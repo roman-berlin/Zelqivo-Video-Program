@@ -4,7 +4,9 @@ from typing import List, Optional
 
 from PyQt6.QtCore import QObject, pyqtSignal
 
-from ..utils.signals import ProcessingSignals
+# Import ProcessingSignals via an absolute path. Using ``..`` to ascend above
+# the package root breaks when running the application with ``python main.py``.
+from utils.signals import ProcessingSignals
 from .processing_pipeline import ProcessingPipeline
 
 

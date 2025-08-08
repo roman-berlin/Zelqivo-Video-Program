@@ -3,7 +3,11 @@
 import time
 from typing import List, Optional
 
-from ..utils.signals import ProcessingSignals
+# Use an absolute import instead of a relative ``..`` import. When this
+# module is imported while running ``python main.py``, the package ``project``
+# is not considered a package, so ascending relative imports fail. Absolute
+# imports ensure the module resolves regardless of how the package is executed.
+from utils.signals import ProcessingSignals
 
 
 class ProcessingPipeline:

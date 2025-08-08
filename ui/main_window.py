@@ -14,8 +14,11 @@ from typing import Optional
 
 from .file_list_widget import FileListWidget
 from .video_preview import VideoPreviewWidget
-from ..utils.file_utils import is_supported_video_file, is_supported_audio_file
-from ..logic.processing_worker import ProcessingWorker
+# Avoid using relative imports that ascend above the package root. Absolute
+# imports work whether the application is launched via ``python main.py`` or
+# through ``python -m`` on the package. See README for details.
+from utils.file_utils import is_supported_video_file, is_supported_audio_file
+from logic.processing_worker import ProcessingWorker
 
 
 class MainWindow(QMainWindow):

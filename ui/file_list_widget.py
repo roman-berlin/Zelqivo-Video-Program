@@ -7,7 +7,12 @@ allows removal.
 
 from PyQt6.QtWidgets import QListWidget, QListWidgetItem
 
-from ..utils.file_utils import is_supported_video_file, is_supported_audio_file
+# Use absolute imports instead of ascending beyond the package root. When this
+# module is executed as part of a script (e.g. `python main.py`), the parent
+# package ``project`` isn't available for relative imports like ``..utils``.
+# Absolute imports allow the module to resolve correctly regardless of how the
+# application is launched.
+from utils.file_utils import is_supported_video_file, is_supported_audio_file
 
 
 class FileListWidget(QListWidget):

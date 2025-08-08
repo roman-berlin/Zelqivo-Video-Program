@@ -9,6 +9,8 @@ from PyQt6.QtWidgets import (
     QFileDialog,
     QMessageBox,
 )
+import os
+import shutil
 from PyQt6.QtCore import QThread
 from typing import Optional
 
@@ -111,22 +113,52 @@ class MainWindow(QMainWindow):
         self._thread.start()
 
     def _save_video(self) -> None:
-        """Prompt the user to save the merged video to a chosen location."""
-        file_path, _ = QFileDialog.getSaveFileName(
-            self, "Save Merged Video", "", "MP4 Video (*.mp4)"
+        """
+        Save the processed video to a user‑selected location.
+
+        Opens a file dialog to allow the user to choose a target filename and
+        directory. If an output video exists (``self.output_path``), it is
+        copied to the selected destination. Success or failure is
+        communicated via a message box.
+        """
+        # Ensure there is an output file to save
+        if not getattr(self, 'output_path', None) or not os.path.exists(self.output_path):
+            QMessageBox.warning(self, "No Video", "There is no processed video to save.")
+            return
+
+        # Prompt the user for a destination file path
+        target_path, _ = QFileDialog.getSaveFileName(
+            self,
+            "Save Merged Video As",
+            "",
+            "MP4 Video (*.mp4);;All Files (*)",
         )
-        if file_path:
+        if not target_path:
+            # User cancelled the dialog
+            return
+
+        try:
+            shutil.copy(self.output_path, target_path)
+        except Exception as exc:
+            # Display an error message if saving fails
+            QMessageBox.critical(
+                self,
+                "Save Failed",
+                f"Could not save video:\n{exc}",
+            )
+        else:
+            # Inform the user of success
             QMessageBox.information(
                 self,
-                "Save Location",
-                f"Selected path: {file_path}\nSaving functionality not implemented yet.",
+                "Video Saved",
+                f"Video successfully saved to:\n{target_path}",
             )
 
     def _on_processing_finished(self, output_path: str) -> None:
         """
         Handle completion of the processing pipeline.
 
-        Re-enables the Start button, stores the output path, and enables the Save button.
+        Re‑enables the Start button, stores the output path, and enables the Save button.
         If no output was produced, alerts the user instead.
         """
         self.start_button.setEnabled(True)

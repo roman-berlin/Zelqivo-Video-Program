@@ -4,13 +4,8 @@
     <option name="autoReloadType" value="SELECTIVE" />
   </component>
   <component name="ChangeListManager">
-    <list default="true" id="b507a7c6-4dc7-4ab3-a8d3-dcdce9d54c97" name="Changes" comment="ui skeleteon">
-      <change beforePath="$PROJECT_DIR$/.idea/Video_Editor.iml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/Video_Editor.iml" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/.idea/misc.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/misc.xml" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/.idea/vcs.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/vcs.xml" afterDir="false" />
+    <list default="true" id="b507a7c6-4dc7-4ab3-a8d3-dcdce9d54c97" name="Changes" comment="ui skeleteon2">
       <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/main.py" beforeDir="false" afterPath="$PROJECT_DIR$/main.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/requirements.txt" beforeDir="false" afterPath="$PROJECT_DIR$/requirements.txt" afterDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
@@ -80,11 +75,20 @@
       <option name="project" value="LOCAL‎" />
       <updated>1754564108380</updated>
     </task>
-    <option name="localTasksCounter" value="2" />
+    <task id="LOCAL‎-00002" summary="ui skeleteon2">
+      <option name="closed" value="true" />
+      <created>1754664884325</created>
+      <option name="number" value="00002" />
+      <option name="presentableId" value="LOCAL‎-00002" />
+      <option name="project" value="LOCAL‎" />
+      <updated>1754664884325</updated>
+    </task>
+    <option name="localTasksCounter" value="3" />
     <servers />
   </component>
   <component name="VcsManagerConfiguration">
     <MESSAGE value="ui skeleteon" />
-    <option name="LAST_COMMIT_MESSAGE" value="ui skeleteon" />
+    <MESSAGE value="ui skeleteon2" />
+    <option name="LAST_COMMIT_MESSAGE" value="ui skeleteon2" />
   </component>
 </project>

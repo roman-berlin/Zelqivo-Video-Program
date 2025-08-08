@@ -10,8 +10,8 @@ desktop application.
 import sys
 from PyQt6.QtWidgets import QApplication
 
-from .ui.main_window import MainWindow
-from .utils.logger import configure_logging
+from ui.main_window import MainWindow
+from utils.logger import configure_logging
 
 
 def main() -> None:

@@ -1,5 +1,6 @@
 """High‑level orchestration of the video processing workflow."""
 
+import time
 from typing import List, Optional
 
 from ..utils.signals import ProcessingSignals
@@ -14,13 +15,16 @@ class ProcessingPipeline:
 
     def run(self, external_audio: Optional[str] = None, resolution: str = "1080p") -> None:
         """
-        Execute the processing pipeline (stub).
+        Execute the processing pipeline.
 
-        The actual implementation will extract audio, perform active speaker
-        detection, optionally synchronise external audio, merge the video
-        segments and emit progress updates.
+        The current stub simulates progress updates and emits a finished signal
+        when complete. In a real implementation this would perform audio/video
+        processing and periodically emit progress between 0 and 100.
         """
-        # Placeholder implementation
-        self.signals.progress.emit(0)
-        dummy_output_path = ""
+        # Simulate work by emitting progress in steps
+        for percent in range(0, 101, 20):
+            time.sleep(0.5)  # simulate expensive computation
+            self.signals.progress.emit(percent)
+        # When processing is complete, emit the output path (placeholder here)
+        dummy_output_path = ""  # replace with real output path when implemented
         self.signals.finished.emit(dummy_output_path)

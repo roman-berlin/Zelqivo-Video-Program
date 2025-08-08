@@ -1,22 +1,21 @@
-"""Main window for the Active Speaker Video Merger application.
-
-This module defines the ``MainWindow`` class which inherits from
-``QMainWindow``. It sets up the high‑level layout: a list for
-uploading video and audio files, buttons to start processing and save
-the resulting video, a progress bar to report progress and a preview
-area. At this stage, the widgets are placeholders and do not
-implement any real processing logic.
-"""
+"""Main window for the Active Speaker Video Merger application."""
 
 from PyQt6.QtWidgets import (
-    QMainWindow, QWidget, QVBoxLayout,
-    QPushButton, QProgressBar, QFileDialog, QMessageBox,
+    QMainWindow,
+    QWidget,
+    QVBoxLayout,
+    QPushButton,
+    QProgressBar,
+    QFileDialog,
+    QMessageBox,
 )
-from PyQt6.QtCore import Qt
+from PyQt6.QtCore import QThread
+from typing import Optional
 
 from .file_list_widget import FileListWidget
 from .video_preview import VideoPreviewWidget
-from ..utils.signals import ProcessingSignals
+from ..utils.file_utils import is_supported_video_file, is_supported_audio_file
+from ..logic.processing_worker import ProcessingWorker
 
 
 class MainWindow(QMainWindow):
@@ -26,9 +25,13 @@ class MainWindow(QMainWindow):
         super().__init__()
         self.setWindowTitle("Active Speaker Video Merger")
         self.resize(800, 600)
-        self.signals = ProcessingSignals()
         self._setup_ui()
         self._connect_signals()
+        # holders for threading
+        self._thread: Optional[QThread] = None
+        self._worker: Optional[ProcessingWorker] = None
+        # attribute to store the output path when processing completes
+        self.output_path: str = ""
 
     def _setup_ui(self) -> None:
         """Initialise and arrange widgets in the main window."""
@@ -52,16 +55,60 @@ class MainWindow(QMainWindow):
         """Connect UI events to their handlers."""
         self.start_button.clicked.connect(self._start_processing)
         self.save_button.clicked.connect(self._save_video)
-        self.signals.progress.connect(self.progress_bar.setValue)
-        self.signals.finished.connect(self._on_processing_finished)
 
     def _start_processing(self) -> None:
-        """Placeholder handler for the Start button."""
-        QMessageBox.information(
-            self,
-            "Not Implemented",
-            "Processing logic is not yet implemented. This button will start the processing pipeline.",
-        )
+        """
+        Handle the Start button by launching the processing pipeline in a worker thread.
+
+        Files are gathered from the file list widget and separated into video and audio.
+        A ProcessingWorker is created and moved to a QThread; its progress and finished
+        signals are connected to update the UI safely. The start button remains disabled
+        until processing completes or an error occurs.
+        """
+        # Retrieve file paths
+        file_paths = self.file_list_widget.get_file_paths()
+        if not file_paths:
+            QMessageBox.information(
+                self,
+                "No Files Selected",
+                "Please add at least one supported video file before starting processing.",
+            )
+            return
+
+        video_paths = [p for p in file_paths if is_supported_video_file(p)]
+        audio_paths = [p for p in file_paths if is_supported_audio_file(p)]
+
+        if not video_paths:
+            QMessageBox.information(
+                self,
+                "No Video Files",
+                "At least one supported video file is required to start processing.",
+            )
+            return
+
+        external_audio = audio_paths[0] if audio_paths else None
+
+        # Disable the start button while processing
+        self.start_button.setEnabled(False)
+        self.save_button.setEnabled(False)
+
+        # Create and configure thread and worker
+        self._thread = QThread(self)
+        self._worker = ProcessingWorker(video_paths, external_audio)
+        self._worker.moveToThread(self._thread)
+
+        # When the thread starts, invoke the worker's run method
+        self._thread.started.connect(self._worker.run)
+        # Connect worker signals to UI updates
+        self._worker.progress.connect(self.progress_bar.setValue)
+        self._worker.finished.connect(self._on_processing_finished)
+        self._worker.error.connect(self._on_worker_error)
+        # Ensure we stop the thread cleanly when done or error
+        self._worker.finished.connect(self._thread.quit)
+        self._worker.error.connect(self._thread.quit)
+        self._thread.finished.connect(self._thread.deleteLater)
+        # Start the thread
+        self._thread.start()
 
     def _save_video(self) -> None:
         """Prompt the user to save the merged video to a chosen location."""
@@ -76,6 +123,31 @@ class MainWindow(QMainWindow):
             )
 
     def _on_processing_finished(self, output_path: str) -> None:
-        """Handle completion of the processing pipeline."""
-        self.save_button.setEnabled(True)
-        self.preview_widget.load_video(output_path)
+        """
+        Handle completion of the processing pipeline.
+
+        Re-enables the Start button, stores the output path, and enables the Save button.
+        If no output was produced, alerts the user instead.
+        """
+        self.start_button.setEnabled(True)
+        self.output_path = output_path
+        if output_path:
+            self.save_button.setEnabled(True)
+            self.preview_widget.load_video(output_path)
+        else:
+            self.save_button.setEnabled(False)
+            QMessageBox.warning(
+                self,
+                "Processing Result",
+                "Processing finished but no output video was produced.",
+            )
+
+    def _on_worker_error(self, message: str) -> None:
+        """
+        Display an error message if the worker encounters an exception.
+
+        This slot is connected to the ProcessingWorker.error signal.
+        """
+        # re-enable the start button since processing has failed
+        self.start_button.setEnabled(True)
+        QMessageBox.critical(self, "Processing Error", message)

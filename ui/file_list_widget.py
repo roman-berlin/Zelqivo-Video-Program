@@ -1,44 +1,51 @@
-"""Custom widget for managing uploaded video and audio files."""
-
+# file: ui/file_list_widget.py
 from __future__ import annotations
+import os
+from typing import List
+from PyQt6.QtCore import pyqtSignal, QModelIndex
+from PyQt6.QtWidgets import QWidget, QListView, QVBoxLayout
+from PyQt6.QtGui import QStandardItemModel, QStandardItem
 
-from PyQt6.QtCore import Qt
-from PyQt6.QtWidgets import QListWidget, QListWidgetItem
 
-from utils.file_utils import is_supported_audio_file, is_supported_video_file
+class FileListWidget(QWidget):
+    """Minimal list that emits selected path; DnD/buttons arrive in later prompts."""
 
+    currentPathChanged = pyqtSignal(str)
 
-class FileListWidget(QListWidget):
-    """Drag-and-drop enabled list of media paths."""
-
-    def __init__(self, parent=None) -> None:
+    def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
-        self.setAcceptDrops(True)
-        self.setSelectionMode(self.SelectionMode.SingleSelection)
+        self._model = QStandardItemModel(self)
+        self._view = QListView(self)
+        self._view.setModel(self._model)
+        self._view.setSelectionMode(QListView.SelectionMode.SingleSelection)
+        self._view.selectionModel().currentChanged.connect(self._on_current_changed)
 
-    # --- drag & drop
+        lay = QVBoxLayout(self)
+        lay.setContentsMargins(0, 0, 0, 0)
+        lay.addWidget(self._view)
 
-    def dragEnterEvent(self, event) -> None:
-        if event.mimeData().hasUrls():
-            event.acceptProposedAction()
-        else:
-            event.ignore()
+    # --- Public API used by MainWindow/tests ---
+    def add_paths_bootstrap(self, paths: List[str]) -> None:
+        """Temporary helper for bootstrap/testing only.
+        Real add/drag/drop arrives in Prompt 1.
+        """
+        for p in paths:
+            item = QStandardItem(os.path.basename(p))
+            item.setData(p)  # store full path in item data
+            self._model.appendRow(item)
 
-    def dragMoveEvent(self, event) -> None:
-        event.acceptProposedAction()
+    def selected_path(self) -> str | None:
+        idx: QModelIndex = self._view.currentIndex()
+        if not idx.isValid():
+            return None
+        item = self._model.itemFromIndex(idx)
+        return item.data()
 
-    def dropEvent(self, event) -> None:
-        for url in event.mimeData().urls():
-            path = url.toLocalFile()
-            if not path:
-                continue
-            if is_supported_video_file(path) or is_supported_audio_file(path):
-                self.addItem(QListWidgetItem(path))
-        event.acceptProposedAction()
-
-    def add_path(self, path: str) -> None:
-        if is_supported_video_file(path) or is_supported_audio_file(path):
-            self.addItem(QListWidgetItem(path))
-
-    def get_file_paths(self) -> list[str]:
-        return [self.item(i).text() for i in range(self.count())]
+    # --- Internal ---
+    def _on_current_changed(self, cur: QModelIndex, _prev: QModelIndex) -> None:
+        path = None
+        if cur.isValid():
+            item = self._model.itemFromIndex(cur)
+            path = item.data()
+        if path:
+            self.currentPathChanged.emit(path)

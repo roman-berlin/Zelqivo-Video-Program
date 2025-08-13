@@ -1,13 +1,22 @@
+# 1. תלויות ליבה כבדות
+numpy
+torch
+
+# 2. ספריות עיבוד אודיו
+soundfile
+librosa
+pydub
+pyannote.audio
+SpeechBrain
+
+# 3. ספריות עיבוד וידאו ותמונות
+opencv-python
+ffmpeg-python
+moviepy
+
+# 4. GUI (PyQt6)
 pyqt6-sip
 PyQt6
-pyannote.audio  # Active speaker detection (requires torch)
-SpeechBrain      # Alternative diarisation library
-librosa          # Audio waveform analysis
-pydub            # Simple audio manipulation
-numpy            # Numerical operations
-ffmpeg-python    # High-level FFmpeg wrapper
-moviepy          # Video editing (alternative to ffmpeg-python)
-opencv-python    # Optional video frame handling and preview
-torch            # Backend for pyannote.audio and SpeechBrain models
-tqdm             # Progress bars for debugging
-soundfile        # Required by librosa for audio I/O
+
+# 5. כלי עזר
+tqdm

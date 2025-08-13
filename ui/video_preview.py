@@ -1,74 +1,41 @@
-"""Video preview widget with playback controls using QMediaPlayer."""
-
+# file: ui/video_preview.py
 from __future__ import annotations
-
-from PyQt6.QtCore import Qt, QUrl
-from PyQt6.QtWidgets import (
-    QHBoxLayout,
-    QPushButton,
-    QSlider,
-    QVBoxLayout,
-    QWidget,
-)
+from pathlib import Path
+from PyQt6.QtCore import QUrl
 from PyQt6.QtMultimedia import QAudioOutput, QMediaPlayer
 from PyQt6.QtMultimediaWidgets import QVideoWidget
+from PyQt6.QtWidgets import QWidget, QVBoxLayout, QLabel
 
 
-class VideoPreviewWidget(QWidget):
-    """Simple player for previewing a single media file."""
+class VideoPreview(QWidget):
+    """Preview shell with safe audio guard (Prompt 1)."""
 
-    def __init__(self, parent=None) -> None:
+    def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
+        self._label = QLabel("Select a file to preview", self)
+        self._video = QVideoWidget(self)
+        self._player = QMediaPlayer(self)
 
-        self.media_player = QMediaPlayer(self)
-        self.audio_output = QAudioOutput(self)
-        self.media_player.setAudioOutput(self.audio_output)
+        # Audio may be missing/unavailable on some systems; guard it.
+        self._audio = None
+        try:
+            self._audio = QAudioOutput(self)
+            self._player.setAudioOutput(self._audio)
+        except Exception:
+            self._audio = None  # keep preview working (video only)
 
-        self.video_widget = QVideoWidget(self)
-        self.media_player.setVideoOutput(self.video_widget)
+        self._player.setVideoOutput(self._video)
 
-        self.play_button = QPushButton("Play")
-        self.pause_button = QPushButton("Pause")
-        self.stop_button = QPushButton("Stop")
+        lay = QVBoxLayout(self)
+        lay.setContentsMargins(0, 0, 0, 0)
+        lay.addWidget(self._label)
+        lay.addWidget(self._video, 1)
 
-        self.position_slider = QSlider(Qt.Orientation.Horizontal)
-        self.position_slider.setRange(0, 0)
-
-        controls = QHBoxLayout()
-        controls.addWidget(self.play_button)
-        controls.addWidget(self.pause_button)
-        controls.addWidget(self.stop_button)
-
-        layout = QVBoxLayout()
-        layout.addWidget(self.video_widget)
-        layout.addWidget(self.position_slider)
-        layout.addLayout(controls)
-        self.setLayout(layout)
-
-        # Signals
-        self.play_button.clicked.connect(self.media_player.play)
-        self.pause_button.clicked.connect(self.media_player.pause)
-        self.stop_button.clicked.connect(self.media_player.stop)
-        self.position_slider.sliderMoved.connect(self.set_position)
-
-        self.media_player.durationChanged.connect(self._on_duration_changed)
-        self.media_player.positionChanged.connect(self._on_position_changed)
-
-    # API
-
-    def load(self, path: str) -> None:
-        """Load a media file for preview."""
-        self.media_player.setSource(QUrl.fromLocalFile(path))
-
-    # QMediaPlayer slots
-
-    def _on_position_changed(self, position: int) -> None:
-        self.position_slider.blockSignals(True)
-        self.position_slider.setValue(position)
-        self.position_slider.blockSignals(False)
-
-    def _on_duration_changed(self, duration: int) -> None:
-        self.position_slider.setRange(0, duration)
-
-    def set_position(self, position: int) -> None:
-        self.media_player.setPosition(position)
+    def set_source(self, path: str) -> None:
+        self._label.setText(Path(path).name)
+        try:
+            self._player.setSource(QUrl.fromLocalFile(path))
+            self._player.play()
+        except Exception:
+            # Keep UI responsive; in Prompt 2 we'll add proper error banners/fallbacks.
+            pass

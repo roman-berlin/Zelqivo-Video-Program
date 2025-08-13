@@ -1,27 +1,22 @@
-"""Custom widget for managing uploaded video and audio files.
+"""Custom widget for managing uploaded video and audio files."""
 
-This widget accepts drag‑and‑drop of supported video (mp4, avi, mov)
-and audio (wav, mp3) files. It displays them in a simple list and
-allows removal.
-"""
+from __future__ import annotations
 
+from PyQt6.QtCore import Qt
 from PyQt6.QtWidgets import QListWidget, QListWidgetItem
 
-# Use absolute imports instead of ascending beyond the package root. When this
-# module is executed as part of a script (e.g. `python main.py`), the parent
-# package ``project`` isn't available for relative imports like ``..utils``.
-# Absolute imports allow the module to resolve correctly regardless of how the
-# application is launched.
-from utils.file_utils import is_supported_video_file, is_supported_audio_file
+from utils.file_utils import is_supported_audio_file, is_supported_video_file
 
 
 class FileListWidget(QListWidget):
-    """A QListWidget subclass that supports drag‑and‑drop for files."""
+    """Drag-and-drop enabled list of media paths."""
 
-    def __init__(self) -> None:
-        super().__init__()
+    def __init__(self, parent=None) -> None:
+        super().__init__(parent)
         self.setAcceptDrops(True)
         self.setSelectionMode(self.SelectionMode.SingleSelection)
+
+    # --- drag & drop
 
     def dragEnterEvent(self, event) -> None:
         if event.mimeData().hasUrls():
@@ -41,6 +36,9 @@ class FileListWidget(QListWidget):
                 self.addItem(QListWidgetItem(path))
         event.acceptProposedAction()
 
-    def get_file_paths(self):
-        """Return a list of file paths currently in the list widget."""
+    def add_path(self, path: str) -> None:
+        if is_supported_video_file(path) or is_supported_audio_file(path):
+            self.addItem(QListWidgetItem(path))
+
+    def get_file_paths(self) -> list[str]:
         return [self.item(i).text() for i in range(self.count())]

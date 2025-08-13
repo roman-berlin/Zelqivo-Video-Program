@@ -1,12 +1,10 @@
 """High‑level orchestration of the video processing workflow."""
 
+from __future__ import annotations
+
 import time
 from typing import List, Optional
 
-# Use an absolute import instead of a relative ``..`` import. When this
-# module is imported while running ``python main.py``, the package ``project``
-# is not considered a package, so ascending relative imports fail. Absolute
-# imports ensure the module resolves regardless of how the package is executed.
 from utils.signals import ProcessingSignals
 
 
@@ -15,20 +13,12 @@ class ProcessingPipeline:
 
     def __init__(self, input_files: List[str], signals: ProcessingSignals) -> None:
         self.input_files = input_files
-        self.signals = signals
+        self.signals = signals  # why: allow UI to subscribe without tight coupling
 
     def run(self, external_audio: Optional[str] = None, resolution: str = "1080p") -> None:
-        """
-        Execute the processing pipeline.
-
-        The current stub simulates progress updates and emits a finished signal
-        when complete. In a real implementation this would perform audio/video
-        processing and periodically emit progress between 0 and 100.
-        """
-        # Simulate work by emitting progress in steps
+        """Simulate work and emit progress/finished."""
         for percent in range(0, 101, 20):
-            time.sleep(0.5)  # simulate expensive computation
+            time.sleep(0.4)
             self.signals.progress.emit(percent)
-        # When processing is complete, emit the output path (placeholder here)
-        dummy_output_path = ""  # replace with real output path when implemented
-        self.signals.finished.emit(dummy_output_path)
+        # No real output yet — emit empty string to indicate "no file"
+        self.signals.finished.emit("")

@@ -1,8 +1,7 @@
-# file: ui/video_preview.py
 from __future__ import annotations
 from typing import Optional
 
-from PyQt6.QtCore import QUrl, Qt, QTimer
+from PyQt6.QtCore import QUrl, Qt, QTimer, pyqtSignal
 from PyQt6.QtGui import QPixmap, QImage
 from PyQt6.QtMultimedia import QAudioOutput, QMediaPlayer
 from PyQt6.QtMultimediaWidgets import QVideoWidget
@@ -16,218 +15,236 @@ from PyQt6.QtWidgets import (
     QStackedLayout,
 )
 
-# OpenCV is optional; used only for the thumbnail fallback
-try:
-    import cv2  # type: ignore
-except Exception:  # pragma: no cover
-    cv2 = None  # type: ignore
-
 
 class VideoPreview(QWidget):
-    """QMediaPlayer preview with controls, fallback thumbnail, and correct play/pause icon."""
+    """Video preview with play/pause/seek and OpenCV thumbnail fallback.
 
-    STARTUP_STALL_MS = 2500
+    Signals
+    -------
+    durationKnown(int): emitted when the media duration (ms) becomes available.
+    """
+
+    durationKnown = pyqtSignal(int)
 
     def __init__(self, parent: Optional[QWidget] = None) -> None:
         super().__init__(parent)
 
-        # Banner
-        self._banner = QLabel(self)
-        self._banner.setVisible(False)
-        self._banner.setWordWrap(True)
-        self._banner.setStyleSheet(
-            "QLabel { background: #332; color: #ffd; border: 1px solid #664; padding: 6px; }"
-        )
+        # --- backend ---
+        self._player = QMediaPlayer(self)
+        self._audio = QAudioOutput(self)
+        self._player.setAudioOutput(self._audio)
 
-        # Video/Thumb stack
-        self._video_widget = QVideoWidget(self)
-        self._thumb = QLabel(self)
-        self._thumb.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self._thumb.setText("No preview available")
-        self._stack = QStackedLayout()
-        self._stack.addWidget(self._video_widget)  # 0
-        self._stack.addWidget(self._thumb)         # 1
+        self._duration_ms = 0
+        self._source_path: Optional[str] = None
+        self._user_scrubbing = False  # why: avoid playhead "jump" feedback during drag
+        self._duration_emitted_for: Optional[str] = None
+
+        # throttle UI updates to reduce jitter (especially on Windows)
+        self._pos_ms_latest = 0
+        self._pos_timer = QTimer(self)
+        self._pos_timer.setInterval(33)  # ~30fps
+        self._pos_timer.timeout.connect(self._apply_latest_position_to_ui)
+        self._pos_timer.start()
+
+        # --- UI ---
+        self._stack = QStackedLayout(self)
+
+        # video widget page
+        video_page = QWidget(self)
+        vlay = QVBoxLayout(video_page)
+        vlay.setContentsMargins(0, 0, 0, 0)
+
+        self._video_widget = QVideoWidget(video_page)
+        vlay.addWidget(self._video_widget, 1)
+
+        # controls
+        ctrl = QWidget(video_page)
+        hlay = QHBoxLayout(ctrl)
+        hlay.setContentsMargins(8, 4, 8, 4)
+
+        self.btn_play = QPushButton("▶", ctrl)
+        self.btn_play.setFixedWidth(28)
+        self.btn_play.clicked.connect(self._toggle_play)
+
+        self.lbl_time = QLabel("00:00", ctrl)
+
+        self.slider = QSlider(Qt.Orientation.Horizontal, ctrl)
+        self.slider.setMinimum(0)
+        self.slider.setMaximum(100)
+        self.slider.setSingleStep(1000)  # 1s
+        self.slider.setPageStep(5000)    # 5s
+        self.slider.setTracking(True)    # allow live scrubbing, but guarded by flag
+        self.slider.sliderPressed.connect(self._on_slider_pressed)
+        self.slider.sliderReleased.connect(self._on_slider_released)
+        self.slider.sliderMoved.connect(self._on_slider_moved)
+
+        self.lbl_dur = QLabel("00:00", ctrl)
+
+        hlay.addWidget(self.btn_play)
+        hlay.addWidget(self.lbl_time)
+        hlay.addWidget(self.slider, 1)
+        hlay.addWidget(self.lbl_dur)
+
+        vlay.addWidget(ctrl)
+
+        # thumbnail/placeholder page
+        thumb_page = QWidget(self)
+        tlay = QVBoxLayout(thumb_page)
+        tlay.setContentsMargins(0, 0, 0, 0)
+        self._thumb_label = QLabel("", thumb_page)
+        self._thumb_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self._thumb_label.setStyleSheet("background: #222; color: #bbb;")
+        tlay.addWidget(self._thumb_label, 1)
+
+        self._stack.addWidget(video_page)   # index 0
+        self._stack.addWidget(thumb_page)   # index 1
         self._stack.setCurrentIndex(0)
 
-        # Player
-        self._player = QMediaPlayer(self)
+        # connect signals after UI is ready
         self._player.setVideoOutput(self._video_widget)
-
-        # Audio (guarded)
-        self._audio: Optional[QAudioOutput] = None
-        try:
-            self._audio = QAudioOutput(self)
-            self._player.setAudioOutput(self._audio)
-        except Exception:
-            self._audio = None
-
-        # Controls
-        self._btn_play = QPushButton("▶", self)
-        self._btn_play.setFixedWidth(36)
-        self._btn_play.clicked.connect(self._on_toggle_play)
-
-        self._slider = QSlider(Qt.Orientation.Horizontal, self)
-        self._slider.setRange(0, 0)
-        self._slider.sliderPressed.connect(self._on_slider_pressed)
-        self._slider.sliderReleased.connect(self._on_slider_released)
-
-        self._lbl_time_now = QLabel("00:00", self)
-        self._lbl_time_dur = QLabel("00:00", self)
-
-        # Layout
-        vbox = QVBoxLayout(self)
-        vbox.setContentsMargins(0, 0, 0, 0)
-        vbox.addWidget(self._banner)
-        vbox.addLayout(self._stack, 1)
-
-        ctrls = QHBoxLayout()
-        ctrls.setContentsMargins(0, 0, 0, 0)
-        ctrls.addWidget(self._btn_play)
-        ctrls.addWidget(self._lbl_time_now)
-        ctrls.addWidget(self._slider, 1)
-        ctrls.addWidget(self._lbl_time_dur)
-        vbox.addLayout(ctrls)
-
-        # State
-        self._path: Optional[str] = None
-        self._dragging_slider = False
-        self._startup_timer = QTimer(self)
-        self._startup_timer.setSingleShot(True)
-        self._startup_timer.timeout.connect(self._on_startup_timeout)
-        self._last_position = 0
-
-        # Signals
         self._player.positionChanged.connect(self._on_position_changed)
         self._player.durationChanged.connect(self._on_duration_changed)
         self._player.mediaStatusChanged.connect(self._on_media_status)
-        # NEW: keep play/pause icon in sync with actual state
-        self._player.playbackStateChanged.connect(self._on_playback_state_changed)
+        self._player.errorOccurred.connect(self._on_error)
 
-        if hasattr(self._player, "errorOccurred"):
-            try:
-                self._player.errorOccurred.connect(self._on_player_error)  # type: ignore[attr-defined]
-            except Exception:
-                pass
-        if hasattr(self._player, "errorChanged"):
-            try:
-                self._player.errorChanged.connect(lambda *_: self._on_player_error())  # type: ignore[attr-defined]
-            except Exception:
-                pass
-
-    # --- Public API ---
-    def set_source(self, path: str) -> None:
-        self._path = path
-        self._show_banner(False)
-        self._thumb.clear()
-        self._slider.setEnabled(False)
-        self._slider.setRange(0, 0)
-        self._lbl_time_now.setText("00:00")
-        self._lbl_time_dur.setText("00:00")
+    # --- public API ---
+    def set_source(self, path: Optional[str]) -> None:
+        if not path:
+            self._clear()
+            return
+        if self._source_path == path:
+            return
+        self._source_path = path
+        self._duration_ms = 0
+        self._set_labels(0, 0)
+        self.slider.setRange(0, 1)
+        self.slider.setValue(0)
         self._stack.setCurrentIndex(0)
-        self._btn_play.setText("▶")  # will flip to ❚❚ once playback truly starts
+        self._thumb_label.clear()
+        self._player.setSource(QUrl.fromLocalFile(path))
+        # Autoplay for UX parity with earlier prompts
+        self._player.play()
+        self._update_play_icon()
 
-        try:
-            self._player.setSource(QUrl.fromLocalFile(path))
-            self._player.play()
-            self._startup_timer.start(self.STARTUP_STALL_MS)
-            self._last_position = 0
-        except Exception:
-            self._fallback_to_thumbnail("Could not open media.")
+    def current_position_ms(self) -> int:
+        return int(self._player.position())
 
-    # --- Player events ---
-    def _on_playback_state_changed(self, state: QMediaPlayer.PlaybackState) -> None:
-        if state == QMediaPlayer.PlaybackState.PlayingState:
-            self._btn_play.setText("❚❚")
-        else:
-            self._btn_play.setText("▶")
-
-    def _on_position_changed(self, pos_ms: int) -> None:
-        if not self._dragging_slider:
-            self._slider.setValue(pos_ms)
-        self._lbl_time_now.setText(self._fmt_time(pos_ms))
-        if pos_ms > self._last_position:
-            self._last_position = pos_ms
-            if self._startup_timer.isActive():
-                self._startup_timer.stop()
-            if self._stack.currentIndex() != 0:
-                self._show_video()
-
-    def _on_duration_changed(self, dur_ms: int) -> None:
-        self._slider.setEnabled(dur_ms > 0)
-        self._slider.setRange(0, max(0, dur_ms))
-        self._lbl_time_dur.setText(self._fmt_time(dur_ms))
-        if dur_ms > 0 and self._stack.currentIndex() != 0:
-            self._show_video()
-
-    def _on_media_status(self, status) -> None:
-        if status == QMediaPlayer.MediaStatus.EndOfMedia:
-            # playbackStateChanged will flip icon to ▶ automatically
-            pass
-
-    def _on_player_error(self, *args) -> None:
-        if self._last_position <= 0:
-            self._fallback_to_thumbnail("Live preview not available for this codec; will still export correctly.")
-
-    def _on_startup_timeout(self) -> None:
-        if self._last_position <= 0:
-            self._fallback_to_thumbnail("Live preview not available for this codec; showing first frame instead.")
-
-    # --- Controls ---
-    def _on_toggle_play(self) -> None:
-        state = self._player.playbackState()
-        if state == QMediaPlayer.PlaybackState.PlayingState:
+    # --- slots ---
+    def _toggle_play(self) -> None:
+        st = self._player.playbackState()
+        if st == QMediaPlayer.PlaybackState.PlayingState:
             self._player.pause()
         else:
             self._player.play()
+        self._update_play_icon()
+
+    def _on_duration_changed(self, dur: int) -> None:
+        self._duration_ms = max(0, int(dur))
+        if self._duration_ms <= 0:
+            self.slider.setRange(0, 1)
+        else:
+            self.slider.setRange(0, self._duration_ms)
+        self.lbl_dur.setText(self._fmt_time(self._duration_ms))
+        # inform TrimPanel once per source
+        if self._source_path and self._duration_emitted_for != self._source_path:
+            self._duration_emitted_for = self._source_path
+            self.durationKnown.emit(self._duration_ms)
+
+    def _on_position_changed(self, pos: int) -> None:
+        self._pos_ms_latest = int(max(0, pos))
+        # defer UI update to timer; avoids fight with sliderMoved while dragging
+
+    def _apply_latest_position_to_ui(self) -> None:
+        if self._user_scrubbing:
+            return
+        pos = self._pos_ms_latest
+        # keep slider/label in sync without oscillation
+        if self.slider.maximum() > 0:
+            self.slider.blockSignals(True)
+            try:
+                self.slider.setValue(pos)
+            finally:
+                self.slider.blockSignals(False)
+        self._set_labels(pos, self._duration_ms)
+
+    def _on_media_status(self, _status) -> None:
+        # if video fails to render, show thumbnail fallback
+        if self._player.mediaStatus() == QMediaPlayer.MediaStatus.InvalidMedia:
+            self._show_thumbnail_fallback(self._source_path)
+
+    def _on_error(self, _err, *_args) -> None:
+        self._show_thumbnail_fallback(self._source_path)
 
     def _on_slider_pressed(self) -> None:
-        self._dragging_slider = True
+        self._user_scrubbing = True  # why: prevent positionChanged from fighting the drag
 
     def _on_slider_released(self) -> None:
-        self._dragging_slider = False
-        self._player.setPosition(self._slider.value())
+        # seek when user releases the knob
+        pos = int(self.slider.value())
+        self._player.setPosition(pos)
+        self._user_scrubbing = False
+        # update UI immediately for responsiveness
+        self._pos_ms_latest = pos
+        self._apply_latest_position_to_ui()
 
-    # --- Fallback & View switching ---
-    def _show_video(self) -> None:
+    def _on_slider_moved(self, value: int) -> None:
+        # live scrubbing; guarded by _user_scrubbing flag to avoid jitter
+        self._player.setPosition(int(value))
+        self._pos_ms_latest = int(value)
+        self._apply_latest_position_to_ui()
+
+    # --- helpers ---
+    def _clear(self) -> None:
+        self._player.stop()
+        self._player.setSource(QUrl())
+        self._source_path = None
+        self._duration_ms = 0
+        self._set_labels(0, 0)
+        self.slider.setRange(0, 1)
+        self.slider.setValue(0)
+        self._update_play_icon()
         self._stack.setCurrentIndex(0)
-        self._show_banner(False)
 
-    def _fallback_to_thumbnail(self, reason: str) -> None:
-        try:
-            self._player.stop()
-        except Exception:
-            pass
-        self._slider.setEnabled(False)
-        self._show_banner(True, reason)
-        self._show_thumbnail(self._path)
+    def _update_play_icon(self) -> None:
+        st = self._player.playbackState()
+        self.btn_play.setText("⏸" if st == QMediaPlayer.PlaybackState.PlayingState else "▶")
 
-    def _show_banner(self, visible: bool, text: str | None = None) -> None:
-        self._banner.setVisible(visible)
-        if text:
-            self._banner.setText(text)
+    def _set_labels(self, pos_ms: int, dur_ms: int) -> None:
+        self.lbl_time.setText(self._fmt_time(pos_ms))
+        self.lbl_dur.setText(self._fmt_time(dur_ms))
 
-    def _show_thumbnail(self, path: Optional[str]) -> None:
-        if path and cv2 is not None:
-            pix = self._read_first_frame_pixmap(path)
+    def _show_thumbnail_fallback(self, path: Optional[str]) -> None:
+        if not path:
+            self._thumb_label.setText("No media")
+            self._stack.setCurrentIndex(1)
+            return
+        pm = self._read_thumb_with_cv(path)
+        if pm is None:
+            self._thumb_label.setText("(no preview available)")
         else:
-            pix = None
-        if pix is not None:
-            self._thumb.setPixmap(pix)
-        else:
-            self._thumb.setText("Preview not available for this file. It will still export correctly.")
+            self._thumb_label.setPixmap(pm.scaled(self._thumb_label.size(), Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation))
         self._stack.setCurrentIndex(1)
 
-    def _read_first_frame_pixmap(self, path: str) -> Optional[QPixmap]:
+    def resizeEvent(self, e) -> None:  # type: ignore[override]
+        super().resizeEvent(e)
+        if self._stack.currentIndex() == 1 and not self._thumb_label.pixmap() is None:
+            # rescale stored pixmap to fit label
+            pm = self._thumb_label.pixmap()
+            if pm:
+                self._thumb_label.setPixmap(pm.scaled(self._thumb_label.size(), Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation))
+
+    @staticmethod
+    def _read_thumb_with_cv(path: str) -> Optional[QPixmap]:
         try:
+            import cv2  # optional
             cap = cv2.VideoCapture(path)
             ok, frame = cap.read()
             cap.release()
             if not ok or frame is None:
                 return None
-            rgb = frame[:, :, ::-1]
-            h, w, ch = rgb.shape
-            bytes_per_line = ch * w
-            qimg = QImage(rgb.data, w, h, bytes_per_line, QImage.Format.Format_RGB888)
+            frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+            h, w, _ = frame.shape
+            qimg = QImage(frame.data, w, h, w * 3, QImage.Format.Format_RGB888)
             return QPixmap.fromImage(qimg)
         except Exception:
             return None

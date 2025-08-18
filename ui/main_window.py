@@ -1,9 +1,8 @@
-# file: ui/main_window.py
 from __future__ import annotations
 import os
 from typing import List
 
-from PyQt6.QtCore import Qt, QSettings
+from PyQt6.QtCore import Qt, QSettings, QTimer
 from PyQt6.QtWidgets import (
     QFileDialog,
     QFrame,
@@ -113,6 +112,8 @@ class MainWindow(QMainWindow):
 
         # Adapter bridges model ↔ view
         self.timeline_adapter = TimelineAdapter(self.project, self.timeline_scene)
+        # ensure timeline starts scrolled fully left
+        QTimer.singleShot(0, self._scroll_timeline_left)
 
     # --- Signals ---
     def _connect_signals(self) -> None:
@@ -178,6 +179,8 @@ class MainWindow(QMainWindow):
         self.settings.setValue("last_dir", os.path.dirname(paths[-1]))
         _actually_added = self.timeline_adapter.add_paths(paths)
         self._refresh_counter()
+        # keep the view anchored to the left after adding clips
+        QTimer.singleShot(0, self._scroll_timeline_left)
 
     def _on_scene_selection_changed(self) -> None:
         """Mirror timeline selection to file list to drive preview.
@@ -199,6 +202,15 @@ class MainWindow(QMainWindow):
 
     def _toast(self, message: str, timeout_ms: int = 4000) -> None:
         self.statusBar().showMessage(message, timeout_ms)
+
+    def _scroll_timeline_left(self) -> None:
+        """Anchor timeline view to the far left (after layout/scene updates)."""
+        try:
+            hbar = self.timeline_view.horizontalScrollBar()
+            if hbar is not None:
+                hbar.setValue(hbar.minimum())
+        except Exception:
+            pass
 
     # --- TrimPanel wiring ---
     def _on_current_path_changed(self, path: str) -> None:

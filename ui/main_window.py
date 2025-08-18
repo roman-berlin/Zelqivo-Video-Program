@@ -1,7 +1,8 @@
-# file: ui/main_window.py  (minimal integration with Project + TimelineAdapter + click-to-play)
+# file: ui/main_window.py
 from __future__ import annotations
 import os
 from typing import List
+
 from PyQt6.QtCore import Qt, QSettings
 from PyQt6.QtWidgets import (
     QFileDialog,
@@ -14,9 +15,11 @@ from PyQt6.QtWidgets import (
     QVBoxLayout,
     QWidget,
 )
+
 from utils import file_utils
 from .file_list_widget import FileListWidget
 from .video_preview import VideoPreview
+from ui.trim_panel import TrimPanel
 from ui.timeline.timeline import TimelineScene, TimelineView
 from ui.timeline.adapter import TimelineAdapter
 from logic.project_state import Project
@@ -31,10 +34,13 @@ class MainWindow(QMainWindow):
         self.resize(1280, 800)
         self.settings = QSettings("MultiCamEditor", "MultiCamEditor")
         self.project = Project(max_videos=VIDEO_CAP)
+        self._current_path: str | None = None
+
         self._init_ui()
         self._connect_signals()
         self._refresh_counter()
 
+    # --- UI setup ---
     def _init_ui(self) -> None:
         central = QWidget(self)
         root = QHBoxLayout(central)
@@ -44,7 +50,7 @@ class MainWindow(QMainWindow):
         splitter.setChildrenCollapsible(False)
         root.addWidget(splitter)
 
-        # Left
+        # Left: file list + controls
         left = QWidget(splitter)
         left_layout = QVBoxLayout(left)
         left_layout.setContentsMargins(0, 0, 0, 0)
@@ -59,19 +65,22 @@ class MainWindow(QMainWindow):
         ctrl_lay.addWidget(self.btn_add)
         ctrl_lay.addStretch(1)
         ctrl_lay.addWidget(self.lbl_counter)
+
         lbl = QLabel("Media Files", left)
         lbl.setObjectName("lblMediaFiles")
         self.file_list = FileListWidget(left)
         self.file_list.setObjectName("fileList")
         self.file_list.set_video_cap(VIDEO_CAP)
+
         left_layout.addWidget(ctrl_row)
         left_layout.addWidget(lbl)
         left_layout.addWidget(self.file_list, 1)
 
-        # Right
+        # Right: preview + trim panel + timeline
         right = QWidget(splitter)
         right_layout = QVBoxLayout(right)
         right_layout.setContentsMargins(0, 0, 0, 0)
+
         lbl_prev = QLabel("Preview", right)
         lbl_prev.setObjectName("lblPreview")
         self.preview = VideoPreview(right)
@@ -79,12 +88,18 @@ class MainWindow(QMainWindow):
         right_layout.addWidget(lbl_prev)
         right_layout.addWidget(self.preview, 1)
 
+        # Trim panel (read-only in 4.1)
+        self.trim_panel = TrimPanel(right)
+        right_layout.addWidget(self.trim_panel)
+
         line = QFrame(right)
         line.setFrameShape(QFrame.Shape.HLine)
         right_layout.addWidget(line)
+
         lbl_tl = QLabel("Timeline", right)
         lbl_tl.setObjectName("lblTimeline")
         right_layout.addWidget(lbl_tl)
+
         self.timeline_scene = TimelineScene(self)
         self.timeline_view = TimelineView(self.timeline_scene, right)
         self.timeline_view.setMinimumHeight(120)
@@ -96,24 +111,42 @@ class MainWindow(QMainWindow):
         self.setCentralWidget(central)
         self.statusBar().showMessage("")
 
-        # Adapter
+        # Adapter bridges model ↔ view
         self.timeline_adapter = TimelineAdapter(self.project, self.timeline_scene)
 
+    # --- Signals ---
     def _connect_signals(self) -> None:
         # list → preview + select in scene
         self.file_list.currentPathChanged.connect(self.preview.set_source)
         self.file_list.currentPathChanged.connect(self.timeline_scene.select_by_path)
-        # add via button/DnD → handler
+        self.file_list.currentPathChanged.connect(self._on_current_path_changed)
+
+        # timeline selection → mirror to list (drives preview when clicking squares)
+        if hasattr(self.timeline_scene, "selectionChanged"):
+            self.timeline_scene.selectionChanged.connect(self._on_scene_selection_changed)
+
+        # preview → TrimPanel population when duration becomes known
+        if hasattr(self.preview, "durationKnown"):
+            try:
+                self.preview.durationKnown.connect(self._on_preview_duration_known)
+            except Exception:
+                pass
+
+        # scene reorder → adapter
+        if hasattr(self.timeline_scene, "requestReorder"):
+            try:
+                self.timeline_scene.requestReorder.connect(self.timeline_adapter.on_request_reorder)
+            except Exception:
+                pass
+
+        # file list changes
         self.file_list.filesAdded.connect(self._on_files_added)
         self.file_list.videoCountChanged.connect(self._refresh_counter)
-        # scene → adapter (reorder); adapter → list order mirror
-        self.timeline_adapter.pathsReordered.connect(self.file_list.reorder_to_paths)
-        # NEW: scene selection → list selection → preview switch (click-to-play)
-        self.timeline_scene.selectionChanged.connect(self._on_timeline_selection_changed)
-        # controls
+
+        # buttons
         self.btn_add.clicked.connect(self.on_add_files)
 
-    # --- Actions
+    # --- Actions ---
     def on_add_files(self) -> None:
         last_dir = self.settings.value("last_dir", os.path.expanduser("~"))
         files, _ = QFileDialog.getOpenFileNames(
@@ -138,7 +171,7 @@ class MainWindow(QMainWindow):
                 self._toast(f"Reached 10-video cap. Skipped {skipped_by_cap} file(s).")
         self._refresh_counter()
 
-    # --- Handlers
+    # --- Handlers ---
     def _on_files_added(self, paths: List[str]) -> None:
         if not paths:
             return
@@ -146,12 +179,9 @@ class MainWindow(QMainWindow):
         _actually_added = self.timeline_adapter.add_paths(paths)
         self._refresh_counter()
 
-    def _on_timeline_order_changed(self, ordered_paths: list[str]) -> None:
-        self.file_list.reorder_to_paths(ordered_paths)
-
-    def _on_timeline_selection_changed(self) -> None:
-        """When the user clicks a clip, select the same path in the list.
-        Why: Selecting in the list emits currentPathChanged → preview.set_source.
+    def _on_scene_selection_changed(self) -> None:
+        """Mirror timeline selection to file list to drive preview.
+        Why: selecting in the list emits currentPathChanged → preview.set_source.
         """
         sel = self.timeline_scene.selectedItems()
         if not sel:
@@ -161,7 +191,7 @@ class MainWindow(QMainWindow):
         if path:
             self.file_list.select_path(path)
 
-    # --- Helpers
+    # --- Helpers ---
     def _refresh_counter(self, *_args) -> None:
         count = self.file_list.video_count()
         self.lbl_counter.setText(f"Videos: {count}/{VIDEO_CAP}")
@@ -169,3 +199,31 @@ class MainWindow(QMainWindow):
 
     def _toast(self, message: str, timeout_ms: int = 4000) -> None:
         self.statusBar().showMessage(message, timeout_ms)
+
+    # --- TrimPanel wiring ---
+    def _on_current_path_changed(self, path: str) -> None:
+        self._current_path = path
+        # Immediate path display; duration/in/out fill when known
+        if getattr(self, "trim_panel", None):
+            try:
+                self.trim_panel.load(path, 0, 0, 0)
+            except Exception:
+                pass
+
+    def _on_preview_duration_known(self, duration_ms: int) -> None:
+        path = self._current_path
+        if not path:
+            return
+        in_ms = 0
+        out_ms = int(duration_ms)
+        try:
+            for c in getattr(self.project.video, "clips", []):
+                if getattr(c, "path", None) == path:
+                    in_ms = int(getattr(c, "in_ms", 0) or 0)
+                    out_val = getattr(c, "out_ms", None)
+                    out_ms = int(out_val) if (out_val is not None and int(out_val) > 0) else int(duration_ms)
+                    break
+        except Exception:
+            pass
+        if hasattr(self, "trim_panel") and self.trim_panel is not None:
+            self.trim_panel.load(path, int(duration_ms), int(in_ms), int(out_ms))

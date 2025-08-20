@@ -4,30 +4,18 @@ from typing import Optional
 
 from PyQt6.QtCore import QUrl, Qt, QTimer, pyqtSignal
 from PyQt6.QtGui import QPixmap, QImage
-from PyQt6.QtMultimedia import QAudioOutput, QMediaPlayer
 from PyQt6.QtMultimediaWidgets import QVideoWidget
 from PyQt6.QtWidgets import (
-    QWidget,
-    QVBoxLayout,
-    QLabel,
-    QHBoxLayout,
-    QPushButton,
-    QSlider,
-    QStackedLayout,
+    QWidget, QVBoxLayout, QLabel, QHBoxLayout, QPushButton, QSlider, QStackedLayout
 )
+
+# Note: QMediaPlayer/QAudioOutput imported lazily to avoid early native crashes.
 
 
 class VideoPreview(QWidget):
-    """Video preview with play/pause/seek and OpenCV thumbnail fallback.
+    """Video preview with smooth playhead and correct play/pause icon.
 
-    Signals
-    -------
-    durationKnown(int): emitted when the media duration (ms) becomes available.
-
-    Why relevant changes:
-    - Smooth playhead: timer-driven UI + capped step per tick avoids visible jumps
-      from irregular backend `positionChanged` bursts on Windows.
-    - During slider drag we don't continuously seek; we seek once on release.
+    Lazy-creates QMediaPlayer on first source load to avoid startup crashes.
     """
 
     durationKnown = pyqtSignal(int)
@@ -35,10 +23,9 @@ class VideoPreview(QWidget):
     def __init__(self, parent: Optional[QWidget] = None) -> None:
         super().__init__(parent)
 
-        # --- backend ---
-        self._player = QMediaPlayer(self)
-        self._audio = QAudioOutput(self)
-        self._player.setAudioOutput(self._audio)
+        # backend (lazy)
+        self._player = None           # type: Optional["QMediaPlayer"]
+        self._audio = None            # type: Optional["QAudioOutput"]
 
         self._duration_ms = 0
         self._source_path: Optional[str] = None
@@ -46,70 +33,61 @@ class VideoPreview(QWidget):
         self._pending_seek_ms: int = 0
         self._duration_emitted_for: Optional[str] = None
 
-        # UI-smoothed position (ms). We gently approach the real player position.
         self._ui_pos_ms: int = 0
-        self._MAX_STEP_MS: int = 40  # cap UI change per tick (smooths bursty updates)
+        self._MAX_STEP_MS: int = 40
+        self._always_restart_on_play: bool = True  # set False to resume instead
 
-        # steady UI refresh (≈60fps) for smooth playhead
-        self._tick = QTimer(self)
-        self._tick.setInterval(16)
-        self._tick.timeout.connect(self._update_ui_from_player)
-        self._tick.start()
+        self._tick = QTimer(self); self._tick.setInterval(16)
+        self._tick.timeout.connect(self._update_ui_from_player); self._tick.start()
 
-        # --- UI ---
+        # UI
         self._stack = QStackedLayout(self)
 
-        # video page
         video_page = QWidget(self)
-        vlay = QVBoxLayout(video_page)
-        vlay.setContentsMargins(0, 0, 0, 0)
-
+        vlay = QVBoxLayout(video_page); vlay.setContentsMargins(0, 0, 0, 0)
         self._video_widget = QVideoWidget(video_page)
         vlay.addWidget(self._video_widget, 1)
 
-        ctrl = QWidget(video_page)
-        hlay = QHBoxLayout(ctrl)
-        hlay.setContentsMargins(8, 4, 8, 4)
-
-        self.btn_play = QPushButton("▶", ctrl)
-        self.btn_play.setFixedWidth(28)
+        ctrl = QWidget(video_page); hlay = QHBoxLayout(ctrl); hlay.setContentsMargins(8, 4, 8, 4)
+        self.btn_play = QPushButton("▶", ctrl); self.btn_play.setFixedWidth(28)
         self.btn_play.clicked.connect(self._toggle_play)
-
         self.lbl_time = QLabel("00:00", ctrl)
 
         self.slider = QSlider(Qt.Orientation.Horizontal, ctrl)
-        self.slider.setMinimum(0)
-        self.slider.setMaximum(1)
-        self.slider.setSingleStep(250)  # finer keyboard step, doesn't affect mouse drag
-        self.slider.setPageStep(2000)
+        self.slider.setMinimum(0); self.slider.setMaximum(1)
+        self.slider.setSingleStep(250); self.slider.setPageStep(2000)
         self.slider.sliderPressed.connect(self._on_slider_pressed)
         self.slider.sliderReleased.connect(self._on_slider_released)
         self.slider.sliderMoved.connect(self._on_slider_moved)
 
         self.lbl_dur = QLabel("00:00", ctrl)
 
-        hlay.addWidget(self.btn_play)
-        hlay.addWidget(self.lbl_time)
-        hlay.addWidget(self.slider, 1)
-        hlay.addWidget(self.lbl_dur)
-
+        hlay.addWidget(self.btn_play); hlay.addWidget(self.lbl_time)
+        hlay.addWidget(self.slider, 1); hlay.addWidget(self.lbl_dur)
         vlay.addWidget(ctrl)
 
-        # thumbnail page (fallback)
         thumb_page = QWidget(self)
-        tlay = QVBoxLayout(thumb_page)
-        tlay.setContentsMargins(0, 0, 0, 0)
         self._thumb_label = QLabel("", thumb_page)
         self._thumb_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self._thumb_label.setStyleSheet("background: #222; color: #bbb;")
+        tlay = QVBoxLayout(thumb_page); tlay.setContentsMargins(0, 0, 0, 0)
         tlay.addWidget(self._thumb_label, 1)
 
-        self._stack.addWidget(video_page)   # 0
-        self._stack.addWidget(thumb_page)   # 1
+        self._stack.addWidget(video_page); self._stack.addWidget(thumb_page)
         self._stack.setCurrentIndex(0)
 
-        # connect after UI ready
+    # --- lazy backend setup ---
+    def _ensure_player(self) -> None:
+        if self._player is not None:
+            return
+        # Import here to avoid early DLL/plugin init
+        from PyQt6.QtMultimedia import QMediaPlayer, QAudioOutput
+        self._player = QMediaPlayer(self)
+        self._audio = QAudioOutput(self)
+        self._player.setAudioOutput(self._audio)
         self._player.setVideoOutput(self._video_widget)
+
+        # signals (now safe)
         self._player.positionChanged.connect(self._on_player_position_changed)
         self._player.durationChanged.connect(self._on_duration_changed)
         self._player.mediaStatusChanged.connect(self._on_media_status)
@@ -119,39 +97,41 @@ class VideoPreview(QWidget):
     # --- public API ---
     def set_source(self, path: Optional[str]) -> None:
         if not path:
-            self._clear()
-            return
+            self._clear(); return
         if self._source_path == path:
             return
         self._source_path = path
         self._duration_ms = 0
         self._ui_pos_ms = 0
         self._set_labels(0, 0)
-        self.slider.setRange(0, 1)
-        self.slider.setValue(0)
-        self._stack.setCurrentIndex(0)
-        self._thumb_label.clear()
+        self.slider.setRange(0, 1); self.slider.setValue(0)
+        self._stack.setCurrentIndex(0); self._thumb_label.clear()
+
+        self._ensure_player()
+        assert self._player is not None
         self._player.setSource(QUrl.fromLocalFile(path))
-        self._player.play()  # autoplay for UX
-        # icon will update via playbackState
+        self._player.play()
 
     def current_position_ms(self) -> int:
-        return int(self._player.position())
+        return int(self._player.position()) if self._player else 0
 
-    # --- slots / handlers ---
+    # --- handlers ---
     def _toggle_play(self) -> None:
+        if not self._player:
+            return
         st = self._player.playbackState()
-        if st == QMediaPlayer.PlaybackState.PlayingState:
+        if st == self._player.PlaybackState.PlayingState:
             self._player.pause()
         else:
+            if self._always_restart_on_play:
+                self._player.setPosition(0)
+                self._ui_pos_ms = 0
+                self._apply_ui_position()
             self._player.play()
-        # icon updates in _on_playback_state_changed
 
-    def _on_playback_state_changed(self, state: QMediaPlayer.PlaybackState) -> None:
-        # correct icon: pause when playing, play otherwise
-        self.btn_play.setText("⏸" if state == QMediaPlayer.PlaybackState.PlayingState else "▶")
-        # ensure UI pos matches actual when pausing/stopping
-        if state != QMediaPlayer.PlaybackState.PlayingState and not self._user_scrubbing:
+    def _on_playback_state_changed(self, state) -> None:
+        self.btn_play.setText("⏸" if self._player and state == self._player.PlaybackState.PlayingState else "▶")
+        if self._player and not self._user_scrubbing:
             self._ui_pos_ms = int(self._player.position())
             self._apply_ui_position()
 
@@ -164,44 +144,45 @@ class VideoPreview(QWidget):
             self.durationKnown.emit(self._duration_ms)
 
     def _on_player_position_changed(self, _pos: int) -> None:
-        # ignored; we drive UI at a steady rate for smoothness
+        # UI updates on steady timer
         pass
 
     def _on_media_status(self, _status) -> None:
-        if self._player.mediaStatus() == QMediaPlayer.MediaStatus.InvalidMedia:
+        if not self._player:
+            return
+        if self._player.mediaStatus() == self._player.MediaStatus.InvalidMedia:
             self._show_thumbnail_fallback(self._source_path)
 
-    def _on_error(self, _err, *_args) -> None:
+    def _on_error(self, *_args) -> None:
         self._show_thumbnail_fallback(self._source_path)
 
     def _on_slider_pressed(self) -> None:
-        self._user_scrubbing = True  # prevent timer from overwriting knob during drag
+        self._user_scrubbing = True
 
     def _on_slider_moved(self, value: int) -> None:
         self._pending_seek_ms = int(value)
-        # show time at knob while dragging
         self._set_labels(self._pending_seek_ms, self._duration_ms)
 
     def _on_slider_released(self) -> None:
+        if not self._player:
+            return
         pos = int(self._pending_seek_ms)
-        self._player.setPosition(pos)  # single seek at release
+        self._player.setPosition(pos)
         self._user_scrubbing = False
-        self._ui_pos_ms = pos  # immediate UI match post-seek
+        self._ui_pos_ms = pos
         self._apply_ui_position()
 
     # --- periodic UI updater ---
     def _update_ui_from_player(self) -> None:
-        if self._user_scrubbing:
+        if self._user_scrubbing or not self._player:
             return
         actual = int(max(0, self._player.position()))
-        if self._player.playbackState() == QMediaPlayer.PlaybackState.PlayingState:
-            # move UI towards the actual pos with a capped step per tick
+        if self._player.playbackState() == self._player.PlaybackState.PlayingState:
             diff = actual - self._ui_pos_ms
             if diff != 0:
                 step = max(-self._MAX_STEP_MS, min(self._MAX_STEP_MS, diff))
                 self._ui_pos_ms += step
         else:
-            # paused/stopped: match exactly
             self._ui_pos_ms = actual
         self._apply_ui_position()
 
@@ -216,14 +197,14 @@ class VideoPreview(QWidget):
 
     # --- helpers ---
     def _clear(self) -> None:
-        self._player.stop()
-        self._player.setSource(QUrl())
+        if self._player:
+            self._player.stop()
+            self._player.setSource(QUrl())
         self._source_path = None
         self._duration_ms = 0
         self._ui_pos_ms = 0
         self._set_labels(0, 0)
-        self.slider.setRange(0, 1)
-        self.slider.setValue(0)
+        self.slider.setRange(0, 1); self.slider.setValue(0)
         self.btn_play.setText("▶")
         self._stack.setCurrentIndex(0)
 

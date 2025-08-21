@@ -217,7 +217,14 @@ class MainWindow(QMainWindow):
         if not sel:
             return
         item = sel[0]
-        path = getattr(item, "path", None)
+        # Timeline items store a composite key in `.path` but the original source
+        # path in `.source_path`.  Use the raw source path for file list selection
+        # so that currentPathChanged emits and the preview loads.
+        path = None
+        if hasattr(item, "source_path"):
+            path = getattr(item, "source_path", None)
+        if not path:
+            path = getattr(item, "path", None)
         if path:
             # This emits currentPathChanged → preview + trim panel load
             self.file_list.select_path(path)

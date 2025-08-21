@@ -1,87 +1,94 @@
 # file: logic/project_state.py
 from __future__ import annotations
+
 from dataclasses import dataclass, field
-from typing import List, Optional
-import uuid
-import os
+from typing import List, Optional, Tuple
 
 
-SCHEMA_VERSION = 1
-MAX_VIDEOS = 10
-
-
-def _new_id() -> str:
-    return uuid.uuid4().hex
+MAX_VIDEOS = 10  # hard rule; UI also enforces 10-cap
 
 
 @dataclass
 class Clip:
-    id: str
     path: str
-    in_ms: int = 0
-    out_ms: Optional[int] = None  # None = until end
-    speed: float = 1.0
-    mute: bool = False
-    effects: dict = field(default_factory=dict)
-    overlays: list = field(default_factory=list)
-
-    @property
-    def title(self) -> str:
-        return os.path.basename(self.path)
+    duration_ms: int = 0
+    in_ms: int = 0        # inclusive
+    out_ms: int = 0       # exclusive; 0 → unset until duration known
 
 
 @dataclass
 class Track:
-    id: str
-    name: str
     clips: List[Clip] = field(default_factory=list)
 
-    def index_by_path(self, path: str) -> int:
-        for i, c in enumerate(self.clips):
+
+class Project:
+    """In-memory project state (single track)."""
+
+    def __init__(self) -> None:
+        self.track = Track()
+
+    # ---- add/remove/reorder ----
+    def add_clip(self, path: str) -> bool:
+        if not path:
+            return False
+        if any(c.path == path for c in self.track.clips):
+            return False
+        if len(self.track.clips) >= MAX_VIDEOS:
+            return False
+        self.track.clips.append(Clip(path=path))
+        return True
+
+    def remove_clip_by_path(self, path: str) -> bool:
+        for i, c in enumerate(self.track.clips):
+            if c.path == path:
+                del self.track.clips[i]
+                return True
+        return False
+
+    def move_clip(self, old_index: int, new_index: int) -> None:
+        if not (0 <= old_index < len(self.track.clips)):
+            return
+        new_index = max(0, min(new_index, len(self.track.clips) - 1))
+        if old_index == new_index:
+            return
+        clip = self.track.clips.pop(old_index)
+        self.track.clips.insert(new_index, clip)
+
+    # ---- lookup ----
+    def find_clip_by_path(self, path: str) -> Optional[Clip]:
+        for c in self.track.clips:
+            if c.path == path:
+                return c
+        return None
+
+    def index_of_path(self, path: str) -> int:
+        for i, c in enumerate(self.track.clips):
             if c.path == path:
                 return i
         return -1
 
+    # ---- trims / duration ----
+    def get_trim_by_path(self, path: str) -> Tuple[int, int]:
+        """Return (in_ms, out_ms). If out unset, use duration."""
+        c = self.find_clip_by_path(path)
+        if not c:
+            return 0, 0
+        out = c.out_ms if c.out_ms > 0 else c.duration_ms
+        return int(c.in_ms), int(out)
 
-@dataclass
-class Project:
-    id: str = field(default_factory=_new_id)
-    version: int = SCHEMA_VERSION
-    video: Track = field(default_factory=lambda: Track(id=_new_id(), name="V1"))
-    max_videos: int = MAX_VIDEOS
+    def set_duration_by_path(self, path: str, duration_ms: int) -> None:
+        c = self.find_clip_by_path(path)
+        if not c:
+            return
+        c.duration_ms = max(0, int(duration_ms))
+        if c.out_ms == 0 and c.duration_ms > 0:
+            c.out_ms = c.duration_ms
 
-    # --- Mutations ---
-    def add_clips(self, paths: List[str]) -> List[Clip]:
-        """Add clips by file path. Enforces max_videos and skips duplicates by path.
-        Returns the list of newly created Clip objects (in order added).
-        """
-        added: List[Clip] = []
-        remaining = max(0, self.max_videos - len(self.video.clips))
-        if remaining <= 0:
-            return added
-        # Skip duplicates by path
-        existing = {c.path for c in self.video.clips}
-        for p in paths:
-            if remaining <= 0:
-                break
-            if p in existing:
-                continue
-            clip = Clip(id=_new_id(), path=p)
-            self.video.clips.append(clip)
-            added.append(clip)
-            remaining -= 1
-        return added
-
-    def reorder_by_paths(self, ordered_paths: List[str]) -> None:
-        """Reorder video track clips to match ordered_paths (unknown paths ignored)."""
-        by_path = {c.path: c for c in self.video.clips}
-        new_order: List[Clip] = []
-        for p in ordered_paths:
-            c = by_path.get(p)
-            if c is not None:
-                new_order.append(c)
-        # Append any clips not in list (should not happen normally)
-        for c in self.video.clips:
-            if c not in new_order:
-                new_order.append(c)
-        self.video.clips = new_order
+    def set_trim_by_path(self, path: str, in_ms: int, out_ms: int) -> None:
+        c = self.find_clip_by_path(path)
+        if not c:
+            return
+        dur = max(0, int(c.duration_ms))
+        left = max(0, min(int(in_ms), dur))
+        right = max(left, min(int(out_ms), dur))
+        c.in_ms, c.out_ms = left, right

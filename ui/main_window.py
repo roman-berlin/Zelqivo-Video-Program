@@ -22,7 +22,8 @@ from .video_preview import VideoPreview
 from ui.trim_panel import TrimPanel
 from ui.timeline.timeline import TimelineScene, TimelineView
 from ui.timeline.adapter import TimelineAdapter
-from logic.project_state import Project
+# Use the core project implementation for clip management and splitting.
+from core.project import Project
 
 
 VIDEO_CAP = 10
@@ -36,7 +37,8 @@ class MainWindow(QMainWindow):
         self.setWindowTitle("MultiCamEditor")
         self.resize(1280, 800)
         self.settings = QSettings("MultiCamEditor", "MultiCamEditor")
-        # IMPORTANT: your Project() doesn't take max_videos → enforce cap via FileListWidget/Project internals
+        # Instantiate the core Project used by the timeline and trim panel.
+        # Video cap is enforced at the FileListWidget level.
         self.project = Project()
         self._current_path: str | None = None
 
@@ -117,6 +119,13 @@ class MainWindow(QMainWindow):
 
         # Adapter bridges model ↔ view (pass view so adapter can fit/scroll)
         self.timeline_adapter = TimelineAdapter(self.project, self.timeline_scene, self.timeline_view)
+
+        # Bind context for the TrimPanel so splitting works correctly.  This
+        # wiring is done here after the adapter and preview widgets exist.
+        try:
+            self.trim_panel.bind_context(self.project, self.timeline_adapter, self.preview)
+        except Exception:
+            pass
 
         # Ensure timeline starts scrolled fully left
         QTimer.singleShot(0, self._scroll_timeline_left)

@@ -38,6 +38,27 @@ class ClipItem(QGraphicsRectItem):
             scn._record_last_clicked(self)
         super().mousePressEvent(event)
 
+    def mouseDoubleClickEvent(self, event):  # type: ignore[override]
+        """
+        Treat double click like a single click so that selection and playback are triggered.
+
+        In Qt, a double-click on a graphics item skips the normal mousePress/mouseRelease
+        handlers and invokes mouseDoubleClickEvent directly. As a result, our
+        mousePressEvent logic (which records the item and relies on the scene's
+        selectionChanged signal) is bypassed.  To ensure that double-clicking a clip
+        behaves the same as a single click (highlight the item and cause the file
+        list/preview to change), we explicitly call mousePressEvent first.  After
+        synthesising the single-click behaviour, we delegate to the base
+        implementation so that any default double-click handling (if added in
+        future) still applies.
+        """
+        # First, perform the same operations as a single click.
+        # This will call our overridden mousePressEvent, which records the
+        # last clicked item and forwards to the base implementation.
+        self.mousePressEvent(event)
+        # Then, call the base double-click handler to respect Qt's event flow.
+        super().mouseDoubleClickEvent(event)
+
     def itemChange(self, change, value):  # type: ignore[override]
         if change == QGraphicsRectItem.GraphicsItemChange.ItemPositionChange and isinstance(value, QPointF):
             return type(value)(max(0.0, float(value.x())), 0.0)  # lock Y to 0
@@ -71,6 +92,10 @@ class TimelineScene(QGraphicsScene):
     """Hosts ClipItems, enforces single selection, manages order/layout."""
 
     orderChanged = pyqtSignal(list)  # emits List[str] of keys in left→right order
+
+    # Emitted when a clip is double-clicked.  Provides the unique key (path|in-out|index)
+    # of the item so that callers can mirror selection and start playback.
+    clipActivated = pyqtSignal(str)
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -118,6 +143,31 @@ class TimelineScene(QGraphicsScene):
             for c in self._clips:
                 c.setSelected(False)
         super().mousePressEvent(event)
+
+    def mouseDoubleClickEvent(self, event):  # type: ignore[override]
+        """Emit `clipActivated` when a clip item is double-clicked.
+
+        When the user double-clicks on a clip, Qt does not guarantee that the
+        selectionChanged signal fires again (it might already be selected). To
+        ensure that double-clicking opens/plays the clip in the preview, we
+        detect which item was clicked and emit `clipActivated` with its key.
+        The main window can connect to this signal and forward the selection
+        to the file list / preview.
+        """
+        # Determine which items are under the double-click position.
+        try:
+            pos = event.scenePos()
+            for item in self.items(pos):
+                if isinstance(item, ClipItem):
+                    # Use the stored path (unique key) on the item
+                    key = getattr(item, 'path', None)
+                    if key:
+                        self.clipActivated.emit(str(key))
+                        break
+        except Exception:
+            pass
+        # Call base implementation to maintain default behaviour
+        super().mouseDoubleClickEvent(event)
 
     # mutation API
     def clear_all(self) -> None:

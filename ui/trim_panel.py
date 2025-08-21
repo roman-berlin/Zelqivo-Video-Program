@@ -142,6 +142,24 @@ class TrimPanel(QWidget):
         ms = self._current_playhead_ms()
         if ms is None:
             return
+        # Clamp split position into the current clip's trimmed range.  Without
+        # clamping a playhead outside [in_ms, out_ms] would result in no-op.
+        try:
+            start_ms = int(self._in_ms)
+            end_ms = int(self._out_ms)
+        except Exception:
+            start_ms = 0
+            end_ms = 0
+        # Only clamp if we have a valid range and ms is out of bounds.
+        if end_ms > 0:
+            if ms <= start_ms:
+                ms = start_ms + 1
+            elif ms >= end_ms:
+                ms = end_ms - 1
+            if ms <= start_ms:
+                # Range too small for splitting
+                return
+        # Perform the split.  The project accepts absolute ms.
         try:
             result = self._project.split_clip_by_path(self._path, ms)  # (left, right) or None
         except Exception:

@@ -148,6 +148,13 @@ class MainWindow(QMainWindow):
         if hasattr(self.timeline_scene, "selectionChanged"):
             self.timeline_scene.selectionChanged.connect(self._on_scene_selection_changed)
 
+        # timeline clip activation (double‑click) → mirror to list and play
+        if hasattr(self.timeline_scene, "clipActivated"):
+            try:
+                self.timeline_scene.clipActivated.connect(self._on_clip_activated)
+            except Exception:
+                pass
+
         # preview → when duration becomes known, load TrimPanel & overlay
         if hasattr(self.preview, "durationKnown"):
             try:
@@ -214,6 +221,23 @@ class MainWindow(QMainWindow):
         if path:
             # This emits currentPathChanged → preview + trim panel load
             self.file_list.select_path(path)
+
+    def _on_clip_activated(self, key: str) -> None:
+        """Play the clip associated with the given timeline key.
+
+        The key has the format "path|in-out|index".  We extract the source path
+        (the part before the first pipe) and select it in the file list.  This
+        emits currentPathChanged, causing the preview to load and play the video.
+        """
+        try:
+            if not key:
+                return
+            # Extract the source path from the composite key
+            path = key.split("|", 1)[0]
+            if path:
+                self.file_list.select_path(path)
+        except Exception:
+            pass
 
     # --- TrimPanel wiring ---
     def _on_current_path_changed(self, path: str) -> None:

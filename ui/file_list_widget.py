@@ -1,8 +1,7 @@
 # file: ui/file_list_widget.py
 from __future__ import annotations
 
-import os
-from typing import Iterable, List, Tuple
+from typing import List
 
 from PyQt6.QtCore import Qt, QModelIndex, QMimeData, pyqtSignal
 from PyQt6.QtGui import QStandardItemModel, QStandardItem

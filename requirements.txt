@@ -20,3 +20,8 @@ PyQt6
 
 # 5. כלי עזר
 tqdm
+ruff
+black
+mypy
+pytest
+pytest-cov

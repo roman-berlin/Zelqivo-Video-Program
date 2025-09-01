@@ -1,10 +1,29 @@
-# file: ui/trim_panel.py
+"""
+Patched TrimPanel (DEV branch) to enforce minimum segment length for splits (Prompt 4.5).
+
+This version is based on the DEV branch's `ui/trim_panel.py`.  It adds a
+minimum segment length constraint when clamping the playhead before
+splitting a clip.  If the playhead is too close to the start or end
+of the current in/out range (less than 100ms from either edge), the
+split is aborted.  All other behaviour remains unchanged.
+
+To use this panel, replace the existing `ui/trim_panel.py` in your DEV
+branch checkout with this file's content.
+"""
+
 from __future__ import annotations
 from typing import Optional, Tuple
 
 from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtWidgets import (
-    QWidget, QLabel, QVBoxLayout, QHBoxLayout, QFormLayout, QFrame, QLineEdit, QPushButton
+    QWidget,
+    QLabel,
+    QVBoxLayout,
+    QHBoxLayout,
+    QFormLayout,
+    QFrame,
+    QLineEdit,
+    QPushButton,
 )
 
 from ui.widgets.range_slider import RangeSlider
@@ -12,13 +31,17 @@ from ui.widgets.range_slider import RangeSlider
 
 class TrimPanel(QWidget):
     """Editable trim panel: path, in/out/trimmed-length + dual-handle slider.
-    Adds 'Split at Playhead' (Prompt 4.4).
+
+    Adds "Split at Playhead" with guardrails (Prompts 4.4 & 4.5).
 
     Emits:
         trimChanged(str path, int in_ms, int out_ms)
     """
 
     trimChanged = pyqtSignal(str, int, int)
+
+    # minimum allowed duration for each side of a split (ms)
+    MIN_SEGMENT_MS = 100
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -152,12 +175,16 @@ class TrimPanel(QWidget):
             end_ms = 0
         # Only clamp if we have a valid range and ms is out of bounds.
         if end_ms > 0:
+            # Enforce minimum segment length.  If the playhead is too close to
+            # the start or end of the trimmed range (< MIN_SEGMENT_MS) we do
+            # not perform the split.
+            if ms - start_ms < self.MIN_SEGMENT_MS:
+                return
+            if end_ms - ms < self.MIN_SEGMENT_MS:
+                return
             if ms <= start_ms:
-                ms = start_ms + 1
-            elif ms >= end_ms:
-                ms = end_ms - 1
-            if ms <= start_ms:
-                # Range too small for splitting
+                return
+            if ms >= end_ms:
                 return
         # Perform the split.  The project accepts absolute ms.
         try:

@@ -1,23 +1,48 @@
-# file: ui/trim_panel.py
+"""
+Patched TrimPanel (DEV branch) to enforce minimum segment length for splits (Prompt 4.5).
+
+This version is based on the DEV branch's `ui/trim_panel.py`.  It adds a
+minimum segment length constraint when clamping the playhead before
+splitting a clip.  If the playhead is too close to the start or end
+of the current in/out range (less than 100ms from either edge), the
+split is aborted.  All other behaviour remains unchanged.
+
+To use this panel, replace the existing `ui/trim_panel.py` in your DEV
+branch checkout with this file's content.
+"""
+
 from __future__ import annotations
 from typing import Optional, Tuple
 
 from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtWidgets import (
-    QWidget, QLabel, QVBoxLayout, QHBoxLayout, QFormLayout, QFrame, QLineEdit
+    QWidget,
+    QLabel,
+    QVBoxLayout,
+    QHBoxLayout,
+    QFormLayout,
+    QFrame,
+    QLineEdit,
+    QPushButton,
 )
 
-from ui.widgets.range_slider import RangeSlider
+# Use a relative import to access the RangeSlider widget within the same package.
+from .widgets.range_slider import RangeSlider
 
 
 class TrimPanel(QWidget):
     """Editable trim panel: path, in/out/trimmed-length + dual-handle slider.
+
+    Adds "Split at Playhead" with guardrails (Prompts 4.4 & 4.5).
 
     Emits:
         trimChanged(str path, int in_ms, int out_ms)
     """
 
     trimChanged = pyqtSignal(str, int, int)
+
+    # minimum allowed duration for each side of a split (ms)
+    MIN_SEGMENT_MS = 100
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -26,6 +51,11 @@ class TrimPanel(QWidget):
         self._in_ms: int = 0
         self._out_ms: int = 0
         self._loading: bool = False
+
+        # injected context (bind_context)
+        self._project = None            # type: ignore[assignment]
+        self._adapter = None            # type: ignore[assignment]
+        self._video_preview: Optional[object] = None
 
         self.lbl_path = QLabel("-", self)
         self.lbl_path.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
@@ -45,7 +75,12 @@ class TrimPanel(QWidget):
         self.lbl_dur = QLabel("00:00", self)
         self.lbl_dur.setToolTip("Trimmed length: Out − In")
 
-        form = QFormLayout(); form.setContentsMargins(0, 0, 0, 0)
+        self.btn_split = QPushButton("Split at Playhead", self)
+        self.btn_split.setToolTip("Split current clip at the preview playhead")
+        self.btn_split.clicked.connect(self._on_split_clicked)
+
+        form = QFormLayout()
+        form.setContentsMargins(0, 0, 0, 0)
         form.addRow("Path:", self.lbl_path)
 
         info_row = QWidget(self)
@@ -56,15 +91,23 @@ class TrimPanel(QWidget):
         info_lay.addSpacing(12)
         info_lay.addWidget(QLabel("Duration:", info_row)); info_lay.addWidget(self.lbl_dur)
         info_lay.addStretch(1)
+        info_lay.addWidget(self.btn_split)
 
-        root = QVBoxLayout(self); root.setContentsMargins(0, 0, 0, 0)
+        root = QVBoxLayout(self)
+        root.setContentsMargins(0, 0, 0, 0)
         root.addLayout(form)
         root.addWidget(info_row)
         root.addWidget(self.slider)
         sep = QFrame(self); sep.setFrameShape(QFrame.Shape.HLine)
         root.addWidget(sep)
 
-    # --- Public API ---
+    # context injection
+    def bind_context(self, project, adapter, video_preview: object) -> None:
+        self._project = project
+        self._adapter = adapter
+        self._video_preview = video_preview
+
+    # Public API
     def load(self, path: str, duration_ms: int, in_ms: int, out_ms: int) -> None:
         self._loading = True
         try:
@@ -81,7 +124,7 @@ class TrimPanel(QWidget):
         finally:
             self._loading = False
 
-    # --- Slots ---
+    # Slots
     def _on_slider_changed(self, left: int, right: int) -> None:
         left, right = self._clamp_pair(left, right)
         self._in_ms, self._out_ms = left, right
@@ -117,7 +160,53 @@ class TrimPanel(QWidget):
         if self._path:
             self.trimChanged.emit(self._path, left, right)
 
-    # --- Utils ---
+    def _on_split_clicked(self) -> None:
+        if not self._path or self._project is None or self._adapter is None:
+            return
+        ms = self._current_playhead_ms()
+        if ms is None:
+            return
+        # Clamp split position into the current clip's trimmed range.  Without
+        # clamping a playhead outside [in_ms, out_ms] would result in no-op.
+        try:
+            start_ms = int(self._in_ms)
+            end_ms = int(self._out_ms)
+        except Exception:
+            start_ms = 0
+            end_ms = 0
+        # Only clamp if we have a valid range and ms is out of bounds.
+        if end_ms > 0:
+            # Enforce minimum segment length.  If the playhead is too close to
+            # the start or end of the trimmed range (< MIN_SEGMENT_MS) we do
+            # not perform the split.
+            if ms - start_ms < self.MIN_SEGMENT_MS:
+                return
+            if end_ms - ms < self.MIN_SEGMENT_MS:
+                return
+            if ms <= start_ms:
+                return
+            if ms >= end_ms:
+                return
+        # Perform the split.  The project accepts absolute ms.
+        try:
+            result = self._project.split_clip_by_path(self._path, ms)  # (left, right) or None
+        except Exception:
+            result = None
+        if not result:
+            return
+        left, right = result  # noqa: F841
+
+        # schedule refresh & selection on GUI thread (adapter is thread-safe now)
+        self._adapter.refresh_from_project()
+        clips = self._project.clips()
+        left_index = next((i for i, c in enumerate(clips)
+                           if c.path == left.path and c.in_ms == left.in_ms and c.out_ms == left.out_ms), 0)
+        if hasattr(self._adapter, "_make_key"):
+            key = self._adapter._make_key(left, left_index)  # type: ignore[attr-defined]
+            self._adapter.select_and_scroll_by_key(key)
+        self._seek_preview(ms)
+
+    # Utils
     def _update_duration_label(self) -> None:
         trimmed = max(0, self._out_ms - self._in_ms)
         self.lbl_dur.setText(self._fmt_time(trimmed))
@@ -130,6 +219,27 @@ class TrimPanel(QWidget):
         left = max(0, min(left, dur))
         right = max(left, min(right, dur))
         return int(left), int(right)
+
+    def _current_playhead_ms(self) -> Optional[int]:
+        if self._video_preview is None:
+            return None
+        if hasattr(self._video_preview, "current_position_ms"):
+            try:
+                return int(self._video_preview.current_position_ms())
+            except Exception:
+                return None
+        return None
+
+    def _seek_preview(self, ms: int) -> None:
+        if self._video_preview is None:
+            return
+        for name in ("seek_ms", "set_position_ms", "set_position", "seek"):
+            if hasattr(self._video_preview, name):
+                try:
+                    getattr(self._video_preview, name)(int(ms))
+                except Exception:
+                    pass
+                break
 
     @staticmethod
     def _fmt_time(ms: int) -> str:
@@ -151,14 +261,17 @@ class TrimPanel(QWidget):
         try:
             if ":" not in t:
                 if "." in t:
-                    secs = float(t); return max(0, int(round(secs * 1000)))
+                    secs = float(t)
+                    return max(0, int(round(secs * 1000)))
                 return max(0, int(t) * 1000)
             parts = [p for p in t.split(":") if p != ""]
             parts = [int(float(p)) for p in parts]
             if len(parts) == 2:
-                mm, ss = parts; total = mm * 60 + ss
+                mm, ss = parts
+                total = mm * 60 + ss
             elif len(parts) == 3:
-                hh, mm, ss = parts; total = hh * 3600 + mm * 60 + ss
+                hh, mm, ss = parts
+                total = hh * 3600 + mm * 60 + ss
             else:
                 return None
             return max(0, int(total) * 1000)

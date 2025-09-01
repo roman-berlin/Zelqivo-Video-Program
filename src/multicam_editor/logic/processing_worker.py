@@ -6,7 +6,10 @@ from typing import List, Optional
 
 from PyQt6.QtCore import QObject, pyqtSignal
 
-from utils.signals import ProcessingSignals
+# Import the ProcessingSignals class from our package's utils module via a
+# relative import.  This avoids relying on the Python path outside of the
+# package context, which can break when the package is installed.
+from ..utils.signals import ProcessingSignals
 from .processing_pipeline import ProcessingPipeline
 
 

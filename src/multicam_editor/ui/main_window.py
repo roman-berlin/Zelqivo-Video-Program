@@ -1,3 +1,4 @@
+# file: ui/main_window.py
 from __future__ import annotations
 import os
 from typing import List
@@ -15,24 +16,34 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 
-from utils import file_utils
+# Import helpers from the package's utils module.  Use a relative import to
+# ensure the correct package context when this module is executed as part of
+# ``multicam_editor.ui``.
+from ..utils import file_utils
 from .file_list_widget import FileListWidget
 from .video_preview import VideoPreview
-from ui.trim_panel import TrimPanel
-from ui.timeline.timeline import TimelineScene, TimelineView
-from ui.timeline.adapter import TimelineAdapter
-from logic.project_state import Project
+# Import internal components using relative imports to avoid relying on sys.path
+from .trim_panel import TrimPanel
+from .timeline.timeline import TimelineScene, TimelineView
+from .timeline.adapter import TimelineAdapter
+# Use the core project implementation for clip management and splitting.
+from ..core.project import Project
+
 
 VIDEO_CAP = 10
 
 
 class MainWindow(QMainWindow):
+    """Main window: file list, preview + trim panel, and timeline."""
+
     def __init__(self) -> None:
         super().__init__()
         self.setWindowTitle("MultiCamEditor")
         self.resize(1280, 800)
         self.settings = QSettings("MultiCamEditor", "MultiCamEditor")
-        self.project = Project(max_videos=VIDEO_CAP)
+        # Instantiate the core Project used by the timeline and trim panel.
+        # Video cap is enforced at the FileListWidget level.
+        self.project = Project()
         self._current_path: str | None = None
 
         self._init_ui()
@@ -87,7 +98,7 @@ class MainWindow(QMainWindow):
         right_layout.addWidget(lbl_prev)
         right_layout.addWidget(self.preview, 1)
 
-        # Trim panel (read-only in 4.1)
+        # Trim panel
         self.trim_panel = TrimPanel(right)
         right_layout.addWidget(self.trim_panel)
 
@@ -110,30 +121,52 @@ class MainWindow(QMainWindow):
         self.setCentralWidget(central)
         self.statusBar().showMessage("")
 
-        # Adapter bridges model ↔ view
-        self.timeline_adapter = TimelineAdapter(self.project, self.timeline_scene)
-        # ensure timeline starts scrolled fully left
+        # Adapter bridges model ↔ view (pass view so adapter can fit/scroll)
+        self.timeline_adapter = TimelineAdapter(self.project, self.timeline_scene, self.timeline_view)
+
+        # Bind context for the TrimPanel so splitting works correctly.  This
+        # wiring is done here after the adapter and preview widgets exist.
+        try:
+            self.trim_panel.bind_context(self.project, self.timeline_adapter, self.preview)
+        except Exception:
+            pass
+
+        # Ensure timeline starts scrolled fully left
         QTimer.singleShot(0, self._scroll_timeline_left)
 
     # --- Signals ---
     def _connect_signals(self) -> None:
-        # list → preview + select in scene
+        # list → preview + select in scene + remember current path
         self.file_list.currentPathChanged.connect(self.preview.set_source)
         self.file_list.currentPathChanged.connect(self.timeline_scene.select_by_path)
         self.file_list.currentPathChanged.connect(self._on_current_path_changed)
 
-        # timeline selection → mirror to list (drives preview when clicking squares)
+        # TrimPanel → persist trims in model, refresh overlay
+        if getattr(self, "trim_panel", None):
+            try:
+                self.trim_panel.trimChanged.connect(self._on_trim_changed)
+            except Exception:
+                pass
+
+        # timeline selection → mirror to list (keeps preview in sync when clicking squares)
         if hasattr(self.timeline_scene, "selectionChanged"):
             self.timeline_scene.selectionChanged.connect(self._on_scene_selection_changed)
 
-        # preview → TrimPanel population when duration becomes known
+        # timeline clip activation (double‑click) → mirror to list and play
+        if hasattr(self.timeline_scene, "clipActivated"):
+            try:
+                self.timeline_scene.clipActivated.connect(self._on_clip_activated)
+            except Exception:
+                pass
+
+        # preview → when duration becomes known, load TrimPanel & overlay
         if hasattr(self.preview, "durationKnown"):
             try:
                 self.preview.durationKnown.connect(self._on_preview_duration_known)
             except Exception:
                 pass
 
-        # scene reorder → adapter
+        # scene reorder → adapter (only if your scene exposes this)
         if hasattr(self.timeline_scene, "requestReorder"):
             try:
                 self.timeline_scene.requestReorder.connect(self.timeline_adapter.on_request_reorder)
@@ -183,32 +216,37 @@ class MainWindow(QMainWindow):
         QTimer.singleShot(0, self._scroll_timeline_left)
 
     def _on_scene_selection_changed(self) -> None:
-        """Mirror timeline selection to file list to drive preview.
-        Why: selecting in the list emits currentPathChanged → preview.set_source.
-        """
+        """Mirror timeline selection to file list to drive preview."""
         sel = self.timeline_scene.selectedItems()
         if not sel:
             return
         item = sel[0]
-        path = getattr(item, "path", None)
+        # Timeline items store a composite key in `.path` but the original source
+        # path in `.source_path`.  Use the raw source path for file list selection
+        # so that currentPathChanged emits and the preview loads.
+        path = None
+        if hasattr(item, "source_path"):
+            path = getattr(item, "source_path", None)
+        if not path:
+            path = getattr(item, "path", None)
         if path:
+            # This emits currentPathChanged → preview + trim panel load
             self.file_list.select_path(path)
 
-    # --- Helpers ---
-    def _refresh_counter(self, *_args) -> None:
-        count = self.file_list.video_count()
-        self.lbl_counter.setText(f"Videos: {count}/{VIDEO_CAP}")
-        self.btn_add.setEnabled(count < VIDEO_CAP)
+    def _on_clip_activated(self, key: str) -> None:
+        """Play the clip associated with the given timeline key.
 
-    def _toast(self, message: str, timeout_ms: int = 4000) -> None:
-        self.statusBar().showMessage(message, timeout_ms)
-
-    def _scroll_timeline_left(self) -> None:
-        """Anchor timeline view to the far left (after layout/scene updates)."""
+        The key has the format "path|in-out|index".  We extract the source path
+        (the part before the first pipe) and select it in the file list.  This
+        emits currentPathChanged, causing the preview to load and play the video.
+        """
         try:
-            hbar = self.timeline_view.horizontalScrollBar()
-            if hbar is not None:
-                hbar.setValue(hbar.minimum())
+            if not key:
+                return
+            # Extract the source path from the composite key
+            path = key.split("|", 1)[0]
+            if path:
+                self.file_list.select_path(path)
         except Exception:
             pass
 
@@ -223,19 +261,50 @@ class MainWindow(QMainWindow):
                 pass
 
     def _on_preview_duration_known(self, duration_ms: int) -> None:
-        path = self._current_path
+        """Preview told us the duration of current _current_path."""
+        path = getattr(self, "_current_path", None)
         if not path:
             return
-        in_ms = 0
-        out_ms = int(duration_ms)
+        # model update + panel load + timeline overlay refresh
         try:
-            for c in getattr(self.project.video, "clips", []):
-                if getattr(c, "path", None) == path:
-                    in_ms = int(getattr(c, "in_ms", 0) or 0)
-                    out_val = getattr(c, "out_ms", None)
-                    out_ms = int(out_val) if (out_val is not None and int(out_val) > 0) else int(duration_ms)
-                    break
+            self.project.set_duration_by_path(path, duration_ms)
         except Exception:
             pass
+        in_ms, out_ms = self.project.get_trim_by_path(path)
         if hasattr(self, "trim_panel") and self.trim_panel is not None:
             self.trim_panel.load(path, int(duration_ms), int(in_ms), int(out_ms))
+        if hasattr(self, "timeline_adapter"):
+            try:
+                self.timeline_adapter.update_trim_for_path(path)
+            except Exception:
+                pass
+
+    def _on_trim_changed(self, path: str, in_ms: int, out_ms: int) -> None:
+        """Persist trim in model and refresh timeline overlay."""
+        try:
+            self.project.set_trim_by_path(path, in_ms, out_ms)
+        except Exception:
+            pass
+        if hasattr(self, "timeline_adapter"):
+            try:
+                self.timeline_adapter.update_trim_for_path(path)
+            except Exception:
+                pass
+
+    # --- Helpers ---
+    def _refresh_counter(self, *_args) -> None:
+        count = self.file_list.video_count()
+        self.lbl_counter.setText(f"Videos: {count}/{VIDEO_CAP}")
+        self.btn_add.setEnabled(count < VIDEO_CAP)
+
+    def _toast(self, message: str, timeout_ms: int = 4000) -> None:
+        self.statusBar().showMessage(message, timeout_ms)
+
+    def _scroll_timeline_left(self) -> None:
+        """Anchor timeline view to the far left after layout/scene updates."""
+        try:
+            hbar = self.timeline_view.horizontalScrollBar()
+            if hbar is not None:
+                hbar.setValue(hbar.minimum())
+        except Exception:
+            pass

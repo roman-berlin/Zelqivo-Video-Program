@@ -4,9 +4,19 @@ from typing import Optional, Dict, List
 
 from PyQt6.QtCore import QRectF, QCoreApplication, QThread
 
-from core.project import Project, Clip
-from ui.timeline.timeline import TimelineScene, TimelineView
-from ui.utils.gui import gui_runner
+# Import project classes from the parent ``core`` package.  This relative
+# import allows ``TimelineAdapter`` to function correctly when installed as
+# part of the package rather than relying on sys.path adjustments.
+from ...core.project import Project, Clip
+
+# Import the scene and view classes from the sibling ``timeline`` module.  Using
+# a single leading dot resolves the module within the same package.
+from .timeline import TimelineScene, TimelineView
+
+# Import the GUI runner helper from the neighbouring ``utils`` package.  The
+# double-dot (``..``) climbs up one level from the ``timeline`` package into
+# ``ui``, then into ``utils``.
+from ..utils.gui import gui_runner
 
 
 class TimelineAdapter:

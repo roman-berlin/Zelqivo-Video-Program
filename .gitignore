@@ -1,89 +1,28 @@
-# Python
+# Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]
-*.pyo
-*.pyd
-*.so
-*.egg-info/
-.dist-info/
-.build/
-.eggs/
-.cache/
-.pytest_cache/
-.mypy_cache/
-.dmypy.json
-.pyre/
-.tox/
-.coverage
-htmlcov/
-coverage.xml
 
-# Virtualenv
-venv/
-ENV/
-env/
+# Virtual environments
 .venv/
-.venv*/
-pip-wheel-metadata/
-
-# Logs and temp
-*.log
-logs/
-tmp/
-temp/
-
-# Env and secrets
 .env
-.env.*
-*.key
-*.pem
-*.p12
-*.keystore
-keystore.properties
 
-# Allure
-allure-results/
-allure-report/
-# לפעמים מייצרים ארכיונים
-allure-report-*/
-
-# Appium and mobile artifacts
-appium.log
-appium-logs/
-reports/
-screenshots/
-*.apk
-*.aab
-*.ipa
-
-# JetBrains PyCharm
-.idea/
-*.iml
-out/
-
-# VSCode אם משתמשים לפעמים
-.vscode/
-
-# OS specific
-.DS_Store
-Thumbs.db
-desktop.ini
-
-# Node bits אם יצטלבו כלים
-node_modules/
-npm-debug.log*
-yarn.lock
-pnpm-lock.yaml
-
-# Build artifacts כלליים
+# Distribution / packaging
+.dist/
 dist/
 build/
-target/
+*.egg-info/
 
-# Test artifacts
-junit.xml
-test-output/
+# PyTest / coverage
+.coverage
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.bandit/
 
-# Project specific
-apps/*/reports/
-apps/*/screenshots/
+# Logs and local config
+*.log
+*.spec
+
+# Editors and IDEs
+.idea/
+.vscode/

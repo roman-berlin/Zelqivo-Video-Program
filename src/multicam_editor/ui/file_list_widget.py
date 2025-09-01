@@ -8,7 +8,9 @@ from PyQt6.QtCore import Qt, QModelIndex, QMimeData, pyqtSignal
 from PyQt6.QtGui import QStandardItemModel, QStandardItem
 from PyQt6.QtWidgets import QListView, QVBoxLayout, QWidget
 
-from utils import file_utils
+# Use a relative import to ensure we access the utils module within the
+# ``multicam_editor`` package rather than relying on sys.path state.
+from ..utils import file_utils
 
 
 class FileListWidget(QWidget):

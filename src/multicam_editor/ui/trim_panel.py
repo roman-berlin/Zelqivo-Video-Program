@@ -26,7 +26,8 @@ from PyQt6.QtWidgets import (
     QPushButton,
 )
 
-from ui.widgets.range_slider import RangeSlider
+# Use a relative import to access the RangeSlider widget within the same package.
+from .widgets.range_slider import RangeSlider
 
 
 class TrimPanel(QWidget):

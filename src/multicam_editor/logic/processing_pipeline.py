@@ -5,7 +5,10 @@ from __future__ import annotations
 import time
 from typing import List, Optional
 
-from utils.signals import ProcessingSignals
+# Import the ProcessingSignals class from our package's utils module via a
+# relative import.  This avoids relying on the Python path outside of the
+# package context, which can break when the package is installed.
+from ..utils.signals import ProcessingSignals
 
 
 class ProcessingPipeline:

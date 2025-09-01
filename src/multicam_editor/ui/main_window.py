@@ -16,14 +16,18 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 
-from utils import file_utils
+# Import helpers from the package's utils module.  Use a relative import to
+# ensure the correct package context when this module is executed as part of
+# ``multicam_editor.ui``.
+from ..utils import file_utils
 from .file_list_widget import FileListWidget
 from .video_preview import VideoPreview
-from ui.trim_panel import TrimPanel
-from ui.timeline.timeline import TimelineScene, TimelineView
-from ui.timeline.adapter import TimelineAdapter
+# Import internal components using relative imports to avoid relying on sys.path
+from .trim_panel import TrimPanel
+from .timeline.timeline import TimelineScene, TimelineView
+from .timeline.adapter import TimelineAdapter
 # Use the core project implementation for clip management and splitting.
-from core.project import Project
+from ..core.project import Project
 
 
 VIDEO_CAP = 10

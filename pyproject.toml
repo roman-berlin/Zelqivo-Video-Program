@@ -1,0 +1,65 @@
+## pyproject.toml for the refactored MultiCamEditor project
+[project.scripts]
+multicam-editor = "multicam_editor.main:main"
+
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "multicam-editor"
+version = "0.1.0"
+description = "Refactored multi‑camera video editor"
+authors = [{name = "Owner"}]
+readme = "README.md"
+requires-python = ">=3.10"
+# Runtime dependencies are intentionally kept minimal.  Users of the GUI
+# application should install optional dependencies such as PyQt6, torch,
+# librosa and others separately.  Development dependencies are pinned in
+# requirements.txt/requirements.in.
+dependencies = []
+
+[tool.black]
+line-length = 100
+
+[tool.ruff]
+target-version = "py310"
+line-length = 100
+lint.select = ["E", "F", "I"]
+lint.ignore = [
+    "E501",
+    "UP006", "UP007", "UP035",
+    "SIM105",
+    "PLR0915", "PLR0912", "PLR0911",
+    "PLR2004",
+    "B010",
+    "E702",
+]
+
+[tool.mypy]
+python_version = "3.10"
+strict = false
+ignore_missing_imports = true
+check_untyped_defs = false
+disallow_untyped_defs = false
+disallow_untyped_calls = false
+warn_unused_ignores = false
+warn_return_any = false
+disable_error_code = [
+    "no-untyped-def",
+    "no-untyped-call",
+    "attr-defined",
+    "unused-ignore",
+    "name-defined",
+    "override",
+]
+
+[tool.pytest.ini_options]
+addopts = "-q --cov=src --cov-report=term-missing"
+testpaths = ["tests"]
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+
+[tool.setuptools.packages.find]
+where = ["src"]

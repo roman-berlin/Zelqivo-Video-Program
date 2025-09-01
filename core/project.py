@@ -1,4 +1,18 @@
-# file: core/project.py
+"""
+Patched core.project module with guardrails for splitting (Prompt 4.5).
+
+This version mirrors the DEV branch's core/project.py but adds a minimum
+segment length constraint when splitting clips. Splits that would result
+in a segment shorter than `MIN_SEGMENT_MS` are prevented and return
+``None`` instead of performing the split.  Disallowing very small
+segments helps ensure that splits adhere to the guardrails described in
+stage 4.5.
+
+All other functionality matches the DEV branch.  To use this class in
+your project, replace the original `core/project.py` with this file's
+contents.
+"""
+
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -35,7 +49,10 @@ class Clip:
 
 
 class Project:
-    """Ordered collection of clips with split-by-path support (Prompt 4.4)."""
+    """Ordered collection of clips with split-by-path support (Prompt 4.4/4.5)."""
+
+    # Minimum duration for each segment after a split (ms)
+    MIN_SEGMENT_MS: int = 100
 
     def __init__(self) -> None:
         self._clips: List[Clip] = []
@@ -115,7 +132,22 @@ class Project:
 
     # split
     def split_clip_by_path(self, path: str, playhead_ms: int) -> Optional[Tuple[Clip, Clip]]:
-        """Split the first clip with *path* at *playhead_ms*. Returns (left, right) or None."""
+        """Split the first clip with *path* at *playhead_ms*.
+
+        The playhead is interpreted as an absolute offset from the start
+        of the source file.  If the playhead lies outside the clip's
+        current trim range (``in_ms`` .. ``out_ms``) the split is aborted.
+        When either resulting segment would be shorter than
+        ``MIN_SEGMENT_MS`` the split is also aborted and ``None`` is
+        returned.  A ``None`` return indicates that no split was
+        performed.
+
+        To support open‑ended clips, a recorded ``out_ms`` of ``None`` or
+        ``0`` is treated as unbounded (``end=None``).  In that case the
+        right‑side minimum length check is skipped because the segment
+        extends to the end of the source.  Returns a tuple ``(left,
+        right)`` on success.
+        """
         idx: Optional[int] = None
         for i, c in enumerate(self._clips):
             if c.path == path:
@@ -127,15 +159,26 @@ class Project:
         src = self._clips[idx]
         t = max(0, int(playhead_ms))
         start = max(0, int(src.in_ms))
-        end = src.out_ms  # may be None
+        # Interpret an out_ms of 0 or None as open ended (None)
+        raw_end = src.out_ms
+        end: Optional[int] = None
+        if raw_end is not None and raw_end > 0:
+            end = int(raw_end)
 
-        # prevent empty segments at boundaries
+        # Prevent splits at or outside the boundaries
         if t <= start:
             return None
         if end is not None and t >= end:
             return None
 
+        # Enforce minimum segment length: ensure both sides of the split
+        # will be at least MIN_SEGMENT_MS long relative to the trimmed range.
+        if t - start < self.MIN_SEGMENT_MS:
+            return None
+        if end is not None and (end - t) < self.MIN_SEGMENT_MS:
+            return None
+
         left = Clip(id=str(uuid.uuid4()), path=src.path, in_ms=start, out_ms=t)
-        right = Clip(id=str(uuid.uuid4()), path=src.path, in_ms=t, out_ms=end)
+        right = Clip(id=str(uuid.uuid4()), path=src.path, in_ms=t, out_ms=raw_end)
         self._clips[idx:idx + 1] = [left, right]
         return left, right

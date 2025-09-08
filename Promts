@@ -1,0 +1,171 @@
+Camera switch feature
+4.4 — Split at Playhead
+Prompt: Add Split at Playhead to TrimPanel. Use
+VideoPreview.current_position_ms(). Call Project.split_clip_by_path(path,
+playhead_ms) and refresh scene via Adapter. Keep selection on the left split; scroll
+timeline if needed.
+Done when / Testing:
+Select a clip → press Split → clip becomes two adjacent clips.
+Both appear on timeline; file list mirrors order.
+Selection stays on left part; preview plays from the playhead of left part.
+No crash on start; normal acceptance still passes.
+4.5 — Trim/Split Guardrails
+Prompt: Clamp invalid In/Out; disallow splits at start/end; enforce min segment
+length (e.g., 100 ms). After split, select left; after invalid action, show non-blocking
+toast in status area.
+Done when / Testing:
+In/Out cannot cross; equal allowed but shown.
+Split at 0 ms or at duration → prevented with toast.
+Split very close to edges (<100 ms) → prevented.
+Selection logic remains sensible; no duplicate clips appear.
+4a.1 — QUndoStack Scaffold
+Prompt: Add QUndoStack to MainWindow (dock with Undo/Redo buttons +
+Ctrl+Z/Ctrl+Y). Provide logic/commands.py with base UndoableCommand.
+Done when / Testing:
+Undo/Redo enabled; empty on app start.
+Executing no operations leaves stack empty.
+Camera switch feature 1
+Shortcuts work (no conflicts).
+4a.2 — Undo Add/Remove
+Prompt: Wrap file add/remove in undoable commands. Adapter syncs view;
+counter updates.
+Done when / Testing:
+Add 3 videos → Undo ×3 removes them; Redo ×3 restores.
+Counter and 10-cap reflect Undo/Redo.
+Timeline/list ordering preserved after redo.
+4a.3 — Undo Reorder
+Prompt: Make timeline drag-reorder undoable.
+Done when / Testing:
+Drag A,B,C to C,B,A → Undo → back to A,B,C → Redo → C,B,A.
+Preview and list stay in sync through operations.
+4a.4 — Undo Trim
+Prompt: Trimming via TrimPanel becomes an undoable command (coalesce small
+drags into one command).
+Done when / Testing:
+Drag handles → Undo returns previous In/Out in both UI and model.
+Redo reapplies; timeline overlay reflects changes instantly.
+4a.5 — Undo Split
+Prompt: Split at playhead becomes undoable; Undo merges back; selection
+restored.
+Done when / Testing:
+Split → Undo → clip is whole again; selection at pre-split index.
+Redo → two clips again; selection on left split.
+Processing & Auto-Switching (Core Feature)
+Camera switch feature 2
+5.1 — Metadata Probe + FFmpeg wrapper
+Prompt: Add utils/ffprobe.py (duration, fps, size, streams) and utils/ffmpeg.py
+helpers (safe run, concat, trim, map). Cache probe results.
+Done when / Testing:
+Import 2+ videos with different codecs → duration/fps show in list.
+Bad file → early error with clear message; no crash.
+5.2 — Active Speaker Diarization (backend stub → real)
+Prompt: Create logic/active_speaker.py with pluggable backends:
+Start with a stub (energy-based VAD + channel gating) to return segments
+[start_ms, end_ms, speaker_id].
+Allow backends: pyannote or speechbrain (prompt explicitly allows adding these
+deps later).
+Done when / Testing:
+Running on a short clip returns a list of non-overlapping segments.
+Toggle backend in settings; stub works without GPU.
+5.3 — Decision Engine → Cut Plan
+Prompt: Implement logic/decision_engine.py to convert diarization to a switch
+plan:
+Enforce min_switch_interval_ms (default 1500).
+Require min_speech_ms (default 600) to switch.
+Ignore short remarks < bg_short_remark_ms (default 500).
+Stability: prefer current camera when overlap/uncertain.
+Done when / Testing:
+Feed synthetic diarization → deterministic cut plan (unit tests for rule edge cases).
+Changing thresholds affects number/timing of cuts as expected.
+5.4 — External Audio Sync/Replace
+Prompt: logic/audio_sync.py:
+Camera switch feature 3
+If external audio provided, align with reference (first camera) using crosscorrelation (librosa or pydub).
+Return offset (ms) and resample/stretch factor if needed.
+Output a synced WAV for merge.
+Done when / Testing:
+Slightly shifted audio locks in (±200 ms test).
+Too short/long audio → trimmed/padded gracefully; status toast shown.
+5.5 — Segment Renderer (per-cut exports)
+Prompt: logic/video_merger.py:
+Render timeline segments: for each cut, trim source file to [in:out].
+Use stream-copy when possible (GOP-aligned), else re-encode minimal.
+Write temp .mp4 segments; support cancellation.
+Done when / Testing:
+3–5 cuts render into temp segments; sizes sensible.
+Cancel mid-render → partial files cleaned; UI returns to idle.
+5.6 — Concatenate + Preview Result
+Prompt: Concatenate segments into final mp4 (H.264 + AAC) per output_quality.
+On success, auto-load result into Preview and add as non-counting item (doesn’t
+affect 10-cap).
+Done when / Testing:
+Final mp4 created; opens in Preview.
+Original cap (10) unchanged; result listed distinctly (e.g., “result.mp4”).
+5.7 — Processing Orchestrator + Progress UI
+Prompt: logic/processing_pipeline.py + ui/progress_dialog.py:
+Orchestrate: probe → diarize → decision → (sync) → render → concat.
+Run in QThread/concurrent.futures; progress callbacks.
+Cancel/Fail → safe cleanup + user message.
+Camera switch feature 4
+Done when / Testing:
+Start Processing enabled when ≥2 videos.
+Progress bar advances; ETA roughly correct.
+Cancel works at any stage; UI remains responsive.
+UI Enhancements & Options
+6.1 — Settings Dialog
+Prompt: Add dialog for:
+min_switch_interval_ms, min_speech_ms, bg_short_remark_ms
+output_quality, diarization_backend
+Persist with QSettings.
+Done when / Testing:
+Values persist across restarts.
+Pipeline reads settings and behavior changes accordingly.
+6.2 — Timeline Cut Plan Visualization
+Prompt: Draw vertical cut markers and camera labels on timeline. Hover shows
+timecode + source camera. Clicking a marker moves playhead.
+Done when / Testing:
+After pipeline run, markers appear and match cut plan times.
+Clicking marker seeks Preview accurately (±1 frame).
+6.3 — Result Comparison Preview
+Prompt: Side-by-side mini-viewer: original camera vs auto-switch result (A/B
+toggle).
+Done when / Testing:
+Toggle shows correct source; playheads stay in sync within ±50 ms.
+Audio & Mix
+7.1 — External Audio Replace / Mix Toggle
+Camera switch feature 5
+Prompt: UI control to choose Replace or Mix with per-track gains; optional ducking
+on camera audio when external speech present.
+Done when / Testing:
+Replace: only external audio in result.
+Mix: both audible; gains honored; ducking reduces camera audio during speech
+segments.
+Effects / Export / Project
+8.1 — Basic Effects (per-clip)
+Prompt: Add per-clip attributes (fade in/out, grayscale, speed). Apply via ffmpeg
+filters during segment render.
+Done when / Testing:
+Set fade on a clip → visible in final result.
+Speed changes adjust segment durations & downstream concatenation.
+9.1 — Project Save/Load
+Prompt: Save Project to JSON (relative paths, schema v1); load restores clips,
+trims, order, settings.
+Done when / Testing:
+Save → close app → reopen → Load → state restored 1:1.
+10.1 — Export Dialog
+Prompt: Final export UI with presets (1080p/720p, bitrate), destination picker,
+progress, and error handling.
+Done when / Testing:
+Export completes; file plays in external player.
+Cancel leaves no stray ffmpeg processes.
+11.1 — Windows EXE
+Prompt: PyInstaller spec/batch; bundle Qt Multimedia plugins; verify on clean
+machine.
+Camera switch feature 6
+Done when / Testing:
+EXE launches on a fresh Windows VM without Python installed.
+Playback and processing work.
+12.1 — Polish & Dark Mode
+Prompt: Toggle theme; refine spacing, icons, tooltips; persist theme.
+Done when / Testing:
+Theme persists; no layout regressions; icons legible.

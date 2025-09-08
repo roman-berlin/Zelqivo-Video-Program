@@ -64,8 +64,25 @@ class Project:
     def set_clips(self, clips: List[Clip]) -> None:
         self._clips = list(clips)
 
-    def add_path(self, path: str) -> Clip:
-        clip = Clip(id=str(uuid.uuid4()), path=path)
+    def add_path(self, path: str) -> Clip | None:
+        """Add a new clip for *path* if it does not already exist.
+
+        The UI layer (``FileListWidget``) already guards against adding
+        duplicate video files, but callers may bypass that check (for example,
+        via unit tests or future API calls). Adding the same path twice would
+        lead to multiple ``Clip`` objects representing the same source,
+        causing ambiguous behaviour when splitting or reordering. To keep the
+        project state predictable we refuse to add a second clip with an
+        identical ``path`` and instead return ``None``.
+
+        Returns the newly created ``Clip`` on success, or ``None`` if the clip
+        already exists.
+        """
+        normalized = str(path)
+        for existing in self._clips:
+            if existing.path == normalized:
+                return None
+        clip = Clip(id=str(uuid.uuid4()), path=normalized)
         self._clips.append(clip)
         return clip
 

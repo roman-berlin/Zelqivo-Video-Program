@@ -124,10 +124,12 @@ class MainWindow(QMainWindow):
         # Adapter bridges model ↔ view (pass view so adapter can fit/scroll)
         self.timeline_adapter = TimelineAdapter(self.project, self.timeline_scene, self.timeline_view)
 
-        # Bind context for the TrimPanel so splitting works correctly.  This
-        # wiring is done here after the adapter and preview widgets exist.
+        # Bind context for the TrimPanel so splitting works correctly.  Pass
+        # the file list as well so that physical splits can be added back
+        # into the left panel when ``split_video`` is invoked.  This wiring
+        # is done here after the adapter, preview and file list widgets exist.
         try:
-            self.trim_panel.bind_context(self.project, self.timeline_adapter, self.preview)
+            self.trim_panel.bind_context(self.project, self.timeline_adapter, self.preview, self.file_list)
         except Exception:
             pass
 

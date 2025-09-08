@@ -115,6 +115,43 @@ class VideoPreview(QWidget):
     def current_position_ms(self) -> int:
         return int(self._player.position()) if self._player else 0
 
+    # playback control -------------------------------------------------
+    def seek_ms(self, ms: int) -> None:
+        """Seek the underlying player to ``ms`` milliseconds and update the UI.
+
+        Several components in the GUI call into ``VideoPreview`` using
+        different method names (``seek_ms``, ``set_position_ms``, ``set_position`` or
+        ``seek``).  Qt's ``QMediaPlayer`` exposes a ``setPosition`` API which
+        expects a position in milliseconds.  This helper normalises the
+        input, guards against missing players and updates internal state
+        and labels accordingly.
+        """
+        if not self._player:
+            return
+        try:
+            pos = max(0, int(ms))
+        except Exception:
+            pos = 0
+        try:
+            self._player.setPosition(pos)
+        except Exception:
+            pass
+        # Reset scrubbing state so that the periodic timer reflects the new position
+        self._user_scrubbing = False
+        self._ui_pos_ms = pos
+        self._apply_ui_position()
+
+    # Provide common aliases for seek operations so that callers can use
+    # whichever name they expect.  Each alias delegates to ``seek_ms``.
+    def set_position_ms(self, ms: int) -> None:
+        self.seek_ms(ms)
+
+    def set_position(self, ms: int) -> None:
+        self.seek_ms(ms)
+
+    def seek(self, ms: int) -> None:
+        self.seek_ms(ms)
+
     # --- handlers ---
     def _toggle_play(self) -> None:
         if not self._player:

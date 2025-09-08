@@ -29,6 +29,12 @@ from PyQt6.QtWidgets import (
 # Use a relative import to access the RangeSlider widget within the same package.
 from .widgets.range_slider import RangeSlider
 
+# Import the video splitting helper from the logic layer.  This function
+# physically splits a video on disk and returns the paths of the newly
+# created segments.  The import is placed here to avoid a circular
+# dependency on GUI components.
+from ..logic.video_utils import split_video
+
 
 class TrimPanel(QWidget):
     """Editable trim panel: path, in/out/trimmed-length + dual-handle slider.
@@ -102,10 +108,20 @@ class TrimPanel(QWidget):
         root.addWidget(sep)
 
     # context injection
-    def bind_context(self, project, adapter, video_preview: object) -> None:
+    def bind_context(self, project, adapter, video_preview: object, file_list=None) -> None:
+        """Inject references to the project, timeline adapter, preview and file list.
+
+        The additional ``file_list`` parameter allows the trim panel to
+        add newly created split videos into the media list when
+        ``split_video`` is invoked.  Passing ``None`` preserves the
+        original behaviour where split segments are not added to the left
+        panel.
+        """
         self._project = project
         self._adapter = adapter
         self._video_preview = video_preview
+        # optional: file list widget for adding split outputs
+        self._file_list = file_list
 
     # Public API
     def load(self, path: str, duration_ms: int, in_ms: int, out_ms: int) -> None:
@@ -196,6 +212,27 @@ class TrimPanel(QWidget):
             return
         left, right = result  # noqa: F841
 
+        # Physically split the underlying video on disk.  The helper returns
+        # a list of new file paths, or an empty list if the operation
+        # failed or was skipped.  We wrap this in a try/except so that
+        # logical splitting never crashes the UI.
+        try:
+            new_paths = split_video(self._path, ms)
+        except Exception:
+            new_paths = []
+        # Add the new segments to the project and file list (if provided).
+        for new_path in new_paths:
+            try:
+                clip_obj = self._project.add_path(new_path)
+            except Exception:
+                clip_obj = None
+            # update file list so user can see new segments
+            if getattr(self, "_file_list", None) is not None:
+                try:
+                    # cap_remaining=None uses the current cap set by the list
+                    self._file_list.add_files([new_path], cap_remaining=None)
+                except Exception:
+                    pass
         # schedule refresh & selection on GUI thread (adapter is thread-safe now)
         self._adapter.refresh_from_project()
         clips = self._project.clips()
@@ -204,6 +241,8 @@ class TrimPanel(QWidget):
         if hasattr(self._adapter, "_make_key"):
             key = self._adapter._make_key(left, left_index)  # type: ignore[attr-defined]
             self._adapter.select_and_scroll_by_key(key)
+        # Seek the preview to the split position so that the user can
+        # immediately review the new segment.
         self._seek_preview(ms)
 
     # Utils

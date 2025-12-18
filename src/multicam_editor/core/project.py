@@ -89,7 +89,13 @@ class Project:
     # ------------------------------------------------------------------
     # duration / trim helpers
     def _find_first_by_path(self, path: str) -> Optional[Clip]:
-        """Return the first clip with the given source path or ``None``."""
+        """Return the first clip with the given source path or ``None``.
+
+        TODO: WARNING - path is not a stable identity after split operations.
+        Multiple clips can share the same source path after splitting. This
+        method returns the FIRST match, which may not be the intended clip.
+        Consider using clip ID for lookups in future refactoring.
+        """
         for c in self._clips:
             if c.path == path:
                 return c
@@ -100,6 +106,9 @@ class Project:
 
         If ``out_ms`` is ``None`` or zero the clip's ``duration_ms`` is used.
         If no clip exists the tuple (0, 0) is returned.
+
+        TODO: Path-based lookup - returns FIRST clip match. After splits,
+        multiple clips share the same path. Consider clip ID-based API.
         """
         clip = self._find_first_by_path(path)
         if clip is None:
@@ -119,6 +128,9 @@ class Project:
         When ``out_ms`` is unset (``None`` or zero) and the duration becomes
         known, ``out_ms`` is initialised to ``duration_ms`` so that
         trimming operations have a sensible default.
+
+        TODO: Path-based lookup - affects FIRST clip match only. After splits,
+        multiple clips share the same path. Consider clip ID-based API.
         """
         clip = self._find_first_by_path(path)
         if clip is None:
@@ -133,6 +145,9 @@ class Project:
 
         The values are clamped into the range [0, duration_ms].  If no
         duration is recorded the values are clamped assuming 0→∞.
+
+        TODO: Path-based lookup - modifies FIRST clip match only. After splits,
+        multiple clips share the same path. Consider clip ID-based API.
         """
         clip = self._find_first_by_path(path)
         if clip is None:
@@ -195,7 +210,7 @@ class Project:
         if end is not None and (end - t) < self.MIN_SEGMENT_MS:
             return None
 
-        left = Clip(id=str(uuid.uuid4()), path=src.path, in_ms=start, out_ms=t)
-        right = Clip(id=str(uuid.uuid4()), path=src.path, in_ms=t, out_ms=raw_end)
+        left = Clip(id=str(uuid.uuid4()), path=src.path, in_ms=start, out_ms=t, duration_ms=src.duration_ms)
+        right = Clip(id=str(uuid.uuid4()), path=src.path, in_ms=t, out_ms=raw_end, duration_ms=src.duration_ms)
         self._clips[idx:idx + 1] = [left, right]
         return left, right

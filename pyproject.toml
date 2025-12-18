@@ -2,6 +2,7 @@
 [project.scripts]
 multicam-editor = "multicam_editor.main:main"
 
+
 [build-system]
 requires = ["setuptools>=68", "wheel"]
 build-backend = "setuptools.build_meta"

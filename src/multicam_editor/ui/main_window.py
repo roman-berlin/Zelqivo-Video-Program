@@ -133,7 +133,13 @@ class MainWindow(QMainWindow):
         self.statusBar().showMessage("")
 
         # Adapter bridges model ↔ view (pass view so adapter can fit/scroll)
-        self.timeline_adapter = TimelineAdapter(self.project, self.timeline_scene, self.timeline_view)
+        self.timeline_adapter = TimelineAdapter(
+            self.project,
+            self.timeline_scene,
+            self.timeline_view,
+            undo_stack=self.undo_stack,
+            refresh_callback=self._refresh_after_undo_redo
+        )
 
         # Bind context for the TrimPanel so splitting works correctly.  Pass
         # the file list as well so that physical splits can be added back
@@ -144,7 +150,8 @@ class MainWindow(QMainWindow):
             self.timeline_adapter,
             self.preview,
             self._toast,  # status_sink for displaying error messages
-            self.file_list
+            self.file_list,
+            self.undo_stack  # for undoable operations
         )
 
         # Ensure timeline starts scrolled fully left

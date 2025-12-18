@@ -108,8 +108,8 @@ class TrimPanel(QWidget):
         root.addWidget(sep)
 
     # context injection
-    def bind_context(self, project, adapter, video_preview: object, status_sink, file_list=None) -> None:
-        """Inject references to the project, timeline adapter, preview, status sink and file list.
+    def bind_context(self, project, adapter, video_preview: object, status_sink, file_list=None, undo_stack=None) -> None:
+        """Inject references to the project, timeline adapter, preview, status sink, file list, and undo stack.
 
         Args:
             project: Project instance for clip management
@@ -117,13 +117,14 @@ class TrimPanel(QWidget):
             video_preview: VideoPreview widget for playhead position
             status_sink: Callable that displays status messages (e.g., MainWindow._toast)
             file_list: Optional FileListWidget for adding split file outputs
+            undo_stack: Optional QUndoStack for undoable operations
         """
         self._project = project
         self._adapter = adapter
         self._video_preview = video_preview
         self._status_sink = status_sink
-        # optional: file list widget for adding split outputs
         self._file_list = file_list
+        self._undo_stack = undo_stack
 
     # Public API
     def load(self, path: str, duration_ms: int, in_ms: int, out_ms: int) -> None:
@@ -211,14 +212,30 @@ class TrimPanel(QWidget):
             if ms >= end_ms:
                 self._show_status("Cannot split: Playhead after clip end")
                 return
-        # Perform the split.  The project accepts absolute ms.
-        try:
-            result = self._project.split_clip_by_path(self._path, ms)  # (left, right) or None
-        except Exception:
-            result = None
-        if not result:
-            return
-        left, right = result  # noqa: F841
+        # Perform the split using undo command if available.
+        if self._undo_stack:
+            from ..logic.commands import SplitCommand
+            cmd = SplitCommand(
+                self._project,
+                self._path,
+                ms,
+                refresh_callback=self._adapter.refresh_from_project if self._adapter else None
+            )
+            self._undo_stack.push(cmd)
+            # Get result from command
+            left = cmd.left_clip
+            right = cmd.right_clip
+            if not left or not right:
+                return
+        else:
+            # Fallback to direct split if no undo stack
+            try:
+                result = self._project.split_clip_by_path(self._path, ms)
+            except Exception:
+                result = None
+            if not result:
+                return
+            left, right = result
 
         # Physically split the underlying video on disk.  The helper returns
         # a list of new file paths, or an empty list if the operation

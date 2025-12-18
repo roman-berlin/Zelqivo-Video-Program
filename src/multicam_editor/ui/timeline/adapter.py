@@ -92,6 +92,11 @@ class TimelineAdapter:
         """
         if not new_order:
             return
+
+        # Get old order as clip IDs
+        old_clips = self.project.clips()
+        old_order = [clip.id for clip in old_clips]
+
         # Extract source paths from keys; ignore unknown keys
         paths: list[str] = []
         for key in new_order:
@@ -120,13 +125,27 @@ class TimelineAdapter:
         for c in clips:
             if c not in seen:
                 new_clips.append(c)
-        # Apply new order
-        try:
-            self.project.set_clips(new_clips)
-        except Exception:
-            return
-        # Refresh scene
-        self.refresh_from_project()
+
+        # Get new order as clip IDs
+        new_order_ids = [clip.id for clip in new_clips]
+
+        # Use command if undo_stack available
+        if self.undo_stack:
+            from ...logic.commands import ReorderClipsCommand
+            cmd = ReorderClipsCommand(
+                self.project,
+                old_order,
+                new_order_ids,
+                self.refresh_callback
+            )
+            self.undo_stack.push(cmd)
+        else:
+            # Fallback to direct reorder
+            try:
+                self.project.set_clips(new_clips)
+            except Exception:
+                return
+            self.refresh_from_project()
 
     # ---------------- Impl (GUI thread only) --------------
     def _refresh_from_project_impl(self) -> None:

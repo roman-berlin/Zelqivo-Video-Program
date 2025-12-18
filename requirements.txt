@@ -1,15 +1,15 @@
-# 1. תלויות ליבה כבדות
+# 1. Core heavy dependencies
 numpy
 torch
 
-# 2. ספריות עיבוד אודיו
+# 2. Audio processing libraries
 soundfile
 librosa
 pydub
 pyannote.audio
 SpeechBrain
 
-# 3. ספריות עיבוד וידאו ותמונות
+# 3. Video and image processing libraries
 opencv-python
 ffmpeg-python
 moviepy
@@ -18,5 +18,5 @@ moviepy
 pyqt6-sip
 PyQt6
 
-# 5. כלי עזר
+# 5. Utilities
 tqdm

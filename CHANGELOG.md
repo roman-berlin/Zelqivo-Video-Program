@@ -4,6 +4,26 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+* Added comprehensive architecture review documentation (`ARCHITECTURE_REVIEW.md`)
+  analyzing codebase structure, identifying critical issues, and providing
+  actionable refactoring recommendations.
+
+### Changed
+
+* Standardized `requirements.txt` comments to English for international
+  contributor accessibility.
+* Updated `README.md` to accurately reflect mypy configuration (basic type
+  checking instead of strict mode).
+
+### Removed
+
+* Removed duplicate `logic/project_state.py` module to eliminate architectural
+  confusion. The authoritative `Project` implementation is in `core/project.py`.
+
 ## [0.1.0] – 2025-09-01
 
 ### Added

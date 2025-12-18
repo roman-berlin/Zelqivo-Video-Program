@@ -1,9 +1,11 @@
 # file: ui/main_window.py
 from __future__ import annotations
+import logging
 import os
 from typing import List
 
 from PyQt6.QtCore import Qt, QSettings, QTimer
+from PyQt6.QtGui import QAction, QKeySequence, QUndoStack
 from PyQt6.QtWidgets import (
     QFileDialog,
     QFrame,
@@ -12,9 +14,12 @@ from PyQt6.QtWidgets import (
     QMainWindow,
     QPushButton,
     QSplitter,
+    QToolBar,
     QVBoxLayout,
     QWidget,
 )
+
+logger = logging.getLogger(__name__)
 
 # Import helpers from the package's utils module.  Use a relative import to
 # ensure the correct package context when this module is executed as part of
@@ -28,6 +33,8 @@ from .timeline.timeline import TimelineScene, TimelineView
 from .timeline.adapter import TimelineAdapter
 # Use the core project implementation for clip management and splitting.
 from ..core.project import Project
+# Import undo/redo commands
+from ..logic.commands import AddClipsCommand, ReorderClipsCommand, TrimCommand
 
 
 VIDEO_CAP = 10
@@ -46,7 +53,11 @@ class MainWindow(QMainWindow):
         self.project = Project()
         self._current_path: str | None = None
 
+        # Initialize undo/redo stack
+        self.undo_stack = QUndoStack(self)
+
         self._init_ui()
+        self._init_undo_toolbar()
         self._connect_signals()
         self._refresh_counter()
 
@@ -128,13 +139,40 @@ class MainWindow(QMainWindow):
         # the file list as well so that physical splits can be added back
         # into the left panel when ``split_video`` is invoked.  This wiring
         # is done here after the adapter, preview and file list widgets exist.
-        try:
-            self.trim_panel.bind_context(self.project, self.timeline_adapter, self.preview, self.file_list)
-        except Exception:
-            pass
+        self.trim_panel.bind_context(
+            self.project,
+            self.timeline_adapter,
+            self.preview,
+            self._toast,  # status_sink for displaying error messages
+            self.file_list
+        )
 
         # Ensure timeline starts scrolled fully left
         QTimer.singleShot(0, self._scroll_timeline_left)
+
+    def _init_undo_toolbar(self) -> None:
+        """Initialize undo/redo toolbar with actions and keyboard shortcuts."""
+        toolbar = QToolBar("Edit", self)
+        toolbar.setObjectName("editToolbar")
+        self.addToolBar(Qt.ToolBarArea.TopToolBarArea, toolbar)
+
+        # Create undo action with Ctrl+Z shortcut
+        self.action_undo = self.undo_stack.createUndoAction(self, "Undo")
+        self.action_undo.setShortcut(QKeySequence.StandardKey.Undo)  # Ctrl+Z
+        self.action_undo.setObjectName("actionUndo")
+        toolbar.addAction(self.action_undo)
+
+        # Create redo action with Ctrl+Y (and Ctrl+Shift+Z)
+        self.action_redo = self.undo_stack.createRedoAction(self, "Redo")
+        self.action_redo.setShortcuts([
+            QKeySequence.StandardKey.Redo,  # Ctrl+Y or Ctrl+Shift+Z depending on platform
+            QKeySequence("Ctrl+Y")  # Explicit Ctrl+Y
+        ])
+        self.action_redo.setObjectName("actionRedo")
+        toolbar.addAction(self.action_redo)
+
+        # Actions are automatically disabled when stack is empty
+        # and enabled when operations are available
 
     # --- Signals ---
     def _connect_signals(self) -> None:
@@ -148,7 +186,7 @@ class MainWindow(QMainWindow):
             try:
                 self.trim_panel.trimChanged.connect(self._on_trim_changed)
             except Exception:
-                pass
+                logger.warning("Failed to connect trim_panel.trimChanged signal", exc_info=True)
 
         # timeline selection → mirror to list (keeps preview in sync when clicking squares)
         if hasattr(self.timeline_scene, "selectionChanged"):
@@ -159,21 +197,21 @@ class MainWindow(QMainWindow):
             try:
                 self.timeline_scene.clipActivated.connect(self._on_clip_activated)
             except Exception:
-                pass
+                logger.warning("Failed to connect timeline_scene.clipActivated signal", exc_info=True)
 
         # preview → when duration becomes known, load TrimPanel & overlay
         if hasattr(self.preview, "durationKnown"):
             try:
                 self.preview.durationKnown.connect(self._on_preview_duration_known)
             except Exception:
-                pass
+                logger.warning("Failed to connect preview.durationKnown signal", exc_info=True)
 
         # scene reorder → adapter (only if your scene exposes this)
         if hasattr(self.timeline_scene, "requestReorder"):
             try:
                 self.timeline_scene.requestReorder.connect(self.timeline_adapter.on_request_reorder)
             except Exception:
-                pass
+                logger.warning("Failed to connect timeline_scene.requestReorder signal", exc_info=True)
 
         # file list changes
         self.file_list.filesAdded.connect(self._on_files_added)
@@ -212,8 +250,15 @@ class MainWindow(QMainWindow):
         if not paths:
             return
         self.settings.setValue("last_dir", os.path.dirname(paths[-1]))
-        _actually_added = self.timeline_adapter.add_paths(paths)
-        self._refresh_counter()
+
+        # Use AddClipsCommand for undoable add operation
+        cmd = AddClipsCommand(
+            self.project,
+            paths,
+            refresh_callback=self._refresh_after_undo_redo
+        )
+        self.undo_stack.push(cmd)
+
         # keep the view anchored to the left after adding clips
         QTimer.singleShot(0, self._scroll_timeline_left)
 
@@ -271,7 +316,7 @@ class MainWindow(QMainWindow):
         try:
             self.project.set_duration_by_path(path, duration_ms)
         except Exception:
-            pass
+            logger.error(f"Failed to set duration for {path}", exc_info=True)
         in_ms, out_ms = self.project.get_trim_by_path(path)
         if hasattr(self, "trim_panel") and self.trim_panel is not None:
             self.trim_panel.load(path, int(duration_ms), int(in_ms), int(out_ms))
@@ -279,21 +324,47 @@ class MainWindow(QMainWindow):
             try:
                 self.timeline_adapter.update_trim_for_path(path)
             except Exception:
-                pass
+                logger.debug(f"Failed to update timeline trim for {path}", exc_info=True)
 
     def _on_trim_changed(self, path: str, in_ms: int, out_ms: int) -> None:
-        """Persist trim in model and refresh timeline overlay."""
-        try:
-            self.project.set_trim_by_path(path, in_ms, out_ms)
-        except Exception:
-            pass
-        if hasattr(self, "timeline_adapter"):
-            try:
-                self.timeline_adapter.update_trim_for_path(path)
-            except Exception:
-                pass
+        """Persist trim in model and refresh timeline overlay using undoable command."""
+        # Get old values before creating command
+        old_in, old_out = self.project.get_trim_by_path(path)
+
+        # Create and push trim command (automatically coalesces with previous trims)
+        cmd = TrimCommand(
+            self.project,
+            path,
+            old_in, old_out,
+            in_ms, out_ms,
+            refresh_callback=lambda: self.timeline_adapter.update_trim_for_path(path) if hasattr(self, "timeline_adapter") else None
+        )
+        self.undo_stack.push(cmd)
 
     # --- Helpers ---
+    def _refresh_after_undo_redo(self) -> None:
+        """Refresh UI after undo/redo operations.
+
+        This callback is passed to undo commands to ensure timeline, file list,
+        and counter all reflect the current Project state after add/remove.
+        """
+        # Refresh timeline from project
+        if hasattr(self, "timeline_adapter"):
+            self.timeline_adapter.refresh_from_project()
+
+        # Sync file list with project clips
+        clips = self.project.clips()
+        if hasattr(self, "file_list"):
+            try:
+                self.file_list.clear()
+                for clip in clips:
+                    self.file_list.addItem(clip.display_title())
+            except Exception:
+                logger.debug("Failed to sync file list with project", exc_info=True)
+
+        # Update counter and button state
+        self._refresh_counter()
+
     def _refresh_counter(self, *_args) -> None:
         count = self.file_list.video_count()
         self.lbl_counter.setText(f"Videos: {count}/{VIDEO_CAP}")

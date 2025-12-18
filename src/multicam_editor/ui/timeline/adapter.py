@@ -22,11 +22,14 @@ from ..utils.gui import gui_runner
 class TimelineAdapter:
     """Thread-safe bridge Project ↔ TimelineScene/View (Prompt 4.4)."""
 
-    def __init__(self, project: Project, scene: TimelineScene, view: TimelineView, file_list=None) -> None:
+    def __init__(self, project: Project, scene: TimelineScene, view: TimelineView, file_list=None,
+                 undo_stack=None, refresh_callback=None) -> None:
         self.project = project
         self.scene = scene
         self.view = view
         self.file_list = file_list
+        self.undo_stack = undo_stack
+        self.refresh_callback = refresh_callback
         self._key_to_index: Dict[str, int] = {}
 
     # ---------------- Thread-safe wrappers ----------------

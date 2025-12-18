@@ -210,7 +210,7 @@ class Project:
         if end is not None and (end - t) < self.MIN_SEGMENT_MS:
             return None
 
-        left = Clip(id=str(uuid.uuid4()), path=src.path, in_ms=start, out_ms=t)
-        right = Clip(id=str(uuid.uuid4()), path=src.path, in_ms=t, out_ms=raw_end)
+        left = Clip(id=str(uuid.uuid4()), path=src.path, in_ms=start, out_ms=t, duration_ms=src.duration_ms)
+        right = Clip(id=str(uuid.uuid4()), path=src.path, in_ms=t, out_ms=raw_end, duration_ms=src.duration_ms)
         self._clips[idx:idx + 1] = [left, right]
         return left, right

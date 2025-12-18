@@ -17,8 +17,9 @@ continuous integration workflow.
 * **Centralised logging** – the `logging_setup` module configures the root
   logger once, ensuring consistent log formatting and preventing duplicate
   handlers.
-* **Type hints & strict checking** – public APIs are annotated and the
-  project is checked with `mypy` in `strict` mode.
+* **Type hints & basic type checking** – public APIs are annotated and the
+  project is checked with `mypy` in permissive mode (strict mode is a roadmap
+  item for future improvement).
 * **Tests & coverage** – a small but meaningful test suite validates the
   behaviour of core components and the logging configuration.  Running
   `pytest -q` will report coverage information.

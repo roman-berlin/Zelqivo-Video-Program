@@ -22,11 +22,14 @@ from ..utils.gui import gui_runner
 class TimelineAdapter:
     """Thread-safe bridge Project ↔ TimelineScene/View (Prompt 4.4)."""
 
-    def __init__(self, project: Project, scene: TimelineScene, view: TimelineView, file_list=None) -> None:
+    def __init__(self, project: Project, scene: TimelineScene, view: TimelineView, file_list=None,
+                 undo_stack=None, refresh_callback=None) -> None:
         self.project = project
         self.scene = scene
         self.view = view
         self.file_list = file_list
+        self.undo_stack = undo_stack
+        self.refresh_callback = refresh_callback
         self._key_to_index: Dict[str, int] = {}
 
     # ---------------- Thread-safe wrappers ----------------
@@ -89,6 +92,11 @@ class TimelineAdapter:
         """
         if not new_order:
             return
+
+        # Get old order as clip IDs
+        old_clips = self.project.clips()
+        old_order = [clip.id for clip in old_clips]
+
         # Extract source paths from keys; ignore unknown keys
         paths: list[str] = []
         for key in new_order:
@@ -117,13 +125,27 @@ class TimelineAdapter:
         for c in clips:
             if c not in seen:
                 new_clips.append(c)
-        # Apply new order
-        try:
-            self.project.set_clips(new_clips)
-        except Exception:
-            return
-        # Refresh scene
-        self.refresh_from_project()
+
+        # Get new order as clip IDs
+        new_order_ids = [clip.id for clip in new_clips]
+
+        # Use command if undo_stack available
+        if self.undo_stack:
+            from ...logic.commands import ReorderClipsCommand
+            cmd = ReorderClipsCommand(
+                self.project,
+                old_order,
+                new_order_ids,
+                self.refresh_callback
+            )
+            self.undo_stack.push(cmd)
+        else:
+            # Fallback to direct reorder
+            try:
+                self.project.set_clips(new_clips)
+            except Exception:
+                return
+            self.refresh_from_project()
 
     # ---------------- Impl (GUI thread only) --------------
     def _refresh_from_project_impl(self) -> None:

@@ -108,20 +108,23 @@ class TrimPanel(QWidget):
         root.addWidget(sep)
 
     # context injection
-    def bind_context(self, project, adapter, video_preview: object, file_list=None) -> None:
-        """Inject references to the project, timeline adapter, preview and file list.
+    def bind_context(self, project, adapter, video_preview: object, status_sink, file_list=None, undo_stack=None) -> None:
+        """Inject references to the project, timeline adapter, preview, status sink, file list, and undo stack.
 
-        The additional ``file_list`` parameter allows the trim panel to
-        add newly created split videos into the media list when
-        ``split_video`` is invoked.  Passing ``None`` preserves the
-        original behaviour where split segments are not added to the left
-        panel.
+        Args:
+            project: Project instance for clip management
+            adapter: TimelineAdapter for model-view synchronization
+            video_preview: VideoPreview widget for playhead position
+            status_sink: Callable that displays status messages (e.g., MainWindow._toast)
+            file_list: Optional FileListWidget for adding split file outputs
+            undo_stack: Optional QUndoStack for undoable operations
         """
         self._project = project
         self._adapter = adapter
         self._video_preview = video_preview
-        # optional: file list widget for adding split outputs
+        self._status_sink = status_sink
         self._file_list = file_list
+        self._undo_stack = undo_stack
 
     # Public API
     def load(self, path: str, duration_ms: int, in_ms: int, out_ms: int) -> None:
@@ -178,9 +181,11 @@ class TrimPanel(QWidget):
 
     def _on_split_clicked(self) -> None:
         if not self._path or self._project is None or self._adapter is None:
+            self._show_status("Cannot split: No clip selected or context not initialized")
             return
         ms = self._current_playhead_ms()
         if ms is None:
+            self._show_status("Cannot split: Playhead position unknown")
             return
         # Clamp split position into the current clip's trimmed range.  Without
         # clamping a playhead outside [in_ms, out_ms] would result in no-op.
@@ -188,29 +193,49 @@ class TrimPanel(QWidget):
             start_ms = int(self._in_ms)
             end_ms = int(self._out_ms)
         except Exception:
-            start_ms = 0
-            end_ms = 0
+            self._show_status("Cannot split: Invalid trim range")
+            return
         # Only clamp if we have a valid range and ms is out of bounds.
         if end_ms > 0:
             # Enforce minimum segment length.  If the playhead is too close to
             # the start or end of the trimmed range (< MIN_SEGMENT_MS) we do
             # not perform the split.
             if ms - start_ms < self.MIN_SEGMENT_MS:
+                self._show_status(f"Cannot split: Too close to start (need {self.MIN_SEGMENT_MS}ms minimum)")
                 return
             if end_ms - ms < self.MIN_SEGMENT_MS:
+                self._show_status(f"Cannot split: Too close to end (need {self.MIN_SEGMENT_MS}ms minimum)")
                 return
             if ms <= start_ms:
+                self._show_status("Cannot split: Playhead before clip start")
                 return
             if ms >= end_ms:
+                self._show_status("Cannot split: Playhead after clip end")
                 return
-        # Perform the split.  The project accepts absolute ms.
-        try:
-            result = self._project.split_clip_by_path(self._path, ms)  # (left, right) or None
-        except Exception:
-            result = None
-        if not result:
-            return
-        left, right = result  # noqa: F841
+        # Perform the split using undo command if available.
+        if self._undo_stack:
+            from ..logic.commands import SplitCommand
+            cmd = SplitCommand(
+                self._project,
+                self._path,
+                ms,
+                refresh_callback=self._adapter.refresh_from_project if self._adapter else None
+            )
+            self._undo_stack.push(cmd)
+            # Get result from command
+            left = cmd.left_clip
+            right = cmd.right_clip
+            if not left or not right:
+                return
+        else:
+            # Fallback to direct split if no undo stack
+            try:
+                result = self._project.split_clip_by_path(self._path, ms)
+            except Exception:
+                result = None
+            if not result:
+                return
+            left, right = result
 
         # Physically split the underlying video on disk.  The helper returns
         # a list of new file paths, or an empty list if the operation
@@ -279,6 +304,14 @@ class TrimPanel(QWidget):
                 except Exception:
                     pass
                 break
+
+    def _show_status(self, message: str) -> None:
+        """Display a status message via the injected status sink."""
+        if hasattr(self, "_status_sink") and callable(self._status_sink):
+            try:
+                self._status_sink(message)
+            except Exception:
+                pass
 
     @staticmethod
     def _fmt_time(ms: int) -> str:

@@ -28,6 +28,7 @@ from ..utils import file_utils
 from .file_list_widget import FileListWidget
 from .video_preview import VideoPreview
 from .settings_dialog import SettingsDialog
+from .export_dialog import ExportDialog
 # Import internal components using relative imports to avoid relying on sys.path
 from .trim_panel import TrimPanel
 from .timeline.timeline import TimelineScene, TimelineView
@@ -253,6 +254,17 @@ class MainWindow(QMainWindow):
 
         # File menu
         file_menu = menubar.addMenu("&File")
+
+        # Export action
+        self.action_export = QAction("&Export...", self)
+        self.action_export.setObjectName("actionExport")
+        self.action_export.setShortcut(QKeySequence("Ctrl+E"))
+        self.action_export.setEnabled(False)  # Enabled after processing
+        self.action_export.triggered.connect(self._show_export_dialog)
+        file_menu.addAction(self.action_export)
+
+        file_menu.addSeparator()
+
         settings_action = QAction("&Settings...", self)
         settings_action.triggered.connect(self._show_settings_dialog)
         file_menu.addAction(settings_action)
@@ -261,6 +273,18 @@ class MainWindow(QMainWindow):
         """Show the settings dialog."""
         dialog = SettingsDialog(self)
         dialog.exec()
+
+    def _show_export_dialog(self) -> None:
+        """Show the export dialog for the processed video."""
+        if not self._result_path or not os.path.exists(self._result_path):
+            self._toast("No processed video available to export")
+            return
+
+        dialog = ExportDialog(self._result_path, self)
+        if dialog.exec():
+            output_path = dialog.get_output_path()
+            if output_path and os.path.exists(output_path):
+                self._toast(f"Exported: {os.path.basename(output_path)}")
 
     # --- Signals ---
     def _connect_signals(self) -> None:
@@ -527,9 +551,10 @@ class MainWindow(QMainWindow):
             self._progress_dialog.set_finished(True, f"Output: {output_path}")
         self._toast(f"Processing complete: {os.path.basename(output_path)}")
 
-        # Store result path for A/B comparison
+        # Store result path for A/B comparison and export
         self._result_path = output_path
         self.btn_toggle_ab.setEnabled(True)
+        self.action_export.setEnabled(True)
 
     def _on_processing_error(self, error_msg: str) -> None:
         """Handle processing error."""

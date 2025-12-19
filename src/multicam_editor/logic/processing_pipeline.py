@@ -14,6 +14,8 @@ from dataclasses import dataclass, field
 from enum import Enum, auto
 from typing import Callable, List, Optional
 
+from PyQt6.QtCore import QSettings
+
 from ..utils.ffprobe import probe, ProbeResult
 from ..utils.signals import ProcessingSignals
 from .active_speaker import ActiveSpeakerDetector, SpeakerSegment
@@ -320,7 +322,17 @@ class ProcessingPipeline:
 
         self._emit_progress(50, "Generating cut plan...")
 
-        engine = DecisionEngine()
+        # Read settings for decision engine
+        settings = QSettings("MultiCamEditor", "MultiCamEditor")
+        min_switch_interval_ms = settings.value("decision_engine/min_switch_interval_ms", 1500, type=int)
+        min_speech_ms = settings.value("decision_engine/min_speech_ms", 600, type=int)
+        bg_short_remark_ms = settings.value("decision_engine/bg_short_remark_ms", 500, type=int)
+
+        engine = DecisionEngine(
+            min_switch_interval_ms=min_switch_interval_ms,
+            min_speech_ms=min_speech_ms,
+            bg_short_remark_ms=bg_short_remark_ms,
+        )
         self._cut_plan = engine.generate_cut_plan(
             self._speaker_segments,
             total_duration_ms=total_duration_ms,

@@ -27,6 +27,7 @@ logger = logging.getLogger(__name__)
 from ..utils import file_utils
 from .file_list_widget import FileListWidget
 from .video_preview import VideoPreview
+from .settings_dialog import SettingsDialog
 # Import internal components using relative imports to avoid relying on sys.path
 from .trim_panel import TrimPanel
 from .timeline.timeline import TimelineScene, TimelineView
@@ -61,6 +62,7 @@ class MainWindow(QMainWindow):
 
         self._init_ui()
         self._init_undo_toolbar()
+        self._init_menu()
         self._connect_signals()
         self._refresh_counter()
 
@@ -187,6 +189,21 @@ class MainWindow(QMainWindow):
 
         # Actions are automatically disabled when stack is empty
         # and enabled when operations are available
+
+    def _init_menu(self) -> None:
+        """Initialize menu bar with File and Edit menus."""
+        menubar = self.menuBar()
+
+        # File menu
+        file_menu = menubar.addMenu("&File")
+        settings_action = QAction("&Settings...", self)
+        settings_action.triggered.connect(self._show_settings_dialog)
+        file_menu.addAction(settings_action)
+
+    def _show_settings_dialog(self) -> None:
+        """Show the settings dialog."""
+        dialog = SettingsDialog(self)
+        dialog.exec()
 
     # --- Signals ---
     def _connect_signals(self) -> None:
@@ -395,6 +412,9 @@ class MainWindow(QMainWindow):
             self._toast(f"Need at least {MIN_VIDEOS_FOR_PROCESS} videos to process.")
             return
 
+        # Read output quality from settings
+        quality = self.settings.value("output/quality", "1080p", type=str)
+
         # Create and show progress dialog
         self._progress_dialog = ProcessingProgressDialog(self)
 
@@ -402,7 +422,7 @@ class MainWindow(QMainWindow):
         self._processing_thread = ProcessingThread(
             input_files=paths,
             external_audio=None,
-            resolution="1080p",
+            resolution=quality,
             parent=self,
         )
 

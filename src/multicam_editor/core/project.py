@@ -15,10 +15,45 @@ contents.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from enum import Enum
 from typing import List, Optional, Tuple
 import os
 import uuid
+
+
+class AudioMixMode(Enum):
+    """Audio mixing mode for external audio."""
+    REPLACE = "replace"  # Only external audio audible
+    MIX = "mix"  # Both video and external audio mixed
+
+
+@dataclass
+class AudioMixSettings:
+    """Settings for audio mixing with external audio track.
+
+    Attributes:
+        mode: REPLACE (only external) or MIX (both)
+        video_gain_db: Gain for video's original audio (-60 to +12 dB)
+        external_gain_db: Gain for external audio (-60 to +12 dB)
+        ducking_enabled: Whether to duck video audio when external is loud
+        ducking_amount_db: How much to reduce video audio during ducking
+    """
+    mode: AudioMixMode = AudioMixMode.REPLACE
+    video_gain_db: float = 0.0
+    external_gain_db: float = 0.0
+    ducking_enabled: bool = False
+    ducking_amount_db: float = -12.0
+
+    def clamp_gains(self) -> "AudioMixSettings":
+        """Return a copy with gains clamped to valid range [-60, +12]."""
+        return AudioMixSettings(
+            mode=self.mode,
+            video_gain_db=max(-60.0, min(12.0, self.video_gain_db)),
+            external_gain_db=max(-60.0, min(12.0, self.external_gain_db)),
+            ducking_enabled=self.ducking_enabled,
+            ducking_amount_db=max(-60.0, min(0.0, self.ducking_amount_db)),
+        )
 
 
 @dataclass

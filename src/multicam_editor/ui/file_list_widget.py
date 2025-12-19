@@ -11,6 +11,7 @@ from PyQt6.QtWidgets import QListView, QVBoxLayout, QWidget
 # Use a relative import to ensure we access the utils module within the
 # ``multicam_editor`` package rather than relying on sys.path state.
 from ..utils import file_utils
+from ..utils.ffprobe import probe, ProbeResult
 
 
 class FileListWidget(QWidget):
@@ -174,9 +175,36 @@ class FileListWidget(QWidget):
     # ------------------------ Internals ------------------------
     def _append_item(self, abs_path: str) -> None:
         base = file_utils.safe_basename(abs_path)
-        item = QStandardItem(base)
+        display_text = base
+
+        # Probe for metadata (cached, fast on repeat)
+        result = probe(abs_path)
+        if result.error:
+            # Bad file - show error indicator but still add
+            display_text = f"{base}  [Error: {result.error[:30]}]"
+            tooltip = f"{abs_path}\n\nError: {result.error}"
+        else:
+            # Build metadata string: duration, resolution, fps
+            parts = []
+            if result.duration_ms > 0:
+                secs = result.duration_ms // 1000
+                mins, secs = divmod(secs, 60)
+                parts.append(f"{mins}:{secs:02d}")
+            if result.resolution_str():
+                parts.append(result.resolution_str())
+            if result.fps:
+                parts.append(f"{result.fps:.0f}fps")
+            if parts:
+                display_text = f"{base}  [{' | '.join(parts)}]"
+            tooltip = abs_path
+            if result.video_codec:
+                tooltip += f"\nCodec: {result.video_codec}"
+            if result.audio_codec:
+                tooltip += f" / {result.audio_codec}"
+
+        item = QStandardItem(display_text)
         item.setEditable(False)
-        item.setToolTip(abs_path)
+        item.setToolTip(tooltip)
         item.setData(abs_path, Qt.ItemDataRole.UserRole)
         self._model.appendRow(item)
         self._path_set.add(abs_path)

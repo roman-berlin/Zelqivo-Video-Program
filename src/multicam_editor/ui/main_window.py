@@ -28,6 +28,8 @@ from ..utils import file_utils
 from .file_list_widget import FileListWidget
 from .video_preview import VideoPreview
 from .settings_dialog import SettingsDialog
+from .export_dialog import ExportDialog
+from .theme import apply_theme
 # Import internal components using relative imports to avoid relying on sys.path
 from .trim_panel import TrimPanel
 from .timeline.timeline import TimelineScene, TimelineView
@@ -66,6 +68,9 @@ class MainWindow(QMainWindow):
         self._connect_signals()
         self._refresh_counter()
 
+        # Apply saved theme on startup
+        self._apply_startup_theme()
+
     # --- UI setup ---
     def _init_ui(self) -> None:
         central = QWidget(self)
@@ -86,9 +91,11 @@ class MainWindow(QMainWindow):
         ctrl_lay.setContentsMargins(0, 0, 0, 0)
         self.btn_add = QPushButton("Add Files…", ctrl_row)
         self.btn_add.setObjectName("btnAddFiles")
+        self.btn_add.setToolTip("Add video files (up to 10)")
         self.btn_process = QPushButton("Process", ctrl_row)
         self.btn_process.setObjectName("btnProcess")
         self.btn_process.setEnabled(False)  # Enabled when >=2 videos
+        self.btn_process.setToolTip("Process videos with auto-switching (requires 2+ videos)")
         self.lbl_counter = QLabel("Videos: 0/10", ctrl_row)
         self.lbl_counter.setObjectName("lblCounter")
         ctrl_lay.addWidget(self.btn_add)
@@ -125,6 +132,7 @@ class MainWindow(QMainWindow):
         self.btn_toggle_ab.setObjectName("btnToggleAB")
         self.btn_toggle_ab.setCheckable(True)
         self.btn_toggle_ab.setChecked(False)
+        self.btn_toggle_ab.setToolTip("Compare original vs auto-switched result side-by-side")
         self.btn_toggle_ab.clicked.connect(self._toggle_ab_mode)
         preview_header_layout.addWidget(self.btn_toggle_ab)
 
@@ -248,19 +256,84 @@ class MainWindow(QMainWindow):
         # and enabled when operations are available
 
     def _init_menu(self) -> None:
-        """Initialize menu bar with File and Edit menus."""
+        """Initialize menu bar with File and View menus."""
         menubar = self.menuBar()
 
         # File menu
         file_menu = menubar.addMenu("&File")
+
+        # Export action
+        self.action_export = QAction("&Export...", self)
+        self.action_export.setObjectName("actionExport")
+        self.action_export.setShortcut(QKeySequence("Ctrl+E"))
+        self.action_export.setEnabled(False)  # Enabled after processing
+        self.action_export.triggered.connect(self._show_export_dialog)
+        file_menu.addAction(self.action_export)
+
+        file_menu.addSeparator()
+
         settings_action = QAction("&Settings...", self)
         settings_action.triggered.connect(self._show_settings_dialog)
         file_menu.addAction(settings_action)
+
+        # View menu
+        view_menu = menubar.addMenu("&View")
+
+        # Theme toggle action
+        self.action_toggle_theme = QAction("&Dark Mode", self)
+        self.action_toggle_theme.setObjectName("actionToggleDarkMode")
+        self.action_toggle_theme.setCheckable(True)
+        self.action_toggle_theme.setShortcut(QKeySequence("Ctrl+D"))
+
+        # Load theme setting and set checkbox
+        current_theme = self.settings.value("appearance/theme", "light", type=str)
+        self.action_toggle_theme.setChecked(current_theme == "dark")
+
+        self.action_toggle_theme.triggered.connect(self._toggle_theme)
+        view_menu.addAction(self.action_toggle_theme)
+
+    def _toggle_theme(self) -> None:
+        """Toggle between light and dark themes."""
+        is_dark = self.action_toggle_theme.isChecked()
+        theme = "dark" if is_dark else "light"
+
+        # Save theme setting
+        self.settings.setValue("appearance/theme", theme)
+
+        # Apply theme to app
+        app = self.window().parentWidget()
+        if app is None:
+            from PyQt6.QtWidgets import QApplication
+            app = QApplication.instance()
+        if app:
+            apply_theme(app, theme)
+
+        self._toast(f"{'Dark' if is_dark else 'Light'} mode enabled", 2000)
+
+    def _apply_startup_theme(self) -> None:
+        """Apply saved theme on application startup."""
+        theme = self.settings.value("appearance/theme", "light", type=str)
+        from PyQt6.QtWidgets import QApplication
+        app = QApplication.instance()
+        if app:
+            apply_theme(app, theme)
 
     def _show_settings_dialog(self) -> None:
         """Show the settings dialog."""
         dialog = SettingsDialog(self)
         dialog.exec()
+
+    def _show_export_dialog(self) -> None:
+        """Show the export dialog for the processed video."""
+        if not self._result_path or not os.path.exists(self._result_path):
+            self._toast("No processed video available to export")
+            return
+
+        dialog = ExportDialog(self._result_path, self)
+        if dialog.exec():
+            output_path = dialog.get_output_path()
+            if output_path and os.path.exists(output_path):
+                self._toast(f"Exported: {os.path.basename(output_path)}")
 
     # --- Signals ---
     def _connect_signals(self) -> None:
@@ -527,9 +600,10 @@ class MainWindow(QMainWindow):
             self._progress_dialog.set_finished(True, f"Output: {output_path}")
         self._toast(f"Processing complete: {os.path.basename(output_path)}")
 
-        # Store result path for A/B comparison
+        # Store result path for A/B comparison and export
         self._result_path = output_path
         self.btn_toggle_ab.setEnabled(True)
+        self.action_export.setEnabled(True)
 
     def _on_processing_error(self, error_msg: str) -> None:
         """Handle processing error."""

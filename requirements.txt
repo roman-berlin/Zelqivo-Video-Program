@@ -20,3 +20,6 @@ PyQt6
 
 # 5. Utilities
 tqdm
+
+# 6. Build tools
+pyinstaller

@@ -35,9 +35,12 @@ from .timeline.adapter import TimelineAdapter
 from ..core.project import Project
 # Import undo/redo commands
 from ..logic.commands import AddClipsCommand, ReorderClipsCommand, TrimCommand
+from ..logic.processing_worker import ProcessingThread
+from .progress_dialog import ProcessingProgressDialog
 
 
 VIDEO_CAP = 10
+MIN_VIDEOS_FOR_PROCESS = 2
 
 
 class MainWindow(QMainWindow):
@@ -81,9 +84,13 @@ class MainWindow(QMainWindow):
         ctrl_lay.setContentsMargins(0, 0, 0, 0)
         self.btn_add = QPushButton("Add Files…", ctrl_row)
         self.btn_add.setObjectName("btnAddFiles")
+        self.btn_process = QPushButton("Process", ctrl_row)
+        self.btn_process.setObjectName("btnProcess")
+        self.btn_process.setEnabled(False)  # Enabled when >=2 videos
         self.lbl_counter = QLabel("Videos: 0/10", ctrl_row)
         self.lbl_counter.setObjectName("lblCounter")
         ctrl_lay.addWidget(self.btn_add)
+        ctrl_lay.addWidget(self.btn_process)
         ctrl_lay.addStretch(1)
         ctrl_lay.addWidget(self.lbl_counter)
 
@@ -226,6 +233,7 @@ class MainWindow(QMainWindow):
 
         # buttons
         self.btn_add.clicked.connect(self.on_add_files)
+        self.btn_process.clicked.connect(self.on_process_videos)
 
     # --- Actions ---
     def on_add_files(self) -> None:
@@ -375,6 +383,75 @@ class MainWindow(QMainWindow):
         count = self.file_list.video_count()
         self.lbl_counter.setText(f"Videos: {count}/{VIDEO_CAP}")
         self.btn_add.setEnabled(count < VIDEO_CAP)
+        self.btn_process.setEnabled(count >= MIN_VIDEOS_FOR_PROCESS)
+
+    # --- Processing ---
+    def on_process_videos(self) -> None:
+        """Start the video processing pipeline."""
+        clips = self.project.clips()
+        paths = [clip.path for clip in clips]
+
+        if len(paths) < MIN_VIDEOS_FOR_PROCESS:
+            self._toast(f"Need at least {MIN_VIDEOS_FOR_PROCESS} videos to process.")
+            return
+
+        # Create and show progress dialog
+        self._progress_dialog = ProcessingProgressDialog(self)
+
+        # Create processing thread
+        self._processing_thread = ProcessingThread(
+            input_files=paths,
+            external_audio=None,
+            resolution="1080p",
+            parent=self,
+        )
+
+        # Connect signals
+        self._processing_thread.progress.connect(self._on_processing_progress)
+        self._processing_thread.stage.connect(self._on_processing_stage)
+        self._processing_thread.finished_with_path.connect(self._on_processing_finished)
+        self._processing_thread.error.connect(self._on_processing_error)
+        self._processing_thread.finished.connect(self._on_thread_finished)
+        self._progress_dialog.cancelRequested.connect(self._on_cancel_processing)
+
+        # Start processing
+        self._processing_thread.start()
+        self._progress_dialog.show()
+
+    def _on_processing_progress(self, percent: int) -> None:
+        """Update progress dialog with overall progress."""
+        if hasattr(self, "_progress_dialog") and self._progress_dialog:
+            self._progress_dialog.update_progress(percent)
+
+    def _on_processing_stage(self, stage_name: str, stage_percent: int, message: str) -> None:
+        """Update progress dialog with stage info."""
+        if hasattr(self, "_progress_dialog") and self._progress_dialog:
+            self._progress_dialog.update_stage(stage_name, stage_percent, message)
+
+    def _on_processing_finished(self, output_path: str) -> None:
+        """Handle successful processing completion."""
+        if hasattr(self, "_progress_dialog") and self._progress_dialog:
+            self._progress_dialog.set_finished(True, f"Output: {output_path}")
+        self._toast(f"Processing complete: {os.path.basename(output_path)}")
+
+    def _on_processing_error(self, error_msg: str) -> None:
+        """Handle processing error."""
+        if hasattr(self, "_progress_dialog") and self._progress_dialog:
+            if "Cancelled" in error_msg:
+                self._progress_dialog.set_cancelled()
+            else:
+                self._progress_dialog.set_finished(False, error_msg)
+        else:
+            self._toast(f"Processing failed: {error_msg}")
+
+    def _on_cancel_processing(self) -> None:
+        """Cancel the processing thread."""
+        if hasattr(self, "_processing_thread") and self._processing_thread:
+            self._processing_thread.cancel()
+
+    def _on_thread_finished(self) -> None:
+        """Cleanup after thread finishes."""
+        self._processing_thread = None
 
     def _toast(self, message: str, timeout_ms: int = 4000) -> None:
         self.statusBar().showMessage(message, timeout_ms)

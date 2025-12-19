@@ -111,12 +111,69 @@ class MainWindow(QMainWindow):
         right_layout = QVBoxLayout(right)
         right_layout.setContentsMargins(0, 0, 0, 0)
 
-        lbl_prev = QLabel("Preview", right)
+        # A/B comparison preview header with toggle
+        preview_header = QWidget(right)
+        preview_header_layout = QHBoxLayout(preview_header)
+        preview_header_layout.setContentsMargins(0, 0, 0, 0)
+
+        lbl_prev = QLabel("Preview", preview_header)
         lbl_prev.setObjectName("lblPreview")
-        self.preview = VideoPreview(right)
+        preview_header_layout.addWidget(lbl_prev)
+        preview_header_layout.addStretch(1)
+
+        self.btn_toggle_ab = QPushButton("A/B Compare", preview_header)
+        self.btn_toggle_ab.setObjectName("btnToggleAB")
+        self.btn_toggle_ab.setCheckable(True)
+        self.btn_toggle_ab.setChecked(False)
+        self.btn_toggle_ab.clicked.connect(self._toggle_ab_mode)
+        preview_header_layout.addWidget(self.btn_toggle_ab)
+
+        right_layout.addWidget(preview_header)
+
+        # Preview container (single or dual)
+        self.preview_container = QWidget(right)
+        self.preview_layout = QHBoxLayout(self.preview_container)
+        self.preview_layout.setContentsMargins(0, 0, 0, 0)
+        self.preview_layout.setSpacing(4)
+
+        # Primary preview (A - original)
+        preview_a_widget = QWidget(self.preview_container)
+        preview_a_layout = QVBoxLayout(preview_a_widget)
+        preview_a_layout.setContentsMargins(0, 0, 0, 0)
+        self.lbl_preview_a = QLabel("Original", preview_a_widget)
+        self.lbl_preview_a.setObjectName("lblPreviewA")
+        self.lbl_preview_a.setVisible(False)
+        preview_a_layout.addWidget(self.lbl_preview_a)
+
+        self.preview = VideoPreview(preview_a_widget)
         self.preview.setObjectName("videoPreview")
-        right_layout.addWidget(lbl_prev)
-        right_layout.addWidget(self.preview, 1)
+        preview_a_layout.addWidget(self.preview, 1)
+        self.preview_layout.addWidget(preview_a_widget, 1)
+
+        # Secondary preview (B - auto-switch result)
+        preview_b_widget = QWidget(self.preview_container)
+        preview_b_layout = QVBoxLayout(preview_b_widget)
+        preview_b_layout.setContentsMargins(0, 0, 0, 0)
+        self.lbl_preview_b = QLabel("Auto-Switch", preview_b_widget)
+        self.lbl_preview_b.setObjectName("lblPreviewB")
+        preview_b_layout.addWidget(self.lbl_preview_b)
+
+        self.preview_b = VideoPreview(preview_b_widget)
+        self.preview_b.setObjectName("videoPreviewB")
+        preview_b_layout.addWidget(self.preview_b, 1)
+        self.preview_layout.addWidget(preview_b_widget, 1)
+
+        # Start with B hidden
+        preview_b_widget.setVisible(False)
+        self._ab_mode = False
+        self._result_path: str | None = None
+
+        right_layout.addWidget(self.preview_container, 1)
+
+        # Sync timer for A/B playheads (50ms interval)
+        self._sync_timer = QTimer(self)
+        self._sync_timer.setInterval(50)
+        self._sync_timer.timeout.connect(self._sync_playheads)
 
         # Trim panel
         self.trim_panel = TrimPanel(right)
@@ -244,6 +301,13 @@ class MainWindow(QMainWindow):
             except Exception:
                 logger.warning("Failed to connect timeline_scene.orderChanged signal", exc_info=True)
 
+        # cut marker click → preview seek
+        if hasattr(self.timeline_scene, "cutMarkerClicked"):
+            try:
+                self.timeline_scene.cutMarkerClicked.connect(self._on_cut_marker_clicked)
+            except Exception:
+                logger.warning("Failed to connect timeline_scene.cutMarkerClicked signal", exc_info=True)
+
         # file list changes
         self.file_list.filesAdded.connect(self._on_files_added)
         self.file_list.videoCountChanged.connect(self._refresh_counter)
@@ -328,6 +392,15 @@ class MainWindow(QMainWindow):
                 self.file_list.select_path(path)
         except Exception:
             pass
+
+    def _on_cut_marker_clicked(self, timestamp_ms: int) -> None:
+        """Seek preview to cut marker timestamp when clicked."""
+        try:
+            if hasattr(self, "preview") and self.preview:
+                self.preview.seek_ms(timestamp_ms)
+                self._toast(f"Seek to {timestamp_ms}ms", 2000)
+        except Exception:
+            logger.debug(f"Failed to seek to cut marker at {timestamp_ms}ms", exc_info=True)
 
     # --- TrimPanel wiring ---
     def _on_current_path_changed(self, path: str) -> None:
@@ -454,6 +527,10 @@ class MainWindow(QMainWindow):
             self._progress_dialog.set_finished(True, f"Output: {output_path}")
         self._toast(f"Processing complete: {os.path.basename(output_path)}")
 
+        # Store result path for A/B comparison
+        self._result_path = output_path
+        self.btn_toggle_ab.setEnabled(True)
+
     def _on_processing_error(self, error_msg: str) -> None:
         """Handle processing error."""
         if hasattr(self, "_progress_dialog") and self._progress_dialog:
@@ -475,6 +552,60 @@ class MainWindow(QMainWindow):
 
     def _toast(self, message: str, timeout_ms: int = 4000) -> None:
         self.statusBar().showMessage(message, timeout_ms)
+
+    def _toggle_ab_mode(self) -> None:
+        """Toggle A/B comparison mode."""
+        self._ab_mode = self.btn_toggle_ab.isChecked()
+
+        # Get preview B widget (second widget in layout)
+        preview_b_widget = self.preview_layout.itemAt(1).widget()
+
+        if self._ab_mode:
+            # Enable A/B mode
+            if not self._result_path or not os.path.exists(self._result_path):
+                self._toast("No result video available for comparison")
+                self.btn_toggle_ab.setChecked(False)
+                self._ab_mode = False
+                return
+
+            # Show labels and B preview
+            self.lbl_preview_a.setVisible(True)
+            preview_b_widget.setVisible(True)
+
+            # Load result in preview B
+            self.preview_b.set_source(self._result_path)
+
+            # Start sync timer
+            self._sync_timer.start()
+            self._toast("A/B comparison enabled - playheads synced within 50ms", 3000)
+        else:
+            # Disable A/B mode
+            self.lbl_preview_a.setVisible(False)
+            preview_b_widget.setVisible(False)
+
+            # Stop sync timer
+            self._sync_timer.stop()
+            self._toast("A/B comparison disabled", 2000)
+
+    def _sync_playheads(self) -> None:
+        """Sync playhead positions between A and B previews (≤50ms tolerance)."""
+        if not self._ab_mode:
+            return
+
+        try:
+            # Get current positions
+            pos_a = self.preview.current_position_ms()
+            pos_b = self.preview_b.current_position_ms()
+
+            # Calculate drift
+            drift = abs(pos_a - pos_b)
+
+            # Sync if drift exceeds 50ms threshold
+            if drift > 50:
+                # Sync B to A (A is master)
+                self.preview_b.seek_ms(pos_a)
+        except Exception:
+            logger.debug("Failed to sync playheads", exc_info=True)
 
     def _scroll_timeline_left(self) -> None:
         """Anchor timeline view to the far left after layout/scene updates."""

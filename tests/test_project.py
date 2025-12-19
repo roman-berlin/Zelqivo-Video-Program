@@ -81,3 +81,208 @@ def test_split_produces_unique_clip_ids() -> None:
     # Duration should be preserved from original
     assert left.duration_ms == 1000
     assert right.duration_ms == 1000
+
+
+# ============== Guardrails Tests (Prompt 4.5) ==============
+
+
+def test_split_at_zero_rejected() -> None:
+    """Split at 0ms (start) must be prevented."""
+    p = Project()
+    p.add_path("v.mp4")
+    p.set_duration_by_path("v.mp4", 1000)
+    assert p.split_clip_by_path("v.mp4", 0) is None
+
+
+def test_split_at_duration_rejected() -> None:
+    """Split at duration (end) must be prevented."""
+    p = Project()
+    p.add_path("v.mp4")
+    p.set_duration_by_path("v.mp4", 1000)
+    assert p.split_clip_by_path("v.mp4", 1000) is None
+
+
+def test_split_at_exact_min_segment_allowed() -> None:
+    """Split at exactly MIN_SEGMENT_MS from edges should succeed."""
+    p = Project()
+    p.add_path("v.mp4")
+    p.set_duration_by_path("v.mp4", 1000)
+    # Split at exactly 100ms from start
+    result = p.split_clip_by_path("v.mp4", p.MIN_SEGMENT_MS)
+    assert result is not None
+    left, right = result
+    assert left.out_ms == 100
+    assert right.in_ms == 100
+
+
+def test_split_at_exact_min_segment_from_end_allowed() -> None:
+    """Split at exactly MIN_SEGMENT_MS from end should succeed."""
+    p = Project()
+    p.add_path("v.mp4")
+    p.set_duration_by_path("v.mp4", 1000)
+    # Split at 900ms (100ms from end)
+    result = p.split_clip_by_path("v.mp4", 1000 - p.MIN_SEGMENT_MS)
+    assert result is not None
+    left, right = result
+    assert left.out_ms == 900
+    assert right.in_ms == 900
+
+
+def test_split_one_less_than_min_segment_rejected() -> None:
+    """Split at MIN_SEGMENT_MS - 1 from edges must be rejected."""
+    p = Project()
+    p.add_path("v.mp4")
+    p.set_duration_by_path("v.mp4", 1000)
+    # 99ms from start
+    assert p.split_clip_by_path("v.mp4", p.MIN_SEGMENT_MS - 1) is None
+
+
+def test_split_one_less_from_end_rejected() -> None:
+    """Split at MIN_SEGMENT_MS - 1 from end must be rejected."""
+    p = Project()
+    p.add_path("v.mp4")
+    p.set_duration_by_path("v.mp4", 1000)
+    # 901ms (99ms from end)
+    assert p.split_clip_by_path("v.mp4", 1000 - p.MIN_SEGMENT_MS + 1) is None
+
+
+def test_trim_in_out_equal_allowed() -> None:
+    """In/Out can be equal (zero-length trim)."""
+    p = Project()
+    p.add_path("v.mp4")
+    p.set_duration_by_path("v.mp4", 1000)
+    p.set_trim_by_path("v.mp4", 500, 500)
+    assert p.get_trim_by_path("v.mp4") == (500, 500)
+
+
+def test_trim_in_out_cannot_cross() -> None:
+    """If in > out after clamping, out is raised to match in."""
+    p = Project()
+    p.add_path("v.mp4")
+    p.set_duration_by_path("v.mp4", 1000)
+    # Set in=700, out=300 - out should be clamped to in
+    p.set_trim_by_path("v.mp4", 700, 300)
+    in_ms, out_ms = p.get_trim_by_path("v.mp4")
+    assert out_ms >= in_ms
+
+
+def test_trim_clamp_negative_in() -> None:
+    """Negative in_ms is clamped to 0."""
+    p = Project()
+    p.add_path("v.mp4")
+    p.set_duration_by_path("v.mp4", 1000)
+    p.set_trim_by_path("v.mp4", -100, 500)
+    assert p.get_trim_by_path("v.mp4") == (0, 500)
+
+
+def test_trim_clamp_out_over_duration() -> None:
+    """out_ms exceeding duration is clamped to duration."""
+    p = Project()
+    p.add_path("v.mp4")
+    p.set_duration_by_path("v.mp4", 1000)
+    p.set_trim_by_path("v.mp4", 100, 9999)
+    assert p.get_trim_by_path("v.mp4") == (100, 1000)
+
+
+def test_no_duplicate_clips_on_add() -> None:
+    """Adding the same path twice returns None (no duplicate)."""
+    p = Project()
+    clip1 = p.add_path("v.mp4")
+    assert clip1 is not None
+    clip2 = p.add_path("v.mp4")
+    assert clip2 is None
+    assert len(p.clips()) == 1
+
+
+# ============== TrimCommand Undo/Redo Tests (Prompt 4a.4) ==============
+
+
+def test_trim_command_undo_redo() -> None:
+    """TrimCommand undo restores previous in/out, redo reapplies."""
+    from PyQt6.QtGui import QUndoStack
+    from multicam_editor.logic.commands import TrimCommand
+
+    p = Project()
+    p.add_path("v.mp4")
+    p.set_duration_by_path("v.mp4", 1000)
+    p.set_trim_by_path("v.mp4", 0, 1000)  # initial state
+
+    stack = QUndoStack()
+    cmd = TrimCommand(p, "v.mp4", 0, 1000, 100, 900)
+    stack.push(cmd)
+
+    # After push, trim should be updated
+    assert p.get_trim_by_path("v.mp4") == (100, 900)
+
+    # Undo restores original
+    stack.undo()
+    assert p.get_trim_by_path("v.mp4") == (0, 1000)
+
+    # Redo reapplies
+    stack.redo()
+    assert p.get_trim_by_path("v.mp4") == (100, 900)
+
+
+def test_trim_command_coalesces_multiple_drags() -> None:
+    """Multiple TrimCommands on same clip coalesce into one undo operation."""
+    from PyQt6.QtGui import QUndoStack
+    from multicam_editor.logic.commands import TrimCommand
+
+    p = Project()
+    p.add_path("v.mp4")
+    p.set_duration_by_path("v.mp4", 1000)
+    p.set_trim_by_path("v.mp4", 0, 1000)  # initial
+
+    stack = QUndoStack()
+
+    # Simulate dragging: multiple small adjustments
+    cmd1 = TrimCommand(p, "v.mp4", 0, 1000, 50, 1000)
+    stack.push(cmd1)
+    assert p.get_trim_by_path("v.mp4") == (50, 1000)
+
+    cmd2 = TrimCommand(p, "v.mp4", 50, 1000, 100, 1000)
+    stack.push(cmd2)
+    assert p.get_trim_by_path("v.mp4") == (100, 1000)
+
+    cmd3 = TrimCommand(p, "v.mp4", 100, 1000, 150, 900)
+    stack.push(cmd3)
+    assert p.get_trim_by_path("v.mp4") == (150, 900)
+
+    # Only ONE undo should restore to original (coalesced)
+    stack.undo()
+    assert p.get_trim_by_path("v.mp4") == (0, 1000)
+
+    # Stack should have only 1 command (merged)
+    assert stack.count() == 1
+
+
+def test_trim_command_different_clips_not_coalesced() -> None:
+    """TrimCommands on different clips are NOT coalesced."""
+    from PyQt6.QtGui import QUndoStack
+    from multicam_editor.logic.commands import TrimCommand
+
+    p = Project()
+    p.add_path("a.mp4")
+    p.add_path("b.mp4")
+    p.set_duration_by_path("a.mp4", 1000)
+    p.set_duration_by_path("b.mp4", 1000)
+
+    stack = QUndoStack()
+
+    cmd1 = TrimCommand(p, "a.mp4", 0, 1000, 100, 900)
+    stack.push(cmd1)
+
+    cmd2 = TrimCommand(p, "b.mp4", 0, 1000, 200, 800)
+    stack.push(cmd2)
+
+    # Two separate commands (not merged)
+    assert stack.count() == 2
+
+    # Undo first one
+    stack.undo()
+    assert p.get_trim_by_path("b.mp4") == (0, 1000)
+    assert p.get_trim_by_path("a.mp4") == (100, 900)
+
+    # Undo second
+    stack.undo()
+    assert p.get_trim_by_path("a.mp4") == (0, 1000)

@@ -16,9 +16,11 @@ from multicam_editor.utils.ffmpeg import (
     FFmpegProcess,
     FFmpegResult,
     build_concat_args,
+    build_segment_with_effects_args,
     build_trim_args,
     create_concat_list,
     get_temp_output_path,
+    has_effects,
     is_ffmpeg_available,
 )
 
@@ -27,12 +29,24 @@ logger = logging.getLogger(__name__)
 
 @dataclass
 class CutDefinition:
-    """Definition of a single cut/segment to render."""
+    """Definition of a single cut/segment to render.
+
+    Effects (Prompt 8.1):
+        fade_in_ms: Duration of fade-in (0 = disabled)
+        fade_out_ms: Duration of fade-out (0 = disabled)
+        grayscale: Apply grayscale filter
+        speed: Playback speed (1.0 = normal)
+    """
 
     source_path: str
     start_ms: int
     end_ms: int
     cut_index: int = 0
+    # Effects (Prompt 8.1)
+    fade_in_ms: int = 0
+    fade_out_ms: int = 0
+    grayscale: bool = False
+    speed: float = 1.0
 
 
 @dataclass
@@ -184,13 +198,34 @@ class SegmentRenderer:
         Returns:
             FFmpegResult from the ffmpeg process
         """
-        args = build_trim_args(
-            input_path=cut.source_path,
-            output_path=output_path,
-            start_ms=cut.start_ms,
-            end_ms=cut.end_ms,
-            copy_codec=copy_codec,
+        # Check if effects require re-encoding
+        use_effects = has_effects(
+            fade_in_ms=cut.fade_in_ms,
+            fade_out_ms=cut.fade_out_ms,
+            grayscale=cut.grayscale,
+            speed=cut.speed,
         )
+
+        if use_effects:
+            # Effects require re-encoding
+            args = build_segment_with_effects_args(
+                input_path=cut.source_path,
+                output_path=output_path,
+                start_ms=cut.start_ms,
+                end_ms=cut.end_ms,
+                fade_in_ms=cut.fade_in_ms,
+                fade_out_ms=cut.fade_out_ms,
+                grayscale=cut.grayscale,
+                speed=cut.speed,
+            )
+        else:
+            args = build_trim_args(
+                input_path=cut.source_path,
+                output_path=output_path,
+                start_ms=cut.start_ms,
+                end_ms=cut.end_ms,
+                copy_codec=copy_codec,
+            )
 
         self._current_process = FFmpegProcess(args, output_path)
         result = self._current_process.run()

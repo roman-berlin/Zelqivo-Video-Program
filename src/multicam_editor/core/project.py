@@ -20,6 +20,7 @@ from enum import Enum
 from typing import List, Optional, Tuple
 import os
 import uuid
+import json
 
 
 class AudioMixMode(Enum):
@@ -67,6 +68,12 @@ class Clip:
     used by the UI to display the full length of the source.  It is
     optional and does not affect splitting – the actual clip length is
     governed by ``in_ms``/``out_ms``.
+
+    Effects (Prompt 8.1):
+        fade_in_ms: Duration of fade-in effect (0 = disabled)
+        fade_out_ms: Duration of fade-out effect (0 = disabled)
+        grayscale: If True, apply grayscale filter
+        speed: Playback speed multiplier (1.0 = normal, 0.5 = half speed, 2.0 = double)
     """
 
     id: str
@@ -74,6 +81,11 @@ class Clip:
     in_ms: int = 0
     out_ms: Optional[int] = None  # None → until end
     duration_ms: int = 0
+    # Effects (Prompt 8.1)
+    fade_in_ms: int = 0
+    fade_out_ms: int = 0
+    grayscale: bool = False
+    speed: float = 1.0
 
     def display_title(self) -> str:
         """Return a human‑readable title for display in the timeline/list."""
@@ -88,6 +100,7 @@ class Project:
 
     # Minimum duration for each segment after a split (ms)
     MIN_SEGMENT_MS: int = 100
+    SCHEMA_VERSION: int = 1
 
     def __init__(self) -> None:
         self._clips: List[Clip] = []
@@ -249,3 +262,75 @@ class Project:
         right = Clip(id=str(uuid.uuid4()), path=src.path, in_ms=t, out_ms=raw_end, duration_ms=src.duration_ms)
         self._clips[idx:idx + 1] = [left, right]
         return left, right
+
+    # save/load (Prompt 9.1)
+    def save_to_json(self, filepath: str) -> None:
+        """Save project to JSON with relative paths (schema v1)."""
+        project_dir = os.path.dirname(os.path.abspath(filepath))
+
+        clips_data = []
+        for clip in self._clips:
+            # Convert absolute path to relative
+            abs_clip_path = os.path.abspath(clip.path)
+            try:
+                rel_path = os.path.relpath(abs_clip_path, project_dir)
+            except ValueError:
+                # Different drives on Windows - keep absolute
+                rel_path = abs_clip_path
+
+            clips_data.append({
+                "id": clip.id,
+                "path": rel_path,
+                "in_ms": clip.in_ms,
+                "out_ms": clip.out_ms,
+                "duration_ms": clip.duration_ms,
+                "fade_in_ms": clip.fade_in_ms,
+                "fade_out_ms": clip.fade_out_ms,
+                "grayscale": clip.grayscale,
+                "speed": clip.speed,
+            })
+
+        data = {
+            "schema_version": self.SCHEMA_VERSION,
+            "clips": clips_data,
+        }
+
+        with open(filepath, "w", encoding="utf-8") as f:
+            json.dump(data, f, indent=2)
+
+    @staticmethod
+    def load_from_json(filepath: str) -> "Project":
+        """Load project from JSON, restoring state 1:1."""
+        with open(filepath, "r", encoding="utf-8") as f:
+            data = json.load(f)
+
+        if data.get("schema_version") != Project.SCHEMA_VERSION:
+            raise ValueError(f"Unsupported schema version: {data.get('schema_version')}")
+
+        project = Project()
+        project_dir = os.path.dirname(os.path.abspath(filepath))
+
+        clips = []
+        for clip_data in data.get("clips", []):
+            # Convert relative path back to absolute
+            rel_path = clip_data["path"]
+            if os.path.isabs(rel_path):
+                abs_path = rel_path
+            else:
+                abs_path = os.path.normpath(os.path.join(project_dir, rel_path))
+
+            clip = Clip(
+                id=clip_data["id"],
+                path=abs_path,
+                in_ms=clip_data.get("in_ms", 0),
+                out_ms=clip_data.get("out_ms"),
+                duration_ms=clip_data.get("duration_ms", 0),
+                fade_in_ms=clip_data.get("fade_in_ms", 0),
+                fade_out_ms=clip_data.get("fade_out_ms", 0),
+                grayscale=clip_data.get("grayscale", False),
+                speed=clip_data.get("speed", 1.0),
+            )
+            clips.append(clip)
+
+        project._clips = clips
+        return project

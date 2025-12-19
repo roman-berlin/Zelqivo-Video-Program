@@ -245,6 +245,122 @@ class TestFFmpeg:
         )
         assert "libx264" in args
 
+    def test_has_effects_none(self):
+        """has_effects returns False when no effects applied."""
+        assert ffmpeg.has_effects() is False
+        assert ffmpeg.has_effects(fade_in_ms=0, fade_out_ms=0, grayscale=False, speed=1.0) is False
+
+    def test_has_effects_fade_in(self):
+        """has_effects returns True for fade in."""
+        assert ffmpeg.has_effects(fade_in_ms=500) is True
+
+    def test_has_effects_fade_out(self):
+        """has_effects returns True for fade out."""
+        assert ffmpeg.has_effects(fade_out_ms=500) is True
+
+    def test_has_effects_grayscale(self):
+        """has_effects returns True for grayscale."""
+        assert ffmpeg.has_effects(grayscale=True) is True
+
+    def test_has_effects_speed(self):
+        """has_effects returns True for speed != 1.0."""
+        assert ffmpeg.has_effects(speed=2.0) is True
+        assert ffmpeg.has_effects(speed=0.5) is True
+
+    def test_build_segment_with_effects_fade_in(self):
+        """build_segment_with_effects_args includes fade filter."""
+        args = ffmpeg.build_segment_with_effects_args(
+            "/input.mp4", "/output.mp4",
+            start_ms=0, end_ms=5000,
+            fade_in_ms=500
+        )
+        assert "-vf" in args
+        vf_idx = args.index("-vf")
+        vf_value = args[vf_idx + 1]
+        assert "fade=t=in" in vf_value
+        assert "-af" in args
+        af_idx = args.index("-af")
+        af_value = args[af_idx + 1]
+        assert "afade=t=in" in af_value
+
+    def test_build_segment_with_effects_fade_out(self):
+        """build_segment_with_effects_args includes fade out filter."""
+        args = ffmpeg.build_segment_with_effects_args(
+            "/input.mp4", "/output.mp4",
+            start_ms=0, end_ms=5000,
+            fade_out_ms=500
+        )
+        vf_idx = args.index("-vf")
+        vf_value = args[vf_idx + 1]
+        assert "fade=t=out" in vf_value
+
+    def test_build_segment_with_effects_grayscale(self):
+        """build_segment_with_effects_args includes grayscale filter."""
+        args = ffmpeg.build_segment_with_effects_args(
+            "/input.mp4", "/output.mp4",
+            start_ms=0, end_ms=5000,
+            grayscale=True
+        )
+        vf_idx = args.index("-vf")
+        vf_value = args[vf_idx + 1]
+        assert "format=gray" in vf_value
+
+    def test_build_segment_with_effects_speed(self):
+        """build_segment_with_effects_args includes speed filters."""
+        args = ffmpeg.build_segment_with_effects_args(
+            "/input.mp4", "/output.mp4",
+            start_ms=0, end_ms=5000,
+            speed=2.0
+        )
+        vf_idx = args.index("-vf")
+        vf_value = args[vf_idx + 1]
+        assert "setpts=PTS/2.0" in vf_value
+        af_idx = args.index("-af")
+        af_value = args[af_idx + 1]
+        assert "atempo=2.0" in af_value
+
+    def test_build_segment_with_effects_speed_slow(self):
+        """build_segment_with_effects_args handles slow speed."""
+        args = ffmpeg.build_segment_with_effects_args(
+            "/input.mp4", "/output.mp4",
+            start_ms=0, end_ms=5000,
+            speed=0.5
+        )
+        vf_idx = args.index("-vf")
+        vf_value = args[vf_idx + 1]
+        assert "setpts=PTS/0.5" in vf_value
+        af_idx = args.index("-af")
+        af_value = args[af_idx + 1]
+        assert "atempo=0.5" in af_value
+
+    def test_build_segment_with_effects_combined(self):
+        """build_segment_with_effects_args combines multiple effects."""
+        args = ffmpeg.build_segment_with_effects_args(
+            "/input.mp4", "/output.mp4",
+            start_ms=0, end_ms=5000,
+            fade_in_ms=500,
+            fade_out_ms=500,
+            grayscale=True,
+            speed=1.5
+        )
+        vf_idx = args.index("-vf")
+        vf_value = args[vf_idx + 1]
+        assert "setpts=PTS/1.5" in vf_value
+        assert "format=gray" in vf_value
+        assert "fade=t=in" in vf_value
+        assert "fade=t=out" in vf_value
+
+    def test_build_segment_with_effects_clamps_speed(self):
+        """build_segment_with_effects_args clamps extreme speeds."""
+        args = ffmpeg.build_segment_with_effects_args(
+            "/input.mp4", "/output.mp4",
+            start_ms=0, end_ms=5000,
+            speed=10.0  # Should clamp to 4.0
+        )
+        vf_idx = args.index("-vf")
+        vf_value = args[vf_idx + 1]
+        assert "setpts=PTS/4.0" in vf_value  # Clamped to max 4.0
+
     def test_build_concat_args(self):
         """build_concat_args creates correct command."""
         args = ffmpeg.build_concat_args(

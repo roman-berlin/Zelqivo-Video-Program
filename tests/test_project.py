@@ -6,7 +6,33 @@ minimum segment length guardrails are validated for both too‑early and
 too‑late split positions.
 """
 
-from multicam_editor.core.project import Project
+import os
+from multicam_editor.core.project import Clip, Project
+
+
+def test_clip_effect_defaults() -> None:
+    """Clip effect fields have correct defaults (Prompt 8.1)."""
+    clip = Clip(id="test", path="video.mp4")
+    assert clip.fade_in_ms == 0
+    assert clip.fade_out_ms == 0
+    assert clip.grayscale is False
+    assert clip.speed == 1.0
+
+
+def test_clip_with_effects() -> None:
+    """Clip can be created with custom effect values."""
+    clip = Clip(
+        id="test",
+        path="video.mp4",
+        fade_in_ms=500,
+        fade_out_ms=300,
+        grayscale=True,
+        speed=2.0,
+    )
+    assert clip.fade_in_ms == 500
+    assert clip.fade_out_ms == 300
+    assert clip.grayscale is True
+    assert clip.speed == 2.0
 
 
 def test_add_and_split() -> None:
@@ -286,3 +312,125 @@ def test_trim_command_different_clips_not_coalesced() -> None:
     # Undo second
     stack.undo()
     assert p.get_trim_by_path("a.mp4") == (0, 1000)
+
+
+# ============== Save/Load Tests (Prompt 9.1) ==============
+
+
+def test_save_load_roundtrip(tmp_path) -> None:
+    """Save -> load restores project state 1:1."""
+    import tempfile
+
+    # Create project with clips
+    p1 = Project()
+    clip1 = p1.add_path("video1.mp4")
+    clip2 = p1.add_path("video2.mp4")
+    p1.set_duration_by_path("video1.mp4", 5000)
+    p1.set_duration_by_path("video2.mp4", 3000)
+    p1.set_trim_by_path("video1.mp4", 100, 4500)
+
+    # Save to temp file
+    project_file = tmp_path / "test_project.json"
+    p1.save_to_json(str(project_file))
+
+    # Load from file
+    p2 = Project.load_from_json(str(project_file))
+
+    # Verify clips count and order
+    assert len(p2.clips()) == 2
+
+    # Verify first clip
+    clips = p2.clips()
+    assert clips[0].id == clip1.id
+    assert os.path.basename(clips[0].path) == "video1.mp4"
+    assert clips[0].in_ms == 100
+    assert clips[0].out_ms == 4500
+    assert clips[0].duration_ms == 5000
+
+    # Verify second clip
+    assert clips[1].id == clip2.id
+    assert os.path.basename(clips[1].path) == "video2.mp4"
+    assert clips[1].duration_ms == 3000
+
+
+def test_save_load_with_effects(tmp_path) -> None:
+    """Save/load preserves effect settings."""
+    p1 = Project()
+    clip = p1.add_path("video.mp4")
+    p1.set_duration_by_path("video.mp4", 1000)
+
+    # Modify effects on the clip
+    clips = p1.clips()
+    clips[0].fade_in_ms = 250
+    clips[0].fade_out_ms = 300
+    clips[0].grayscale = True
+    clips[0].speed = 1.5
+
+    # Save and load
+    project_file = tmp_path / "effects_project.json"
+    p1.save_to_json(str(project_file))
+    p2 = Project.load_from_json(str(project_file))
+
+    # Verify effects preserved
+    loaded = p2.clips()[0]
+    assert loaded.fade_in_ms == 250
+    assert loaded.fade_out_ms == 300
+    assert loaded.grayscale is True
+    assert loaded.speed == 1.5
+
+
+def test_save_load_with_split_clips(tmp_path) -> None:
+    """Save/load preserves split clips with same path."""
+    p1 = Project()
+    p1.add_path("video.mp4")
+    p1.set_duration_by_path("video.mp4", 1000)
+
+    # Split the clip
+    result = p1.split_clip_by_path("video.mp4", 500)
+    assert result is not None
+    left, right = result
+
+    # Save and load
+    project_file = tmp_path / "split_project.json"
+    p1.save_to_json(str(project_file))
+    p2 = Project.load_from_json(str(project_file))
+
+    # Verify both clips preserved
+    clips = p2.clips()
+    assert len(clips) == 2
+
+    # Verify IDs preserved
+    assert clips[0].id == left.id
+    assert clips[1].id == right.id
+
+    # Verify trim boundaries
+    assert clips[0].in_ms == 0
+    assert clips[0].out_ms == 500
+    assert clips[1].in_ms == 500
+    assert clips[1].out_ms == 1000
+
+
+def test_save_load_empty_project(tmp_path) -> None:
+    """Save/load works with empty project."""
+    p1 = Project()
+
+    project_file = tmp_path / "empty_project.json"
+    p1.save_to_json(str(project_file))
+    p2 = Project.load_from_json(str(project_file))
+
+    assert len(p2.clips()) == 0
+
+
+def test_load_checks_schema_version(tmp_path) -> None:
+    """Loading project with wrong schema version raises error."""
+    import json
+
+    project_file = tmp_path / "bad_schema.json"
+    with open(project_file, "w") as f:
+        json.dump({"schema_version": 999, "clips": []}, f)
+
+    try:
+        Project.load_from_json(str(project_file))
+        assert False, "Should have raised ValueError"
+    except ValueError as e:
+        assert "Unsupported schema version" in str(e)

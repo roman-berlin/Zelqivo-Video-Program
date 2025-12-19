@@ -255,6 +255,112 @@ def build_trim_args(
     return args
 
 
+def build_segment_with_effects_args(
+    input_path: str,
+    output_path: str,
+    start_ms: int,
+    end_ms: int,
+    fade_in_ms: int = 0,
+    fade_out_ms: int = 0,
+    grayscale: bool = False,
+    speed: float = 1.0,
+) -> List[str]:
+    """Build ffmpeg arguments for trimming with effects applied.
+
+    Effects require re-encoding, so stream copy is not used.
+
+    Args:
+        input_path: Source video path
+        output_path: Destination path
+        start_ms: Start time in milliseconds
+        end_ms: End time in milliseconds
+        fade_in_ms: Fade in duration in ms (0 = disabled)
+        fade_out_ms: Fade out duration in ms (0 = disabled)
+        grayscale: Apply grayscale filter
+        speed: Playback speed multiplier (1.0 = normal)
+
+    Returns:
+        List of ffmpeg arguments
+    """
+    # Clamp speed to reasonable range
+    speed = max(0.25, min(4.0, speed))
+
+    start_sec = start_ms / 1000.0
+    duration_sec = (end_ms - start_ms) / 1000.0
+
+    # Build filter chains
+    vfilters: List[str] = []
+    afilters: List[str] = []
+
+    # Speed filter (setpts for video, atempo for audio)
+    if speed != 1.0:
+        # setpts=PTS/speed makes video faster (speed>1) or slower (speed<1)
+        vfilters.append(f"setpts=PTS/{speed}")
+        # atempo only accepts 0.5-2.0, chain multiple for wider range
+        if speed >= 0.5 and speed <= 2.0:
+            afilters.append(f"atempo={speed}")
+        elif speed < 0.5:
+            # Chain two atempo filters for speeds < 0.5
+            afilters.append(f"atempo={speed * 2}")
+            afilters.append("atempo=0.5")
+        else:
+            # Chain two atempo filters for speeds > 2.0
+            afilters.append(f"atempo={speed / 2}")
+            afilters.append("atempo=2.0")
+
+    # Grayscale
+    if grayscale:
+        vfilters.append("format=gray")
+
+    # Calculate output duration after speed change for fades
+    output_duration_sec = duration_sec / speed
+
+    # Fade in (at start of clip)
+    if fade_in_ms > 0:
+        fade_in_sec = fade_in_ms / 1000.0
+        vfilters.append(f"fade=t=in:st=0:d={fade_in_sec:.3f}")
+        afilters.append(f"afade=t=in:st=0:d={fade_in_sec:.3f}")
+
+    # Fade out (at end of clip, based on output duration)
+    if fade_out_ms > 0:
+        fade_out_sec = fade_out_ms / 1000.0
+        fade_start = max(0, output_duration_sec - fade_out_sec)
+        vfilters.append(f"fade=t=out:st={fade_start:.3f}:d={fade_out_sec:.3f}")
+        afilters.append(f"afade=t=out:st={fade_start:.3f}:d={fade_out_sec:.3f}")
+
+    args = [
+        "ffmpeg",
+        "-y",
+        "-ss", f"{start_sec:.3f}",
+        "-i", input_path,
+        "-t", f"{duration_sec:.3f}",
+    ]
+
+    # Add video filter if any
+    if vfilters:
+        args.extend(["-vf", ",".join(vfilters)])
+
+    # Add audio filter if any
+    if afilters:
+        args.extend(["-af", ",".join(afilters)])
+
+    # Re-encode (required for filters)
+    args.extend(["-c:v", "libx264", "-preset", "fast", "-c:a", "aac"])
+    args.append(output_path)
+
+    return args
+
+
+def has_effects(
+    fade_in_ms: int = 0,
+    fade_out_ms: int = 0,
+    grayscale: bool = False,
+    speed: float = 1.0,
+) -> bool:
+    """Check if any effects are enabled that require re-encoding."""
+    return fade_in_ms > 0 or fade_out_ms > 0 or grayscale or speed != 1.0
+
+
 def build_concat_args(
     input_paths: List[str],
     output_path: str,

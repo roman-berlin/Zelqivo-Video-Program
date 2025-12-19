@@ -1,0 +1,344 @@
+# tests/test_ffprobe_ffmpeg.py
+"""Unit tests for ffprobe and ffmpeg wrappers with mocked subprocess."""
+from __future__ import annotations
+
+import json
+import subprocess
+from unittest.mock import patch, MagicMock
+
+import pytest
+
+from multicam_editor.utils import ffprobe, ffmpeg
+
+
+# Sample ffprobe JSON output
+SAMPLE_PROBE_JSON = {
+    "format": {
+        "duration": "10.500",
+        "format_name": "mov,mp4,m4a,3gp,3g2,mj2",
+    },
+    "streams": [
+        {
+            "codec_type": "video",
+            "codec_name": "h264",
+            "width": 1920,
+            "height": 1080,
+            "avg_frame_rate": "30/1",
+            "r_frame_rate": "30/1",
+        },
+        {
+            "codec_type": "audio",
+            "codec_name": "aac",
+            "sample_rate": "48000",
+            "channels": 2,
+        },
+    ],
+}
+
+
+@pytest.fixture(autouse=True)
+def reset_caches():
+    """Reset ffprobe/ffmpeg caches before each test."""
+    ffprobe.clear_cache()
+    ffprobe.reset_ffprobe_detection()
+    ffmpeg.reset_ffmpeg_detection()
+    yield
+    ffprobe.clear_cache()
+    ffprobe.reset_ffprobe_detection()
+    ffmpeg.reset_ffmpeg_detection()
+
+
+class TestFFprobe:
+    """Tests for ffprobe wrapper."""
+
+    def test_probe_success(self, tmp_path):
+        """Probe returns correct metadata from mocked ffprobe output."""
+        test_file = tmp_path / "test.mp4"
+        test_file.write_bytes(b"fake video data")
+
+        mock_result = MagicMock()
+        mock_result.returncode = 0
+        mock_result.stdout = json.dumps(SAMPLE_PROBE_JSON).encode("utf-8")
+        mock_result.stderr = b""
+
+        with patch("subprocess.run") as mock_run:
+            mock_run.return_value = mock_result
+            result = ffprobe.probe(str(test_file))
+
+        assert result.error is None
+        assert result.duration_ms == 10500
+        assert result.width == 1920
+        assert result.height == 1080
+        assert result.fps == 30.0
+        assert result.video_codec == "h264"
+        assert result.audio_codec == "aac"
+        assert result.resolution_str() == "1920x1080"
+        assert result.fps_str() == "30.00"
+
+    def test_probe_cached(self, tmp_path):
+        """Second probe call uses cache, not subprocess."""
+        test_file = tmp_path / "test.mp4"
+        test_file.write_bytes(b"fake video data")
+
+        mock_result = MagicMock()
+        mock_result.returncode = 0
+        mock_result.stdout = json.dumps(SAMPLE_PROBE_JSON).encode("utf-8")
+
+        with patch("subprocess.run") as mock_run:
+            mock_run.return_value = mock_result
+            result1 = ffprobe.probe(str(test_file))
+            result2 = ffprobe.probe(str(test_file))
+
+        # subprocess.run called once for ffprobe check, once for probe
+        # Second probe should use cache
+        assert result1.duration_ms == result2.duration_ms
+        # Should be 2 calls: 1 for _find_ffprobe, 1 for actual probe
+        assert mock_run.call_count == 2
+
+    def test_probe_file_not_found(self):
+        """Probe returns error for non-existent file."""
+        result = ffprobe.probe("/nonexistent/path/video.mp4")
+        assert result.error == "File not found"
+        assert result.duration_ms == 0
+
+    def test_probe_empty_path(self):
+        """Probe returns error for empty path."""
+        result = ffprobe.probe("")
+        assert result.error == "Empty path"
+
+    def test_probe_ffprobe_not_found(self, tmp_path):
+        """Probe returns error when ffprobe not available."""
+        test_file = tmp_path / "test.mp4"
+        test_file.write_bytes(b"fake video data")
+
+        with patch("subprocess.run") as mock_run:
+            mock_run.side_effect = FileNotFoundError("ffprobe not found")
+            result = ffprobe.probe(str(test_file))
+
+        assert result.error == "ffprobe not found"
+
+    def test_probe_invalid_json(self, tmp_path):
+        """Probe handles invalid JSON from ffprobe."""
+        test_file = tmp_path / "test.mp4"
+        test_file.write_bytes(b"fake video data")
+
+        mock_result = MagicMock()
+        mock_result.returncode = 0
+        mock_result.stdout = b"not valid json"
+
+        with patch("subprocess.run") as mock_run:
+            mock_run.return_value = mock_result
+            result = ffprobe.probe(str(test_file))
+
+        assert result.error is not None
+        assert "Invalid JSON" in result.error
+
+    def test_probe_no_duration(self, tmp_path):
+        """Probe handles files without duration."""
+        test_file = tmp_path / "test.mp4"
+        test_file.write_bytes(b"fake video data")
+
+        mock_result = MagicMock()
+        mock_result.returncode = 0
+        mock_result.stdout = json.dumps({"format": {}, "streams": []}).encode()
+
+        with patch("subprocess.run") as mock_run:
+            mock_run.return_value = mock_result
+            result = ffprobe.probe(str(test_file))
+
+        assert result.error == "No duration in file"
+
+    def test_probe_ffprobe_error(self, tmp_path):
+        """Probe handles ffprobe returning error."""
+        test_file = tmp_path / "test.mp4"
+        test_file.write_bytes(b"fake video data")
+
+        mock_result = MagicMock()
+        mock_result.returncode = 1
+        mock_result.stdout = b""
+        mock_result.stderr = b"Invalid data found"
+
+        with patch.object(ffprobe, "_find_ffprobe", return_value="ffprobe"):
+            with patch("subprocess.run") as mock_run:
+                mock_run.return_value = mock_result
+                result = ffprobe.probe(str(test_file))
+
+        assert result.error is not None
+        assert "ffprobe failed" in result.error
+
+    def test_get_duration_ms_wrapper(self, tmp_path):
+        """get_duration_ms returns duration or None on error."""
+        test_file = tmp_path / "test.mp4"
+        test_file.write_bytes(b"fake video data")
+
+        mock_result = MagicMock()
+        mock_result.returncode = 0
+        mock_result.stdout = json.dumps(SAMPLE_PROBE_JSON).encode()
+
+        with patch("subprocess.run") as mock_run:
+            mock_run.return_value = mock_result
+            duration = ffprobe.get_duration_ms(str(test_file))
+
+        assert duration == 10500
+
+        # Test None return on error
+        assert ffprobe.get_duration_ms("/nonexistent") is None
+
+    def test_fps_parsing_fraction(self, tmp_path):
+        """FPS parsing handles fractional rates like 30000/1001."""
+        test_file = tmp_path / "test.mp4"
+        test_file.write_bytes(b"fake video data")
+
+        probe_json = {
+            "format": {"duration": "5.0"},
+            "streams": [{"codec_type": "video", "codec_name": "h264",
+                        "avg_frame_rate": "30000/1001", "width": 1280, "height": 720}]
+        }
+        mock_result = MagicMock()
+        mock_result.returncode = 0
+        mock_result.stdout = json.dumps(probe_json).encode()
+
+        with patch("subprocess.run") as mock_run:
+            mock_run.return_value = mock_result
+            result = ffprobe.probe(str(test_file))
+
+        assert result.fps is not None
+        assert abs(result.fps - 29.97) < 0.01
+
+
+class TestFFmpeg:
+    """Tests for ffmpeg wrapper."""
+
+    def test_is_ffmpeg_available(self):
+        """is_ffmpeg_available returns bool."""
+        with patch("subprocess.run") as mock_run:
+            mock_result = MagicMock()
+            mock_result.returncode = 0
+            mock_run.return_value = mock_result
+            assert ffmpeg.is_ffmpeg_available() is True
+
+    def test_ffmpeg_not_available(self):
+        """is_ffmpeg_available returns False when not found."""
+        with patch("subprocess.run") as mock_run:
+            mock_run.side_effect = FileNotFoundError()
+            assert ffmpeg.is_ffmpeg_available() is False
+
+    def test_build_trim_args(self):
+        """build_trim_args creates correct command."""
+        args = ffmpeg.build_trim_args(
+            "/input.mp4", "/output.mp4",
+            start_ms=5000, end_ms=10000, copy_codec=True
+        )
+        assert "ffmpeg" in args
+        assert "-ss" in args
+        assert "5.000" in args
+        assert "-t" in args
+        assert "5.000" in args
+        assert "-c" in args
+        assert "copy" in args
+
+    def test_build_trim_args_reencode(self):
+        """build_trim_args with re-encode uses libx264."""
+        args = ffmpeg.build_trim_args(
+            "/input.mp4", "/output.mp4",
+            start_ms=0, end_ms=1000, copy_codec=False
+        )
+        assert "libx264" in args
+
+    def test_build_concat_args(self):
+        """build_concat_args creates correct command."""
+        args = ffmpeg.build_concat_args(
+            ["/a.mp4", "/b.mp4"], "/out.mp4", "/list.txt"
+        )
+        assert "-f" in args
+        assert "concat" in args
+        assert "/list.txt" in args
+
+    def test_create_concat_list(self, tmp_path):
+        """create_concat_list writes proper format."""
+        list_file = tmp_path / "list.txt"
+        ffmpeg.create_concat_list(
+            ["/path/to/video1.mp4", "/path/to/video2.mp4"],
+            str(list_file)
+        )
+        content = list_file.read_text()
+        assert "file '/path/to/video1.mp4'" in content
+        assert "file '/path/to/video2.mp4'" in content
+
+    def test_get_temp_output_path(self):
+        """get_temp_output_path returns valid path."""
+        path = ffmpeg.get_temp_output_path(".mp4")
+        assert path.endswith(".mp4")
+        assert "multicam_" in path
+
+    def test_run_ffmpeg_success(self, tmp_path):
+        """run_ffmpeg returns success result."""
+        output = tmp_path / "output.mp4"
+
+        with patch.object(ffmpeg, "_find_ffmpeg", return_value="ffmpeg"):
+            with patch("subprocess.Popen") as mock_popen:
+                mock_proc = MagicMock()
+                mock_proc.communicate.return_value = (b"", b"")
+                mock_proc.returncode = 0
+                mock_popen.return_value = mock_proc
+
+                result = ffmpeg.run_ffmpeg(
+                    ["ffmpeg", "-i", "input.mp4", str(output)],
+                    str(output)
+                )
+
+        assert result.success is True
+        assert result.error is None
+
+    def test_run_ffmpeg_failure(self):
+        """run_ffmpeg returns error on failure."""
+        with patch.object(ffmpeg, "_find_ffmpeg", return_value="ffmpeg"):
+            with patch("subprocess.Popen") as mock_popen:
+                mock_proc = MagicMock()
+                mock_proc.communicate.return_value = (b"", b"Error message")
+                mock_proc.returncode = 1
+                mock_popen.return_value = mock_proc
+
+                result = ffmpeg.run_ffmpeg(["ffmpeg", "-i", "bad.mp4", "out.mp4"])
+
+        assert result.success is False
+        assert result.error is not None
+
+    def test_ffmpeg_process_cancel(self, tmp_path):
+        """FFmpegProcess.cancel terminates process."""
+        output = tmp_path / "output.mp4"
+
+        with patch("subprocess.Popen") as mock_popen:
+            mock_proc = MagicMock()
+            mock_proc.communicate.return_value = (b"", b"")
+            mock_proc.returncode = 0
+            mock_popen.return_value = mock_proc
+
+            proc = ffmpeg.FFmpegProcess(["ffmpeg", "-i", "in.mp4"], str(output))
+            proc.cancel()
+
+        assert proc._cancelled is True
+
+
+class TestProbeResult:
+    """Tests for ProbeResult dataclass methods."""
+
+    def test_resolution_str_empty(self):
+        """resolution_str returns empty when no dimensions."""
+        result = ffprobe.ProbeResult(duration_ms=1000)
+        assert result.resolution_str() == ""
+
+    def test_fps_str_empty(self):
+        """fps_str returns empty when no fps."""
+        result = ffprobe.ProbeResult(duration_ms=1000)
+        assert result.fps_str() == ""
+
+    def test_resolution_str_valid(self):
+        """resolution_str returns WxH format."""
+        result = ffprobe.ProbeResult(duration_ms=1000, width=1920, height=1080)
+        assert result.resolution_str() == "1920x1080"
+
+    def test_fps_str_valid(self):
+        """fps_str returns formatted fps."""
+        result = ffprobe.ProbeResult(duration_ms=1000, fps=29.97)
+        assert result.fps_str() == "29.97"

@@ -4,14 +4,18 @@ from __future__ import annotations
 
 from PyQt6.QtCore import QSettings
 from PyQt6.QtWidgets import (
+    QCheckBox,
     QDialog,
     QDialogButtonBox,
+    QDoubleSpinBox,
     QFormLayout,
     QSpinBox,
     QComboBox,
     QVBoxLayout,
     QGroupBox,
 )
+
+from multicam_editor.core.project import AudioMixMode, AudioMixSettings
 
 
 class SettingsDialog(QDialog):
@@ -78,6 +82,43 @@ class SettingsDialog(QDialog):
         diarization_group.setLayout(diarization_layout)
         layout.addWidget(diarization_group)
 
+        # Audio Mix Settings Group
+        audio_group = QGroupBox("Audio Mix (External Audio)")
+        audio_layout = QFormLayout()
+
+        self.combo_audio_mode = QComboBox()
+        self.combo_audio_mode.addItems(["Replace", "Mix"])
+        self.combo_audio_mode.currentTextChanged.connect(self._on_audio_mode_changed)
+        audio_layout.addRow("Mode:", self.combo_audio_mode)
+
+        self.spin_video_gain = QDoubleSpinBox()
+        self.spin_video_gain.setRange(-60.0, 12.0)
+        self.spin_video_gain.setSingleStep(1.0)
+        self.spin_video_gain.setSuffix(" dB")
+        self.spin_video_gain.setDecimals(1)
+        audio_layout.addRow("Video Audio Gain:", self.spin_video_gain)
+
+        self.spin_external_gain = QDoubleSpinBox()
+        self.spin_external_gain.setRange(-60.0, 12.0)
+        self.spin_external_gain.setSingleStep(1.0)
+        self.spin_external_gain.setSuffix(" dB")
+        self.spin_external_gain.setDecimals(1)
+        audio_layout.addRow("External Audio Gain:", self.spin_external_gain)
+
+        self.check_ducking = QCheckBox()
+        self.check_ducking.toggled.connect(self._on_ducking_toggled)
+        audio_layout.addRow("Enable Ducking:", self.check_ducking)
+
+        self.spin_ducking_amount = QDoubleSpinBox()
+        self.spin_ducking_amount.setRange(-60.0, 0.0)
+        self.spin_ducking_amount.setSingleStep(1.0)
+        self.spin_ducking_amount.setSuffix(" dB")
+        self.spin_ducking_amount.setDecimals(1)
+        audio_layout.addRow("Ducking Amount:", self.spin_ducking_amount)
+
+        audio_group.setLayout(audio_layout)
+        layout.addWidget(audio_group)
+
         # Dialog buttons
         buttons = QDialogButtonBox(
             QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel
@@ -85,6 +126,20 @@ class SettingsDialog(QDialog):
         buttons.accepted.connect(self._save_and_accept)
         buttons.rejected.connect(self.reject)
         layout.addWidget(buttons)
+
+    def _on_audio_mode_changed(self, mode_text: str) -> None:
+        """Update UI state based on audio mode selection."""
+        is_mix = mode_text == "Mix"
+        # Video gain only matters in Mix mode
+        self.spin_video_gain.setEnabled(is_mix)
+        # Ducking only available in Mix mode
+        self.check_ducking.setEnabled(is_mix)
+        self.spin_ducking_amount.setEnabled(is_mix and self.check_ducking.isChecked())
+
+    def _on_ducking_toggled(self, checked: bool) -> None:
+        """Enable/disable ducking amount based on checkbox."""
+        is_mix = self.combo_audio_mode.currentText() == "Mix"
+        self.spin_ducking_amount.setEnabled(is_mix and checked)
 
     def _load_settings(self) -> None:
         """Load current settings from QSettings."""
@@ -104,6 +159,24 @@ class SettingsDialog(QDialog):
             self.settings.value("diarization/backend", "mock", type=str)
         )
 
+        # Audio mix settings
+        audio_mode = self.settings.value("audio_mix/mode", "Replace", type=str)
+        self.combo_audio_mode.setCurrentText(audio_mode)
+        self.spin_video_gain.setValue(
+            self.settings.value("audio_mix/video_gain_db", 0.0, type=float)
+        )
+        self.spin_external_gain.setValue(
+            self.settings.value("audio_mix/external_gain_db", 0.0, type=float)
+        )
+        self.check_ducking.setChecked(
+            self.settings.value("audio_mix/ducking_enabled", False, type=bool)
+        )
+        self.spin_ducking_amount.setValue(
+            self.settings.value("audio_mix/ducking_amount_db", -12.0, type=float)
+        )
+        # Apply initial UI state
+        self._on_audio_mode_changed(audio_mode)
+
     def _save_and_accept(self) -> None:
         """Save settings to QSettings and accept dialog."""
         self.settings.setValue(
@@ -118,4 +191,37 @@ class SettingsDialog(QDialog):
         self.settings.setValue("output/quality", self.combo_quality.currentText())
         self.settings.setValue("diarization/backend", self.combo_diarization.currentText())
 
+        # Audio mix settings
+        self.settings.setValue("audio_mix/mode", self.combo_audio_mode.currentText())
+        self.settings.setValue("audio_mix/video_gain_db", self.spin_video_gain.value())
+        self.settings.setValue("audio_mix/external_gain_db", self.spin_external_gain.value())
+        self.settings.setValue("audio_mix/ducking_enabled", self.check_ducking.isChecked())
+        self.settings.setValue("audio_mix/ducking_amount_db", self.spin_ducking_amount.value())
+
         self.accept()
+
+    def get_audio_mix_settings(self) -> AudioMixSettings:
+        """Return current audio mix settings from the dialog."""
+        mode_text = self.combo_audio_mode.currentText()
+        mode = AudioMixMode.MIX if mode_text == "Mix" else AudioMixMode.REPLACE
+        return AudioMixSettings(
+            mode=mode,
+            video_gain_db=self.spin_video_gain.value(),
+            external_gain_db=self.spin_external_gain.value(),
+            ducking_enabled=self.check_ducking.isChecked(),
+            ducking_amount_db=self.spin_ducking_amount.value(),
+        ).clamp_gains()
+
+
+def get_audio_mix_settings() -> AudioMixSettings:
+    """Load audio mix settings from QSettings (standalone helper)."""
+    settings = QSettings("MultiCamEditor", "MultiCamEditor")
+    mode_text = settings.value("audio_mix/mode", "Replace", type=str)
+    mode = AudioMixMode.MIX if mode_text == "Mix" else AudioMixMode.REPLACE
+    return AudioMixSettings(
+        mode=mode,
+        video_gain_db=settings.value("audio_mix/video_gain_db", 0.0, type=float),
+        external_gain_db=settings.value("audio_mix/external_gain_db", 0.0, type=float),
+        ducking_enabled=settings.value("audio_mix/ducking_enabled", False, type=bool),
+        ducking_amount_db=settings.value("audio_mix/ducking_amount_db", -12.0, type=float),
+    ).clamp_gains()

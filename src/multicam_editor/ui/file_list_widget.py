@@ -115,6 +115,18 @@ class FileListWidget(QWidget):
             self._append_item(p)
         self.videoCountChanged.emit(self._video_count)
 
+    def sync_from_paths(self, paths: list[str]) -> None:
+        """Rebuild the list to exactly match given paths (for undo/redo sync).
+
+        Unlike reorder_to_paths, this allows adding new paths not currently present.
+        """
+        self._model.removeRows(0, self._model.rowCount())
+        self._path_set.clear()
+        self._video_count = 0
+        for p in paths:
+            self._append_item(p)
+        self.videoCountChanged.emit(self._video_count)
+
     def selected_path(self) -> str | None:
         idx: QModelIndex = self._view.currentIndex()
         if not idx.isValid():

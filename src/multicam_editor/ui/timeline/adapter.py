@@ -112,22 +112,26 @@ class TimelineAdapter:
         for c in clips:
             by_path.setdefault(c.path, []).append(c)
         new_clips: list[Clip] = []
-        seen: set[Clip] = set()
+        seen: set[str] = set()
         for p in paths:
             lst = by_path.get(p)
             if not lst:
                 continue
             for c in lst:
-                if c not in seen:
+                if c.id not in seen:
                     new_clips.append(c)
-                    seen.add(c)
+                    seen.add(c.id)
         # Append any remaining clips that were not specified
         for c in clips:
-            if c not in seen:
+            if c.id not in seen:
                 new_clips.append(c)
 
         # Get new order as clip IDs
         new_order_ids = [clip.id for clip in new_clips]
+
+        # Skip if order unchanged (avoids infinite recursion from refresh)
+        if old_order == new_order_ids:
+            return
 
         # Use command if undo_stack available
         if self.undo_stack:

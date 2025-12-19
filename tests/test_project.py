@@ -192,3 +192,97 @@ def test_no_duplicate_clips_on_add() -> None:
     clip2 = p.add_path("v.mp4")
     assert clip2 is None
     assert len(p.clips()) == 1
+
+
+# ============== TrimCommand Undo/Redo Tests (Prompt 4a.4) ==============
+
+
+def test_trim_command_undo_redo() -> None:
+    """TrimCommand undo restores previous in/out, redo reapplies."""
+    from PyQt6.QtGui import QUndoStack
+    from multicam_editor.logic.commands import TrimCommand
+
+    p = Project()
+    p.add_path("v.mp4")
+    p.set_duration_by_path("v.mp4", 1000)
+    p.set_trim_by_path("v.mp4", 0, 1000)  # initial state
+
+    stack = QUndoStack()
+    cmd = TrimCommand(p, "v.mp4", 0, 1000, 100, 900)
+    stack.push(cmd)
+
+    # After push, trim should be updated
+    assert p.get_trim_by_path("v.mp4") == (100, 900)
+
+    # Undo restores original
+    stack.undo()
+    assert p.get_trim_by_path("v.mp4") == (0, 1000)
+
+    # Redo reapplies
+    stack.redo()
+    assert p.get_trim_by_path("v.mp4") == (100, 900)
+
+
+def test_trim_command_coalesces_multiple_drags() -> None:
+    """Multiple TrimCommands on same clip coalesce into one undo operation."""
+    from PyQt6.QtGui import QUndoStack
+    from multicam_editor.logic.commands import TrimCommand
+
+    p = Project()
+    p.add_path("v.mp4")
+    p.set_duration_by_path("v.mp4", 1000)
+    p.set_trim_by_path("v.mp4", 0, 1000)  # initial
+
+    stack = QUndoStack()
+
+    # Simulate dragging: multiple small adjustments
+    cmd1 = TrimCommand(p, "v.mp4", 0, 1000, 50, 1000)
+    stack.push(cmd1)
+    assert p.get_trim_by_path("v.mp4") == (50, 1000)
+
+    cmd2 = TrimCommand(p, "v.mp4", 50, 1000, 100, 1000)
+    stack.push(cmd2)
+    assert p.get_trim_by_path("v.mp4") == (100, 1000)
+
+    cmd3 = TrimCommand(p, "v.mp4", 100, 1000, 150, 900)
+    stack.push(cmd3)
+    assert p.get_trim_by_path("v.mp4") == (150, 900)
+
+    # Only ONE undo should restore to original (coalesced)
+    stack.undo()
+    assert p.get_trim_by_path("v.mp4") == (0, 1000)
+
+    # Stack should have only 1 command (merged)
+    assert stack.count() == 1
+
+
+def test_trim_command_different_clips_not_coalesced() -> None:
+    """TrimCommands on different clips are NOT coalesced."""
+    from PyQt6.QtGui import QUndoStack
+    from multicam_editor.logic.commands import TrimCommand
+
+    p = Project()
+    p.add_path("a.mp4")
+    p.add_path("b.mp4")
+    p.set_duration_by_path("a.mp4", 1000)
+    p.set_duration_by_path("b.mp4", 1000)
+
+    stack = QUndoStack()
+
+    cmd1 = TrimCommand(p, "a.mp4", 0, 1000, 100, 900)
+    stack.push(cmd1)
+
+    cmd2 = TrimCommand(p, "b.mp4", 0, 1000, 200, 800)
+    stack.push(cmd2)
+
+    # Two separate commands (not merged)
+    assert stack.count() == 2
+
+    # Undo first one
+    stack.undo()
+    assert p.get_trim_by_path("b.mp4") == (0, 1000)
+    assert p.get_trim_by_path("a.mp4") == (100, 900)
+
+    # Undo second
+    stack.undo()
+    assert p.get_trim_by_path("a.mp4") == (0, 1000)

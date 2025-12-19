@@ -219,7 +219,8 @@ class TrimPanel(QWidget):
                 self._project,
                 self._path,
                 ms,
-                refresh_callback=self._adapter.refresh_from_project if self._adapter else None
+                refresh_callback=self._adapter.refresh_from_project if self._adapter else None,
+                adapter=self._adapter
             )
             self._undo_stack.push(cmd)
             # Get result from command

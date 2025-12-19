@@ -4,7 +4,95 @@ from typing import List, Optional
 
 from PyQt6.QtCore import Qt, QRectF, pyqtSignal, QPointF
 from PyQt6.QtGui import QBrush, QPen, QPainter, QColor, QFont, QFontMetrics
-from PyQt6.QtWidgets import QGraphicsScene, QGraphicsView, QGraphicsRectItem, QGraphicsItem
+from PyQt6.QtWidgets import QGraphicsScene, QGraphicsView, QGraphicsRectItem, QGraphicsItem, QGraphicsLineItem, QToolTip
+
+
+# ------------------------------- CutMarkerItem -----------------------------
+class CutMarkerItem(QGraphicsLineItem):
+    """Visual marker for cut plan boundaries with camera label."""
+
+    def __init__(self, x_pos: float, start_ms: int, end_ms: int, camera_id: int, parent=None):
+        super().__init__(x_pos, 0, x_pos, ClipItem.HEIGHT, parent)
+        self.setAcceptHoverEvents(True)
+        self.x_pos = x_pos
+        self.start_ms = start_ms
+        self.end_ms = end_ms
+        self.camera_id = camera_id
+        self._hovered = False
+
+        # Visual style
+        pen = QPen(QColor(255, 180, 50), 2)
+        self.setPen(pen)
+        self.setZValue(10)  # Above clips
+
+    def hoverEnterEvent(self, event):  # type: ignore[override]
+        self._hovered = True
+        # Make line thicker on hover
+        pen = QPen(QColor(255, 200, 80), 3)
+        self.setPen(pen)
+        # Show tooltip
+        timecode = self._format_timecode(self.start_ms)
+        tooltip = f"Cut at {timecode}\nCamera: {self.camera_id}"
+        QToolTip.showText(event.screenPos(), tooltip)
+        super().hoverEnterEvent(event)
+
+    def hoverLeaveEvent(self, event):  # type: ignore[override]
+        self._hovered = False
+        pen = QPen(QColor(255, 180, 50), 2)
+        self.setPen(pen)
+        QToolTip.hideText()
+        super().hoverLeaveEvent(event)
+
+    def mousePressEvent(self, event):  # type: ignore[override]
+        # Emit signal to scene for seek
+        scene = self.scene()
+        if isinstance(scene, TimelineScene):
+            scene.cutMarkerClicked.emit(self.start_ms)
+        event.accept()
+
+    @staticmethod
+    def _format_timecode(ms: int) -> str:
+        """Format milliseconds as MM:SS.mmm"""
+        if ms <= 0:
+            return "00:00.000"
+        total_sec = ms / 1000
+        m, s = divmod(int(total_sec), 60)
+        millis = int((total_sec - int(total_sec)) * 1000)
+        return f"{m:02d}:{int(s):02d}.{millis:03d}"
+
+    def paint(self, painter: QPainter, option, widget=None):  # type: ignore[override]
+        # Draw marker line
+        super().paint(painter, option, widget)
+
+        # Draw camera label
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        font = QFont("Segoe UI", 9, QFont.Weight.Bold)
+        painter.setFont(font)
+
+        # Label background
+        label_text = f"Cam {self.camera_id}"
+        fm = QFontMetrics(font)
+        text_width = fm.horizontalAdvance(label_text)
+        text_height = fm.height()
+
+        label_rect = QRectF(
+            self.x_pos + 4,
+            5,
+            text_width + 8,
+            text_height + 4
+        )
+
+        painter.setBrush(QBrush(QColor(255, 180, 50, 200)))
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.drawRoundedRect(label_rect, 3, 3)
+
+        # Label text
+        painter.setPen(QColor(20, 20, 20))
+        painter.drawText(
+            int(label_rect.x() + 4),
+            int(label_rect.y() + text_height),
+            label_text
+        )
 
 
 # ------------------------------- ClipItem ----------------------------------
@@ -101,11 +189,15 @@ class TimelineScene(QGraphicsScene):
     # of the item so that callers can mirror selection and start playback.
     clipActivated = pyqtSignal(str)
 
+    # Emitted when a cut marker is clicked. Provides timestamp in ms for seek.
+    cutMarkerClicked = pyqtSignal(int)
+
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setSceneRect(0, 0, 12000, ClipItem.HEIGHT)
         self._grid_px = 80
         self._clips: List[ClipItem] = []
+        self._cut_markers: List[CutMarkerItem] = []
         self._last_clicked: Optional[ClipItem] = None
         self._enforcing_selection: bool = False  # reentrancy guard
         self.selectionChanged.connect(self._enforce_single_selection)
@@ -184,8 +276,49 @@ class TimelineScene(QGraphicsScene):
                     self.removeItem(c)
                 except Exception:
                     pass
+            self._clear_cut_markers()
         finally:
             self.blockSignals(blocked)
+
+    def _clear_cut_markers(self) -> None:
+        """Remove all cut markers from the scene."""
+        while self._cut_markers:
+            marker = self._cut_markers.pop()
+            try:
+                self.removeItem(marker)
+            except Exception:
+                pass
+
+    def set_cut_plan(self, cut_segments: List) -> None:
+        """Draw cut markers based on cut plan segments.
+
+        Args:
+            cut_segments: List of CutSegment objects with start_ms, end_ms, camera_id
+        """
+        # Clear existing markers
+        self._clear_cut_markers()
+
+        if not cut_segments:
+            return
+
+        # Simple visualization: place markers at proportional positions
+        # Assume timeline width represents total duration
+        # Get max time from cut segments
+        max_time_ms = max(seg.end_ms for seg in cut_segments) if cut_segments else 0
+        if max_time_ms <= 0:
+            return
+
+        # Use scene width for positioning
+        scene_width = self.sceneRect().width()
+
+        # Draw marker for each cut boundary (except first at 0)
+        for seg in cut_segments:
+            if seg.start_ms > 0:  # Skip marker at time 0
+                # Calculate x position proportionally
+                x_pos = (seg.start_ms / max_time_ms) * scene_width
+                marker = CutMarkerItem(x_pos, seg.start_ms, seg.end_ms, seg.camera_id)
+                self.addItem(marker)
+                self._cut_markers.append(marker)
 
     def add_clip(self, path: str, title: Optional[str] = None):
         width = 420.0  # wider boxes

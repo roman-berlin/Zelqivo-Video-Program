@@ -214,11 +214,11 @@ class MainWindow(QMainWindow):
                 logger.warning("Failed to connect preview.durationKnown signal", exc_info=True)
 
         # scene reorder → adapter (only if your scene exposes this)
-        if hasattr(self.timeline_scene, "requestReorder"):
+        if hasattr(self.timeline_scene, "orderChanged"):
             try:
-                self.timeline_scene.requestReorder.connect(self.timeline_adapter.on_request_reorder)
+                self.timeline_scene.orderChanged.connect(self.timeline_adapter.on_request_reorder)
             except Exception:
-                logger.warning("Failed to connect timeline_scene.requestReorder signal", exc_info=True)
+                logger.warning("Failed to connect timeline_scene.orderChanged signal", exc_info=True)
 
         # file list changes
         self.file_list.filesAdded.connect(self._on_files_added)
@@ -363,9 +363,8 @@ class MainWindow(QMainWindow):
         clips = self.project.clips()
         if hasattr(self, "file_list"):
             try:
-                self.file_list.clear()
-                for clip in clips:
-                    self.file_list.addItem(clip.display_title())
+                paths = [clip.path for clip in clips]
+                self.file_list.sync_from_paths(paths)
             except Exception:
                 logger.debug("Failed to sync file list with project", exc_info=True)
 

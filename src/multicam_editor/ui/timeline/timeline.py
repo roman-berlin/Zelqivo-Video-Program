@@ -4,7 +4,7 @@ from typing import List, Optional
 
 from PyQt6.QtCore import Qt, QRectF, pyqtSignal, QPointF
 from PyQt6.QtGui import QBrush, QPen, QPainter, QColor, QFont, QFontMetrics
-from PyQt6.QtWidgets import QGraphicsScene, QGraphicsView, QGraphicsRectItem
+from PyQt6.QtWidgets import QGraphicsScene, QGraphicsView, QGraphicsRectItem, QGraphicsItem
 
 
 # ------------------------------- ClipItem ----------------------------------
@@ -60,9 +60,13 @@ class ClipItem(QGraphicsRectItem):
         super().mouseDoubleClickEvent(event)
 
     def itemChange(self, change, value):  # type: ignore[override]
-        if change == QGraphicsRectItem.GraphicsItemChange.ItemPositionChange and isinstance(value, QPointF):
-            return type(value)(max(0.0, float(value.x())), 0.0)  # lock Y to 0
-        return super().itemChange(change, value)
+        # Lock Y to 0 when position changes
+        try:
+            if int(change) == int(QGraphicsItem.GraphicsItemChange.ItemPositionChange) and isinstance(value, QPointF):
+                return QPointF(max(0.0, float(value.x())), 0.0)
+        except (TypeError, ValueError):
+            pass
+        return value
 
     def mouseReleaseEvent(self, event):  # type: ignore[override]
         snapped_x = round(self.x() / self._grid_px) * self._grid_px

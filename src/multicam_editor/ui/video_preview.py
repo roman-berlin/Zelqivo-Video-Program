@@ -1,5 +1,7 @@
 # file: ui/video_preview.py
 from __future__ import annotations
+import logging
+import threading
 from typing import Optional
 
 from PyQt6.QtCore import QUrl, Qt, QTimer, pyqtSignal
@@ -10,6 +12,8 @@ from PyQt6.QtWidgets import (
 )
 
 # Note: QMediaPlayer/QAudioOutput imported lazily to avoid early native crashes.
+
+logger = logging.getLogger(__name__)
 
 
 class VideoPreview(QWidget):
@@ -36,6 +40,10 @@ class VideoPreview(QWidget):
         self._ui_pos_ms: int = 0
         self._MAX_STEP_MS: int = 40
         self._always_restart_on_play: bool = True  # set False to resume instead
+
+        # Fallback timer for ffprobe duration when QMediaPlayer fails
+        self._fallback_timer: Optional[QTimer] = None
+        self._fallback_path: Optional[str] = None
 
         self._tick = QTimer(self); self._tick.setInterval(16)
         self._tick.timeout.connect(self._update_ui_from_player); self._tick.start()
@@ -111,6 +119,10 @@ class VideoPreview(QWidget):
         assert self._player is not None
         self._player.setSource(QUrl.fromLocalFile(path))
         self._player.play()
+
+        # Start fallback timer to check if QMediaPlayer reports duration
+        # If not, use ffprobe to get duration
+        self._start_duration_fallback(path)
 
     def current_position_ms(self) -> int:
         return int(self._player.position()) if self._player else 0
@@ -306,3 +318,70 @@ class VideoPreview(QWidget):
         if h:
             return f"{h:02d}:{m:02d}:{s:02d}"
         return f"{m:02d}:{s:02d}"
+
+    # --- ffprobe duration fallback ---
+    def _start_duration_fallback(self, path: str) -> None:
+        """Start a timer to check if QMediaPlayer reports duration.
+
+        If duration is still 0 after timeout, use ffprobe as fallback.
+        """
+        # Cancel any existing fallback timer
+        if self._fallback_timer is not None:
+            self._fallback_timer.stop()
+            self._fallback_timer = None
+
+        self._fallback_path = path
+        self._fallback_timer = QTimer(self)
+        self._fallback_timer.setSingleShot(True)
+        self._fallback_timer.timeout.connect(self._check_duration_fallback)
+        self._fallback_timer.start(800)  # Check after 800ms
+
+    def _check_duration_fallback(self) -> None:
+        """Check if duration was reported; if not, use ffprobe."""
+        path = self._fallback_path
+        self._fallback_timer = None
+        self._fallback_path = None
+
+        # If duration already known or path changed, skip
+        if not path or path != self._source_path:
+            return
+        if self._duration_ms > 0:
+            return  # QMediaPlayer reported duration, no fallback needed
+
+        # Run ffprobe in background thread to avoid UI freeze
+        def probe_in_thread():
+            try:
+                from ..utils.ffprobe import get_duration_ms
+                duration = get_duration_ms(path)
+            except Exception as e:
+                logger.debug(f"ffprobe import/call failed: {e}")
+                duration = None
+            # Post result back to GUI thread
+            QTimer.singleShot(0, lambda: self._on_ffprobe_result(path, duration))
+
+        thread = threading.Thread(target=probe_in_thread, daemon=True)
+        thread.start()
+
+    def _on_ffprobe_result(self, path: str, duration_ms: Optional[int]) -> None:
+        """Handle ffprobe result on GUI thread."""
+        # Verify path still matches current source
+        if path != self._source_path:
+            return
+        # If QMediaPlayer reported duration in the meantime, skip
+        if self._duration_ms > 0:
+            return
+
+        if duration_ms is None or duration_ms <= 0:
+            logger.debug(f"ffprobe fallback failed for {path}")
+            return
+
+        # Apply duration from ffprobe
+        logger.debug(f"Using ffprobe duration for {path}: {duration_ms}ms")
+        self._duration_ms = duration_ms
+        self.slider.setRange(0, duration_ms)
+        self.lbl_dur.setText(self._fmt_time(duration_ms))
+
+        # Emit durationKnown if not already emitted for this path
+        if self._duration_emitted_for != path:
+            self._duration_emitted_for = path
+            self.durationKnown.emit(duration_ms)

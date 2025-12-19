@@ -100,9 +100,19 @@ python -m pip install build
 python -m build
 ```
 
-Artifacts will be placed in the `dist/` directory.  Building a standalone
-Windows executable via PyInstaller is out of scope for this refactoring,
-but the `main.py` entry point remains compatible with PyInstaller.
+Artifacts will be placed in the `dist/` directory.
+
+#### Building Windows Executable
+
+To build a standalone Windows executable:
+
+```bash
+pip install pyinstaller
+pyinstaller multicam_editor.spec
+```
+
+The executable and all dependencies will be in `dist/MulticamEditor/`.
+Run `MulticamEditor.exe` to launch the application.
 
 ### License
 

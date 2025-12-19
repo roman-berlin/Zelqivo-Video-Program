@@ -10,7 +10,7 @@ class ProcessingSignals(QObject):
     # so that static analysis tools correctly recognise the PyQt signal
     # objects and their ``connect`` methods. Each signal takes a single
     # argument corresponding to the type of value it emits.
-    progress = pyqtSignal(int)
-    finished = pyqtSignal(str)
-    error = pyqtSignal(str)
-
+    progress = pyqtSignal(int)  # overall percent 0-100
+    finished = pyqtSignal(str)  # output path
+    error = pyqtSignal(str)     # error message
+    stage = pyqtSignal(str, int, str)  # stage_name, stage_percent, message

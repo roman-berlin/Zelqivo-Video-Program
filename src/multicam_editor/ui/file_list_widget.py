@@ -147,6 +147,39 @@ class FileListWidget(QWidget):
                 self._view.scrollTo(idx)
                 return
 
+    def add_result_file(self, path: str, label: str = "🎬 Final Output") -> None:
+        """Add a result file to the list without counting against video cap.
+
+        This is used for auto-loading exported/merged videos for preview
+        without affecting the 10-video import limit.
+
+        Args:
+            path: Absolute path to the result video file
+            label: Display label prefix (default: "🎬 Final Output")
+        """
+        if not path or path in self._path_set:
+            return
+
+        base = file_utils.safe_basename(path)
+        display_text = f"{label}: {base}"
+
+        # Probe for metadata
+        result = probe(path)
+        if not result.error and result.duration_ms > 0:
+            secs = result.duration_ms // 1000
+            mins, secs = divmod(secs, 60)
+            display_text = f"{label}: {base}  [{mins}:{secs:02d}]"
+
+        item = QStandardItem(display_text)
+        item.setEditable(False)
+        item.setToolTip(f"Result: {path}")
+        item.setData(path, Qt.ItemDataRole.UserRole)
+        # Mark as result (non-counting) via a custom role
+        item.setData(True, Qt.ItemDataRole.UserRole + 1)
+        self._model.appendRow(item)
+        self._path_set.add(path)
+        # Note: _video_count NOT incremented - this doesn't count against cap
+
     # ------------------------ Drag & Drop ------------------------
     def dragEnterEvent(self, e):  # type: ignore[override]
         if self._has_supported_urls(e.mimeData()):

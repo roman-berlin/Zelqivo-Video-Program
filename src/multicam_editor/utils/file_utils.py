@@ -3,9 +3,9 @@ from __future__ import annotations
 import os
 from typing import Iterable, List, Tuple
 
-# Extensions
-VIDEO_EXTS = {".mp4", ".avi", ".mov"}
-AUDIO_EXTS = {".mp3", ".wav"}
+# Extensions - common video formats supported by ffmpeg/OpenCV
+VIDEO_EXTS = {".mp4", ".avi", ".mov", ".mkv", ".webm", ".m4v", ".flv", ".wmv"}
+AUDIO_EXTS = {".mp3", ".wav", ".flac", ".ogg", ".aac", ".m4a"}
 
 
 def is_video(path: str) -> bool:
@@ -36,7 +36,7 @@ def normalize_paths(paths: Iterable[str]) -> List[str]:
 
 
 def dialog_filter_videos() -> str:
-    return "Video Files (*.mp4 *.avi *.mov)"
+    return "Video Files (*.mp4 *.avi *.mov *.mkv *.webm *.m4v *.flv *.wmv)"
 
 
 def split_by_type(paths: Iterable[str]) -> Tuple[List[str], List[str]]:

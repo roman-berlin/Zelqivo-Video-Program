@@ -20,6 +20,7 @@ from ..utils.ffprobe import probe, ProbeResult
 from ..utils.signals import ProcessingSignals
 from .active_speaker import ActiveSpeakerDetector, SpeakerSegment
 from .decision_engine import DecisionEngine, CutSegment
+from .qa_artifacts import QAArtifactExporter
 from .video_merger import SegmentRenderer, CutDefinition, concatenate_segments
 
 logger = logging.getLogger(__name__)
@@ -105,6 +106,9 @@ class ProcessingPipeline:
         self._probe_results: List[ProbeResult] = []
         self._speaker_segments: List[SpeakerSegment] = []
         self._cut_plan: List[CutSegment] = []
+
+        # QA artifacts exporter
+        self._qa_exporter = QAArtifactExporter()
 
     def cancel(self) -> None:
         """Cancel the pipeline from any thread."""
@@ -197,6 +201,9 @@ class ProcessingPipeline:
         self._pipeline_start_time = time.time()
         self._cancelled = False
 
+        # Start QA artifact collection
+        self._qa_exporter.start_run()
+
         try:
             # Stage 1: Probe all input files
             if not self._stage_probe():
@@ -251,6 +258,9 @@ class ProcessingPipeline:
             self._advance_stage(PipelineStage.DONE)
             self._emit_progress(100, "Processing complete!")
 
+            # Finalize QA artifacts
+            self._qa_exporter.finalize()
+
             total_time = time.time() - self._pipeline_start_time
             logger.info("Pipeline completed in %.1fs: %s", total_time, final_path)
 
@@ -304,6 +314,9 @@ class ProcessingPipeline:
                 num_channels=num_cameras,
             )
 
+            # Record for QA artifacts
+            self._qa_exporter.set_diarization(self._speaker_segments)
+
             self._emit_progress(100, f"Found {len(self._speaker_segments)} speaker segments")
             logger.info("Diarization complete: %d segments", len(self._speaker_segments))
             return True
@@ -341,6 +354,42 @@ class ProcessingPipeline:
         # Merge adjacent cuts with same camera
         self._cut_plan = engine.merge_adjacent(self._cut_plan)
 
+        # Record QA artifacts
+        self._qa_exporter.set_thresholds(
+            min_switch_interval_ms=min_switch_interval_ms,
+            min_speech_ms=min_speech_ms,
+            bg_short_remark_ms=bg_short_remark_ms,
+        )
+        self._qa_exporter.set_total_duration(total_duration_ms)
+
+        # Build a speaker segment lookup for determining cut reasons
+        segment_speakers = {(s.start_ms, s.end_ms): s.speaker_id for s in self._speaker_segments}
+
+        for cut in self._cut_plan:
+            # Determine reason based on decision logic
+            camera_idx = min(cut.camera_id, len(self.input_files) - 1)
+            # Find speaker that triggered this cut (heuristic: speaker at cut start)
+            speaker_id = cut.camera_id  # Assume camera_id == speaker_id from decision engine
+
+            # Determine reason
+            if cut.start_ms == 0:
+                reason = "default"  # First cut is always default
+            elif any(
+                s.start_ms == cut.start_ms and s.speaker_id == speaker_id
+                for s in self._speaker_segments
+            ):
+                reason = "threshold"  # Cut triggered by speaker segment meeting thresholds
+            else:
+                reason = "forced"  # Merged or forced cut
+
+            self._qa_exporter.add_cut(
+                start_ms=cut.start_ms,
+                end_ms=cut.end_ms,
+                camera_index=camera_idx,
+                speaker_id=speaker_id,
+                reason=reason,
+            )
+
         self._emit_progress(100, f"Generated {len(self._cut_plan)} cuts")
         logger.info("Decision complete: %d cuts", len(self._cut_plan))
         return True
@@ -362,12 +411,20 @@ class ProcessingPipeline:
         if result is None or result.status == "failed":
             error_msg = result.message if result else "Sync failed"
             logger.error("Audio sync failed: %s", error_msg)
+            self._qa_exporter.set_sync_info(offset_ms=0, success=False, message=error_msg)
             self.signals.error.emit(f"Audio sync failed: {error_msg}")
             self._emit_progress(100, "Sync failed, continuing without external audio")
             return None
 
         if result.output_path:
             self._temp_files.append(result.output_path)
+
+        # Record sync info for QA
+        self._qa_exporter.set_sync_info(
+            offset_ms=result.offset_ms,
+            success=True,
+            message=result.message or "Sync successful",
+        )
 
         self._emit_progress(100, f"Audio synced (offset: {result.offset_ms:.0f}ms)")
         logger.info("Audio sync complete: offset=%.1fms", result.offset_ms)

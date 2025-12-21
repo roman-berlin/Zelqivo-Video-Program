@@ -495,6 +495,15 @@ class MainWindow(QMainWindow):
         self.action_toggle_theme.triggered.connect(self._toggle_theme)
         view_menu.addAction(self.action_toggle_theme)
 
+        view_menu.addSeparator()
+
+        # Open Last Run Folder action
+        self.action_open_run_folder = QAction("Open Last &Run Folder", self)
+        self.action_open_run_folder.setObjectName("actionOpenRunFolder")
+        self.action_open_run_folder.setToolTip("Open the folder containing QA artifacts from the last processing run")
+        self.action_open_run_folder.triggered.connect(self._open_last_run_folder)
+        view_menu.addAction(self.action_open_run_folder)
+
     def _toggle_theme(self) -> None:
         """Toggle between light and dark themes."""
         is_dark = self.action_toggle_theme.isChecked()
@@ -917,3 +926,30 @@ class MainWindow(QMainWindow):
                 hbar.setValue(hbar.minimum())
         except Exception:
             pass
+
+    def _open_last_run_folder(self) -> None:
+        """Open the last QA run folder in the system file browser."""
+        from ..logic.qa_artifacts import get_last_run_folder
+
+        folder = get_last_run_folder()
+        if folder is None or not folder.exists():
+            self._toast("No QA run folder found. Process videos first.")
+            return
+
+        try:
+            import subprocess
+            import sys
+
+            folder_str = str(folder)
+            if sys.platform == "win32":
+                os.startfile(folder_str)
+            elif sys.platform == "darwin":
+                subprocess.run(["open", folder_str], check=True)
+            else:
+                subprocess.run(["xdg-open", folder_str], check=True)
+
+            self._toast(f"Opened: {folder.name}", 3000)
+            logger.info("Opened QA run folder: %s", folder.name)
+        except Exception as e:
+            logger.error("Failed to open run folder: %s", e, exc_info=True)
+            self._toast(f"Failed to open folder: {e}")

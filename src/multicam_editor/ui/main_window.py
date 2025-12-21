@@ -559,7 +559,7 @@ class MainWindow(QMainWindow):
             try:
                 self.trim_panel.trimChanged.connect(self._on_trim_changed)
             except Exception:
-                logger.warning("Failed to connect trim_panel.trimChanged signal", exc_info=True)
+                logger.debug("Failed to connect trim_panel.trimChanged signal", exc_info=True)
 
         # timeline selection → mirror to list (keeps preview in sync when clicking squares)
         if hasattr(self.timeline_scene, "selectionChanged"):

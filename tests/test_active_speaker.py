@@ -1,12 +1,19 @@
 """Tests for active speaker diarization."""
 
+import os
+from pathlib import Path
+
 import pytest
 
 from multicam_editor.logic.active_speaker import (
     ActiveSpeakerDetector,
     DiarizationBackend,
+    DiarizationMode,
     EnergyVADBackend,
+    NullBackend,
+    PyannoteBackend,
     SpeakerSegment,
+    create_backend,
     detect_active_speakers,
 )
 
@@ -167,3 +174,168 @@ class TestDiarizationBackendProtocol:
                 return []
 
         assert isinstance(MyBackend(), DiarizationBackend)
+
+
+class TestNullBackend:
+    """Tests for NullBackend (OFF mode)."""
+
+    def test_returns_empty_segments(self) -> None:
+        backend = NullBackend()
+        segments = backend.diarize("any_file.wav", num_channels=2)
+        assert segments == []
+
+    def test_is_diarization_backend(self) -> None:
+        backend = NullBackend()
+        assert isinstance(backend, DiarizationBackend)
+
+
+class TestDiarizationMode:
+    """Tests for DiarizationMode enum."""
+
+    def test_mode_values(self) -> None:
+        assert DiarizationMode.OFF.value == "off"
+        assert DiarizationMode.STUB.value == "stub"
+        assert DiarizationMode.REAL.value == "real"
+
+    def test_from_string(self) -> None:
+        assert DiarizationMode("off") == DiarizationMode.OFF
+        assert DiarizationMode("stub") == DiarizationMode.STUB
+        assert DiarizationMode("real") == DiarizationMode.REAL
+
+
+class TestCreateBackend:
+    """Tests for create_backend factory function."""
+
+    def test_off_mode_returns_null_backend(self) -> None:
+        backend, error = create_backend(DiarizationMode.OFF)
+        assert isinstance(backend, NullBackend)
+        assert error is None
+
+    def test_stub_mode_returns_energy_vad(self) -> None:
+        backend, error = create_backend(DiarizationMode.STUB)
+        assert isinstance(backend, EnergyVADBackend)
+        assert error is None
+
+    def test_real_mode_fallback_on_error(self) -> None:
+        # When pyannote not available, should fallback to stub with error msg
+        backend, error = create_backend(DiarizationMode.REAL, fallback_on_error=True)
+        # Either pyannote works, or we get stub with error
+        assert isinstance(backend, (PyannoteBackend, EnergyVADBackend))
+        if isinstance(backend, EnergyVADBackend):
+            assert error is not None  # Should have error message
+
+    def test_real_mode_no_fallback(self) -> None:
+        # When no fallback, should return NullBackend with error
+        backend, error = create_backend(DiarizationMode.REAL, fallback_on_error=False)
+        if not PyannoteBackend.is_available():
+            assert isinstance(backend, NullBackend)
+            assert error is not None
+
+
+class TestPyannoteBackend:
+    """Tests for PyannoteBackend availability checking."""
+
+    def test_is_available_returns_bool(self) -> None:
+        result = PyannoteBackend.is_available()
+        assert isinstance(result, bool)
+
+    def test_get_error_returns_str_or_none(self) -> None:
+        error = PyannoteBackend.get_error()
+        assert error is None or isinstance(error, str)
+
+    def test_backend_is_protocol(self) -> None:
+        # If available, it should satisfy protocol
+        if PyannoteBackend.is_available():
+            backend = PyannoteBackend()
+            assert isinstance(backend, DiarizationBackend)
+
+
+# =============================================================================
+# Integration Tests (require env setup)
+# =============================================================================
+
+@pytest.mark.integration
+class TestPyannoteIntegration:
+    """
+    Integration tests for REAL pyannote diarization.
+
+    Run with: DIARIZATION_SMOKE_AUDIO=path/to/audio.wav pytest -m integration
+
+    Skips if:
+    - DIARIZATION_SMOKE_AUDIO env var not set or file doesn't exist
+    - HuggingFace auth missing or gated model not accepted
+    """
+
+    @pytest.fixture
+    def audio_path(self) -> str:
+        """Get audio path from env, skip if missing."""
+        audio_env = os.environ.get("DIARIZATION_SMOKE_AUDIO")
+        if not audio_env:
+            pytest.skip(
+                "DIARIZATION_SMOKE_AUDIO not set. "
+                "Set it to a local audio file path to run this test."
+            )
+        audio_file = Path(audio_env)
+        if not audio_file.exists():
+            pytest.skip(f"Audio file not found: {audio_file}")
+        return str(audio_file)
+
+    @pytest.fixture
+    def pyannote_backend(self) -> PyannoteBackend:
+        """Get pyannote backend, skip if not available."""
+        if not PyannoteBackend.is_available():
+            error = PyannoteBackend.get_error() or "Unknown error"
+            # Provide actionable skip message
+            if "401" in error or "unauthorized" in error.lower():
+                pytest.skip(
+                    "HuggingFace auth required. Run: hf auth login"
+                )
+            elif "gated" in error.lower() or "access" in error.lower():
+                pytest.skip(
+                    "Gated model not accepted. Visit: "
+                    "https://hf.co/pyannote/speaker-diarization-3.1"
+                )
+            elif "token" in error.lower():
+                pytest.skip(
+                    "HuggingFace token missing. Run: hf auth login"
+                )
+            else:
+                pytest.skip(f"Pyannote not available: {error[:80]}")
+        return PyannoteBackend()
+
+    def test_real_diarization_returns_segments(
+        self, audio_path: str, pyannote_backend: PyannoteBackend
+    ) -> None:
+        """Test that real diarization returns valid segments."""
+        segments = pyannote_backend.diarize(audio_path, num_channels=2)
+
+        # Should return at least 1 segment for any audio with speech
+        assert len(segments) >= 1, "Expected at least 1 segment"
+
+        for seg in segments:
+            # Validate segment structure
+            assert isinstance(seg, SpeakerSegment)
+            assert seg.start_ms >= 0, "start_ms must be >= 0"
+            assert seg.end_ms > seg.start_ms, "end_ms must be > start_ms"
+            assert seg.speaker_id >= 0, "speaker_id must be >= 0"
+
+    def test_segments_are_valid_timeline(
+        self, audio_path: str, pyannote_backend: PyannoteBackend
+    ) -> None:
+        """Test that segments form a valid non-overlapping timeline."""
+        segments = pyannote_backend.diarize(audio_path, num_channels=2)
+
+        if len(segments) < 2:
+            pytest.skip("Need at least 2 segments to test timeline validity")
+
+        # Check sorted order
+        for i in range(1, len(segments)):
+            assert segments[i].start_ms >= segments[i - 1].start_ms, (
+                f"Segments not sorted at index {i}"
+            )
+
+        # Check non-overlapping
+        for i in range(1, len(segments)):
+            assert segments[i].start_ms >= segments[i - 1].end_ms, (
+                f"Overlapping segments at index {i}"
+            )

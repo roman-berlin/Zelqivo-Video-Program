@@ -34,16 +34,21 @@ def _load_audio_mono(path: str, sr: int = _SYNC_SR) -> tuple[np.ndarray, int]:
     return audio, sr_out
 
 
-def _cross_correlate_offset(ref: np.ndarray, ext: np.ndarray, sr: int) -> float:
+def _cross_correlate_offset(ref: np.ndarray, ext: np.ndarray, sr: int) -> tuple[float, float, float]:
     """Compute time offset (in ms) of ext relative to ref via cross-correlation.
 
     A positive offset means ext starts *after* ref (ext is delayed).
     A negative offset means ext starts *before* ref (ext is early).
+
+    Returns:
+        (offset_ms, correlation_score, sample_window_sec)
     """
     # Use only first 30 seconds for faster correlation
-    max_samples = sr * 30
+    sample_window_sec = 30.0
+    max_samples = int(sr * sample_window_sec)
     ref_seg = ref[:max_samples]
     ext_seg = ext[:max_samples]
+    actual_window_sec = len(ref_seg) / sr
 
     # Normalise to prevent numerical issues
     ref_seg = ref_seg / (np.max(np.abs(ref_seg)) + 1e-10)
@@ -53,12 +58,22 @@ def _cross_correlate_offset(ref: np.ndarray, ext: np.ndarray, sr: int) -> float:
     correlation = np.correlate(ref_seg, ext_seg, mode="full")
     # Peak index relative to center
     peak_idx = np.argmax(correlation)
+    peak_value = correlation[peak_idx]
+
+    # Normalize correlation score to 0-1 range
+    correlation_score = float(peak_value / (len(ref_seg) + 1e-10))
+
     # Offset in samples: positive = ext delayed, negative = ext early
-    # Formula: when ext is delayed (zeros at start), peak shifts left -> negative peak_idx offset
-    # We negate to get positive offset for delayed ext
     offset_samples = (len(ext_seg) - 1) - peak_idx
     offset_ms = (offset_samples / sr) * 1000.0
-    return offset_ms
+
+    # QA logging
+    logger.info(
+        "[QA] Audio sync: offset_ms=%.1f, correlation_score=%.4f, sample_window=%.1fs",
+        offset_ms, correlation_score, actual_window_sec
+    )
+
+    return offset_ms, correlation_score, actual_window_sec
 
 
 def _apply_offset(
@@ -123,9 +138,9 @@ def sync_external_audio(
             logger.warning(msg)
             return SyncResult("", 0.0, "failed", msg)
 
-        # Cross-correlate to find offset
-        offset_ms = _cross_correlate_offset(ref_audio, ext_audio, sr)
-        logger.info("Detected offset: %.1f ms", offset_ms)
+        # Cross-correlate to find offset (returns tuple with QA metrics)
+        offset_ms, corr_score, window_sec = _cross_correlate_offset(ref_audio, ext_audio, sr)
+        logger.info("Detected offset: %.1f ms (correlation=%.4f)", offset_ms, corr_score)
 
         # Reload at original quality for output
         ext_full, sr_full = librosa.load(external_audio, sr=None, mono=False)
@@ -176,7 +191,7 @@ def align_audio_offset(
         if len(ext_audio) < min_samples or len(ref_audio) < min_samples:
             return 0.0, "Audio too short for sync"
 
-        offset_ms = _cross_correlate_offset(ref_audio, ext_audio, sr)
+        offset_ms, _, _ = _cross_correlate_offset(ref_audio, ext_audio, sr)
         return offset_ms, "ok"
     except Exception as e:
         logger.error("Offset calculation failed: %s", e, exc_info=True)

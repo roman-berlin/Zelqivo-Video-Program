@@ -44,12 +44,16 @@ class ProcessingWorker(QObject):
         external_audio: Optional[str] = None,
         resolution: str = "1080p",
         output_path: Optional[str] = None,
+        speaker_switching_enabled: bool = True,
+        camera_speaker_mapping: Optional[dict[int, str]] = None,
     ) -> None:
         super().__init__()
         self.input_files = input_files
         self.external_audio = external_audio
         self.resolution = resolution
         self.output_path = output_path
+        self.speaker_switching_enabled = speaker_switching_enabled
+        self.camera_speaker_mapping = camera_speaker_mapping or {}
         self._pipeline: Optional[ProcessingPipeline] = None
 
     def cancel(self) -> None:
@@ -125,6 +129,8 @@ class ProcessingThread(QThread):
         external_audio: Optional[str] = None,
         resolution: str = "1080p",
         output_path: Optional[str] = None,
+        speaker_switching_enabled: bool = True,
+        camera_speaker_mapping: Optional[dict[int, str]] = None,
         parent: Optional[QObject] = None,
     ) -> None:
         super().__init__(parent)
@@ -132,6 +138,8 @@ class ProcessingThread(QThread):
         self.external_audio = external_audio
         self.resolution = resolution
         self.output_path = output_path
+        self.speaker_switching_enabled = speaker_switching_enabled
+        self.camera_speaker_mapping = camera_speaker_mapping or {}
         self._worker: Optional[ProcessingWorker] = None
 
     def cancel(self) -> None:
@@ -146,6 +154,8 @@ class ProcessingThread(QThread):
             self.external_audio,
             self.resolution,
             self.output_path,
+            self.speaker_switching_enabled,
+            self.camera_speaker_mapping,
         )
 
         # Connect worker signals to thread signals

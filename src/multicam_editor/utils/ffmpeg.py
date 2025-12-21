@@ -403,3 +403,127 @@ def create_concat_list(paths: List[str], list_path: str) -> None:
             # Escape single quotes in path
             escaped = p.replace("'", "'\\''")
             f.write(f"file '{escaped}'\n")
+
+
+def build_qa_overlay_filter(
+    speaker_id: int,
+    camera_index: int,
+    start_ms: int,
+    end_ms: int,
+) -> str:
+    """Build drawtext filter for QA overlay burn-in.
+
+    Displays: timecode | speaker_id | camera_index at top-left.
+
+    Args:
+        speaker_id: Current active speaker ID
+        camera_index: Current active camera index
+        start_ms: Segment start time (for static timecode reference)
+        end_ms: Segment end time (unused, for future cut marker)
+
+    Returns:
+        Drawtext filter string for ffmpeg -vf
+    """
+    # Build static overlay text with timecode placeholder
+    # %{pts\:hms} shows running timecode, offset by segment start
+    start_sec = start_ms / 1000.0
+    # Escape colons for drawtext
+    text = f"TC\\: %{{pts\\:hms}} | SPK\\: {speaker_id} | CAM\\: {camera_index}"
+
+    # drawtext filter with white text on semi-transparent black box
+    return (
+        f"drawtext=fontfile=:text='{text}':"
+        f"x=10:y=10:fontsize=18:fontcolor=white:"
+        f"box=1:boxcolor=black@0.6:boxborderw=5"
+    )
+
+
+def build_segment_with_qa_overlay_args(
+    input_path: str,
+    output_path: str,
+    start_ms: int,
+    end_ms: int,
+    speaker_id: int,
+    camera_index: int,
+    fade_in_ms: int = 0,
+    fade_out_ms: int = 0,
+    grayscale: bool = False,
+    speed: float = 1.0,
+) -> List[str]:
+    """Build ffmpeg args for segment with QA overlay burned in.
+
+    Combines existing effects with drawtext overlay.
+
+    Args:
+        input_path: Source video path
+        output_path: Destination path
+        start_ms: Start time in milliseconds
+        end_ms: End time in milliseconds
+        speaker_id: Active speaker ID for overlay
+        camera_index: Active camera index for overlay
+        fade_in_ms: Fade in duration in ms (0 = disabled)
+        fade_out_ms: Fade out duration in ms (0 = disabled)
+        grayscale: Apply grayscale filter
+        speed: Playback speed multiplier (1.0 = normal)
+
+    Returns:
+        List of ffmpeg arguments
+    """
+    speed = max(0.25, min(4.0, speed))
+    start_sec = start_ms / 1000.0
+    duration_sec = (end_ms - start_ms) / 1000.0
+
+    vfilters: List[str] = []
+    afilters: List[str] = []
+
+    # Speed filter
+    if speed != 1.0:
+        vfilters.append(f"setpts=PTS/{speed}")
+        if 0.5 <= speed <= 2.0:
+            afilters.append(f"atempo={speed}")
+        elif speed < 0.5:
+            afilters.append(f"atempo={speed * 2}")
+            afilters.append("atempo=0.5")
+        else:
+            afilters.append(f"atempo={speed / 2}")
+            afilters.append("atempo=2.0")
+
+    # Grayscale
+    if grayscale:
+        vfilters.append("format=gray")
+
+    output_duration_sec = duration_sec / speed
+
+    # Fades
+    if fade_in_ms > 0:
+        fade_in_sec = fade_in_ms / 1000.0
+        vfilters.append(f"fade=t=in:st=0:d={fade_in_sec:.3f}")
+        afilters.append(f"afade=t=in:st=0:d={fade_in_sec:.3f}")
+
+    if fade_out_ms > 0:
+        fade_out_sec = fade_out_ms / 1000.0
+        fade_start = max(0, output_duration_sec - fade_out_sec)
+        vfilters.append(f"fade=t=out:st={fade_start:.3f}:d={fade_out_sec:.3f}")
+        afilters.append(f"afade=t=out:st={fade_start:.3f}:d={fade_out_sec:.3f}")
+
+    # Add QA overlay last (on top of other effects)
+    qa_filter = build_qa_overlay_filter(speaker_id, camera_index, start_ms, end_ms)
+    vfilters.append(qa_filter)
+
+    args = [
+        "ffmpeg",
+        "-y",
+        "-ss", f"{start_sec:.3f}",
+        "-i", input_path,
+        "-t", f"{duration_sec:.3f}",
+    ]
+
+    if vfilters:
+        args.extend(["-vf", ",".join(vfilters)])
+    if afilters:
+        args.extend(["-af", ",".join(afilters)])
+
+    args.extend(["-c:v", "libx264", "-preset", "fast", "-c:a", "aac"])
+    args.append(output_path)
+
+    return args

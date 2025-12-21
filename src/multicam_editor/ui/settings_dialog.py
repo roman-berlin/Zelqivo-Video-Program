@@ -92,6 +92,20 @@ class SettingsDialog(QDialog):
         diarization_group.setLayout(diarization_layout)
         layout.addWidget(diarization_group)
 
+        # QA Overlay Settings Group (Prompt 5)
+        qa_group = QGroupBox("QA Overlay")
+        qa_layout = QFormLayout()
+
+        self.check_qa_overlay = QCheckBox()
+        self.check_qa_overlay.setToolTip(
+            "Burn timecode, speaker ID, and camera index into exported video.\n"
+            "Useful for manual QA review. OFF by default."
+        )
+        qa_layout.addRow("Enable QA Overlay:", self.check_qa_overlay)
+
+        qa_group.setLayout(qa_layout)
+        layout.addWidget(qa_group)
+
         # Audio Mix Settings Group
         audio_group = QGroupBox("Audio Mix (External Audio)")
         audio_layout = QFormLayout()
@@ -236,6 +250,11 @@ class SettingsDialog(QDialog):
         self.spin_ducking_amount.setValue(
             self.settings.value("audio_mix/ducking_amount_db", -12.0, type=float)
         )
+        # QA Overlay setting (Prompt 5)
+        self.check_qa_overlay.setChecked(
+            self.settings.value("qa_overlay/enabled", False, type=bool)
+        )
+
         # Apply initial UI state
         self._on_audio_mode_changed(audio_mode)
 
@@ -262,6 +281,9 @@ class SettingsDialog(QDialog):
         self.settings.setValue("audio_mix/external_gain_db", self.spin_external_gain.value())
         self.settings.setValue("audio_mix/ducking_enabled", self.check_ducking.isChecked())
         self.settings.setValue("audio_mix/ducking_amount_db", self.spin_ducking_amount.value())
+
+        # QA Overlay setting (Prompt 5)
+        self.settings.setValue("qa_overlay/enabled", self.check_qa_overlay.isChecked())
 
         self.accept()
 
@@ -300,3 +322,13 @@ def get_diarization_mode() -> DiarizationMode:
         return DiarizationMode(mode_value)
     except ValueError:
         return DiarizationMode.REAL
+
+
+def get_qa_overlay_enabled() -> bool:
+    """Load QA overlay enabled flag from QSettings (standalone helper).
+
+    Returns:
+        True if QA overlay is enabled, False otherwise (default: False).
+    """
+    settings = QSettings("MultiCamEditor", "MultiCamEditor")
+    return settings.value("qa_overlay/enabled", False, type=bool)

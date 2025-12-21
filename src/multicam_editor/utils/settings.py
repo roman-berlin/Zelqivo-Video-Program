@@ -13,3 +13,6 @@ DIARIZATION_MODES: tuple[DiarizationMode, ...] = (
     DiarizationMode.STUB,
     DiarizationMode.OFF,
 )
+
+# QA Overlay settings (Prompt 5)
+QA_OVERLAY_ENABLED_DEFAULT: bool = False

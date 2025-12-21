@@ -17,6 +17,7 @@ from multicam_editor.utils.ffmpeg import (
     FFmpegResult,
     build_concat_args,
     build_segment_with_effects_args,
+    build_segment_with_qa_overlay_args,
     build_trim_args,
     create_concat_list,
     get_temp_output_path,
@@ -36,6 +37,11 @@ class CutDefinition:
         fade_out_ms: Duration of fade-out (0 = disabled)
         grayscale: Apply grayscale filter
         speed: Playback speed (1.0 = normal)
+
+    QA Overlay (Prompt 5):
+        qa_overlay: Enable QA overlay burn-in
+        speaker_id: Active speaker ID for overlay
+        camera_index: Active camera index for overlay
     """
 
     source_path: str
@@ -47,6 +53,10 @@ class CutDefinition:
     fade_out_ms: int = 0
     grayscale: bool = False
     speed: float = 1.0
+    # QA Overlay (Prompt 5)
+    qa_overlay: bool = False
+    speaker_id: int = 0
+    camera_index: int = 0
 
 
 @dataclass
@@ -206,7 +216,25 @@ class SegmentRenderer:
             speed=cut.speed,
         )
 
-        if use_effects:
+        # QA overlay requires re-encoding with drawtext filter
+        if cut.qa_overlay:
+            logger.debug(
+                "Rendering segment %d with QA overlay: speaker=%d, camera=%d",
+                cut.cut_index, cut.speaker_id, cut.camera_index
+            )
+            args = build_segment_with_qa_overlay_args(
+                input_path=cut.source_path,
+                output_path=output_path,
+                start_ms=cut.start_ms,
+                end_ms=cut.end_ms,
+                speaker_id=cut.speaker_id,
+                camera_index=cut.camera_index,
+                fade_in_ms=cut.fade_in_ms,
+                fade_out_ms=cut.fade_out_ms,
+                grayscale=cut.grayscale,
+                speed=cut.speed,
+            )
+        elif use_effects:
             # Effects require re-encoding
             args = build_segment_with_effects_args(
                 input_path=cut.source_path,

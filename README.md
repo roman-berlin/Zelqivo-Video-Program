@@ -165,6 +165,52 @@ Initial download is ~1-2GB. Subsequent runs use the cached model.
 - **Gated model not accepted**: Visit the model page and click "Agree and access"
 - **Model not found**: Check your internet connection and HuggingFace status
 
+### QA CLI Mode (Headless Processing)
+
+For automated QA and CI/CD pipelines, use the CLI entry point to run
+processing without the GUI:
+
+```bash
+python -m multicam_editor.cli \
+  --videos cam1.mp4 cam2.mp4 \
+  --external-audio podcast.wav \
+  --enable-speaker-switching true \
+  --mapping cam1:speaker_0 cam2:speaker_1 \
+  --preset 1080p \
+  --out output.mp4 \
+  --export-artifacts true
+```
+
+#### CLI Arguments
+
+| Argument                     | Required | Default | Description                                      |
+|-----------------------------|----------|---------|--------------------------------------------------|
+| `--videos`                  | Yes      | -       | Input video files (at least 2)                   |
+| `--external-audio`          | No       | -       | External audio file to sync                      |
+| `--enable-speaker-switching`| No       | true    | Enable speaker-based camera switching            |
+| `--mapping`                 | No       | -       | Camera-to-speaker mapping (reserved for future)  |
+| `--preset`                  | No       | 1080p   | Output resolution: 1080p, 720p, 480p             |
+| `--out`                     | Yes      | -       | Output file path                                 |
+| `--export-artifacts`        | No       | true    | Export QA artifacts (diarization.json, etc.)     |
+| `--verbose` / `-v`          | No       | false   | Enable verbose logging                           |
+
+#### Exit Codes
+
+- `0` - Success
+- `1` - Failure (check logs for details)
+
+#### QA Artifacts
+
+When `--export-artifacts true`, the CLI prints the artifacts folder path:
+```
+Artifacts: C:\Users\...\AppData\Local\MultiCamEditor\qa_runs\run_20241221_143052
+```
+
+This folder contains:
+- `diarization.json` - Speaker segments detected
+- `cut_plan.json` - Final cut decisions with reasons
+- `processing_summary.json` - Counts, thresholds, sync info
+
 ### License
 
 This project is licensed under the MIT License.  See `LICENSE` for

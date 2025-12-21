@@ -7,8 +7,11 @@ from typing import List
 from PyQt6.QtCore import Qt, QSettings, QTimer
 from PyQt6.QtGui import QAction, QKeySequence, QUndoStack
 from PyQt6.QtWidgets import (
+    QCheckBox,
+    QComboBox,
     QFileDialog,
     QFrame,
+    QGroupBox,
     QHBoxLayout,
     QLabel,
     QMainWindow,
@@ -112,6 +115,9 @@ class MainWindow(QMainWindow):
         left_layout.addWidget(ctrl_row)
         left_layout.addWidget(lbl)
         left_layout.addWidget(self.file_list, 1)
+
+        # --- Processing Options Group ---
+        self._init_processing_options(left_layout)
 
         # Right: preview + trim panel + timeline
         right = QWidget(splitter)
@@ -230,6 +236,203 @@ class MainWindow(QMainWindow):
 
         # Ensure timeline starts scrolled fully left
         QTimer.singleShot(0, self._scroll_timeline_left)
+
+    def _init_processing_options(self, parent_layout: QVBoxLayout) -> None:
+        """Initialize processing options group: speaker switching, external audio, mapping."""
+        group = QGroupBox("Processing Options")
+        group.setObjectName("groupProcessingOptions")
+        layout = QVBoxLayout(group)
+        layout.setContentsMargins(6, 6, 6, 6)
+        layout.setSpacing(4)
+
+        # 1) Enable Speaker Switching checkbox
+        self.chk_speaker_switching = QCheckBox("Enable Speaker Switching")
+        self.chk_speaker_switching.setObjectName("chkSpeakerSwitching")
+        self.chk_speaker_switching.setToolTip("Automatically switch cameras based on active speaker")
+        self.chk_speaker_switching.setChecked(
+            self.settings.value("processing/speaker_switching", True, type=bool)
+        )
+        self.chk_speaker_switching.toggled.connect(self._on_speaker_switching_toggled)
+        layout.addWidget(self.chk_speaker_switching)
+
+        # 2) Use External Audio checkbox
+        self.chk_external_audio = QCheckBox("Use External Audio (Replace camera audio)")
+        self.chk_external_audio.setObjectName("chkExternalAudio")
+        self.chk_external_audio.setToolTip("Use external audio file for diarization and final output")
+        self.chk_external_audio.setChecked(
+            self.settings.value("processing/use_external_audio", False, type=bool)
+        )
+        self.chk_external_audio.toggled.connect(self._on_external_audio_toggled)
+        layout.addWidget(self.chk_external_audio)
+
+        # 3) External audio file row
+        ext_row = QWidget()
+        ext_lay = QHBoxLayout(ext_row)
+        ext_lay.setContentsMargins(16, 0, 0, 0)  # indent
+        ext_lay.setSpacing(4)
+
+        self.btn_add_external_audio = QPushButton("Add External Audio...")
+        self.btn_add_external_audio.setObjectName("btnAddExternalAudio")
+        self.btn_add_external_audio.setToolTip("Select .wav or .mp3 file")
+        self.btn_add_external_audio.clicked.connect(self._on_add_external_audio)
+        ext_lay.addWidget(self.btn_add_external_audio)
+
+        self.lbl_external_audio = QLabel("No file selected")
+        self.lbl_external_audio.setObjectName("lblExternalAudio")
+        self._external_audio_path: str | None = self.settings.value("processing/external_audio_path", None)
+        if self._external_audio_path:
+            self.lbl_external_audio.setText(os.path.basename(self._external_audio_path))
+        ext_lay.addWidget(self.lbl_external_audio, 1)
+
+        layout.addWidget(ext_row)
+        self._update_external_audio_ui()
+
+        # 4) Camera-to-Speaker Mapping section
+        mapping_lbl = QLabel("Camera → Speaker Mapping:")
+        mapping_lbl.setObjectName("lblCameraMapping")
+        layout.addWidget(mapping_lbl)
+
+        self.mapping_container = QWidget()
+        self.mapping_layout = QVBoxLayout(self.mapping_container)
+        self.mapping_layout.setContentsMargins(8, 0, 0, 0)
+        self.mapping_layout.setSpacing(2)
+        layout.addWidget(self.mapping_container)
+
+        # Placeholder label when no cameras
+        self.lbl_no_cameras = QLabel("(Add videos to configure mapping)")
+        self.lbl_no_cameras.setObjectName("lblNoCameras")
+        self.lbl_no_cameras.setStyleSheet("color: gray; font-style: italic;")
+        self.mapping_layout.addWidget(self.lbl_no_cameras)
+
+        # Store mapping combos: {camera_index: QComboBox}
+        self._camera_combos: dict[int, QComboBox] = {}
+        # Available speakers (updated after diarization)
+        self._available_speakers: list[str] = ["Auto (best effort)", "speaker_0", "speaker_1"]
+
+        # Warning label for unmapped cameras
+        self.lbl_mapping_warning = QLabel("")
+        self.lbl_mapping_warning.setObjectName("lblMappingWarning")
+        self.lbl_mapping_warning.setStyleSheet("color: orange;")
+        self.lbl_mapping_warning.setWordWrap(True)
+        self.lbl_mapping_warning.setVisible(False)
+        layout.addWidget(self.lbl_mapping_warning)
+
+        parent_layout.addWidget(group)
+
+    def _on_speaker_switching_toggled(self, checked: bool) -> None:
+        """Save speaker switching setting."""
+        self.settings.setValue("processing/speaker_switching", checked)
+        logger.debug("Speaker switching: %s", "enabled" if checked else "disabled")
+
+    def _on_external_audio_toggled(self, checked: bool) -> None:
+        """Save external audio setting and update UI state."""
+        self.settings.setValue("processing/use_external_audio", checked)
+        self._update_external_audio_ui()
+        logger.debug("External audio: %s", "enabled" if checked else "disabled")
+
+    def _update_external_audio_ui(self) -> None:
+        """Enable/disable external audio controls based on checkbox."""
+        enabled = self.chk_external_audio.isChecked()
+        self.btn_add_external_audio.setEnabled(enabled)
+        self.lbl_external_audio.setEnabled(enabled)
+
+    def _on_add_external_audio(self) -> None:
+        """Open file dialog to select external audio file."""
+        last_dir = self.settings.value("last_audio_dir", os.path.expanduser("~"))
+        path, _ = QFileDialog.getOpenFileName(
+            self, "Select External Audio", last_dir,
+            "Audio Files (*.wav *.mp3 *.aac *.m4a);;All Files (*.*)"
+        )
+        if not path:
+            return
+        if not os.path.isfile(path):
+            self._toast("File not found")
+            return
+        self._external_audio_path = path
+        self.settings.setValue("processing/external_audio_path", path)
+        self.settings.setValue("last_audio_dir", os.path.dirname(path))
+        self.lbl_external_audio.setText(os.path.basename(path))
+        logger.info("External audio selected: %s", path)
+
+    def _refresh_camera_mapping_ui(self) -> None:
+        """Rebuild camera mapping combos based on current file list."""
+        # Clear old combos
+        for combo in self._camera_combos.values():
+            combo.setParent(None)
+            combo.deleteLater()
+        self._camera_combos.clear()
+
+        clips = self.project.clips()
+        if not clips:
+            self.lbl_no_cameras.setVisible(True)
+            self.lbl_mapping_warning.setVisible(False)
+            return
+
+        self.lbl_no_cameras.setVisible(False)
+
+        # Create combo for each camera
+        for i, clip in enumerate(clips):
+            row = QWidget()
+            row_lay = QHBoxLayout(row)
+            row_lay.setContentsMargins(0, 0, 0, 0)
+            row_lay.setSpacing(4)
+
+            lbl = QLabel(f"Camera {i + 1}:")
+            lbl.setMinimumWidth(70)
+            row_lay.addWidget(lbl)
+
+            combo = QComboBox()
+            combo.setObjectName(f"comboCamera{i}")
+            combo.addItems(self._available_speakers)
+            # Load saved mapping
+            saved = self.settings.value(f"processing/camera_{i}_speaker", "Auto (best effort)")
+            idx = combo.findText(saved)
+            if idx >= 0:
+                combo.setCurrentIndex(idx)
+            combo.currentTextChanged.connect(
+                lambda text, cam=i: self._on_camera_mapping_changed(cam, text)
+            )
+            row_lay.addWidget(combo, 1)
+
+            # Show filename hint
+            hint = QLabel(os.path.basename(clip.path)[:20])
+            hint.setStyleSheet("color: gray; font-size: 10px;")
+            row_lay.addWidget(hint)
+
+            self._camera_combos[i] = combo
+            self.mapping_layout.addWidget(row)
+
+        self._check_mapping_warnings()
+
+    def _on_camera_mapping_changed(self, camera_index: int, speaker: str) -> None:
+        """Save camera-to-speaker mapping."""
+        self.settings.setValue(f"processing/camera_{camera_index}_speaker", speaker)
+        logger.debug("Camera %d mapped to %s", camera_index, speaker)
+        self._check_mapping_warnings()
+
+    def _check_mapping_warnings(self) -> None:
+        """Show warning if all cameras use auto-mapping."""
+        if not self._camera_combos:
+            self.lbl_mapping_warning.setVisible(False)
+            return
+        all_auto = all(
+            combo.currentText() == "Auto (best effort)"
+            for combo in self._camera_combos.values()
+        )
+        if all_auto and len(self._camera_combos) > 1:
+            self.lbl_mapping_warning.setText(
+                "⚠ All cameras use Auto. For best results, map cameras to specific speakers."
+            )
+            self.lbl_mapping_warning.setVisible(True)
+        else:
+            self.lbl_mapping_warning.setVisible(False)
+
+    def get_camera_speaker_mapping(self) -> dict[int, str]:
+        """Return current camera-to-speaker mapping dict."""
+        return {
+            cam: combo.currentText()
+            for cam, combo in self._camera_combos.items()
+        }
 
     def _init_undo_toolbar(self) -> None:
         """Initialize undo/redo toolbar with actions and keyboard shortcuts."""
@@ -384,6 +587,7 @@ class MainWindow(QMainWindow):
         # file list changes
         self.file_list.filesAdded.connect(self._on_files_added)
         self.file_list.videoCountChanged.connect(self._refresh_counter)
+        self.file_list.videoCountChanged.connect(self._refresh_camera_mapping_ui)
 
         # buttons
         self.btn_add.clicked.connect(self.on_add_files)
@@ -558,17 +762,41 @@ class MainWindow(QMainWindow):
             self._toast(f"Need at least {MIN_VIDEOS_FOR_PROCESS} videos to process.")
             return
 
+        # Read processing options from UI state
+        speaker_switching_enabled = self.chk_speaker_switching.isChecked()
+        use_external_audio = self.chk_external_audio.isChecked()
+
+        # Get external audio path if enabled
+        external_audio: str | None = None
+        if use_external_audio and self._external_audio_path:
+            if os.path.isfile(self._external_audio_path):
+                external_audio = self._external_audio_path
+            else:
+                self._toast("External audio file not found. Processing without it.")
+                logger.warning("External audio file missing: %s", self._external_audio_path)
+
+        # Get camera-to-speaker mapping
+        camera_mapping = self.get_camera_speaker_mapping()
+
         # Read output quality from settings
         quality = self.settings.value("output/quality", "1080p", type=str)
+
+        # Log processing configuration
+        logger.info(
+            "Processing: speaker_switching=%s, external_audio=%s, cameras=%d, quality=%s",
+            speaker_switching_enabled, external_audio is not None, len(paths), quality
+        )
 
         # Create and show progress dialog
         self._progress_dialog = ProcessingProgressDialog(self)
 
-        # Create processing thread
+        # Create processing thread with all options
         self._processing_thread = ProcessingThread(
             input_files=paths,
-            external_audio=None,
+            external_audio=external_audio,
             resolution=quality,
+            speaker_switching_enabled=speaker_switching_enabled,
+            camera_speaker_mapping=camera_mapping,
             parent=self,
         )
 

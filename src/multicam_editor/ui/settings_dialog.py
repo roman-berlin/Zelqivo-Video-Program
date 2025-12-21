@@ -9,6 +9,7 @@ from PyQt6.QtWidgets import (
     QDialogButtonBox,
     QDoubleSpinBox,
     QFormLayout,
+    QLabel,
     QSpinBox,
     QComboBox,
     QVBoxLayout,
@@ -16,6 +17,7 @@ from PyQt6.QtWidgets import (
 )
 
 from multicam_editor.core.project import AudioMixMode, AudioMixSettings
+from multicam_editor.logic.active_speaker import DiarizationMode, PyannoteBackend
 
 
 class SettingsDialog(QDialog):
@@ -76,8 +78,16 @@ class SettingsDialog(QDialog):
         diarization_layout = QFormLayout()
 
         self.combo_diarization = QComboBox()
-        self.combo_diarization.addItems(["mock", "pyannote", "whisper"])
+        # Add items with display names and store enum values as user data
+        self.combo_diarization.addItem("Real (pyannote.audio)", DiarizationMode.REAL.value)
+        self.combo_diarization.addItem("Stub (dev only)", DiarizationMode.STUB.value)
+        self.combo_diarization.addItem("Off (single camera)", DiarizationMode.OFF.value)
         diarization_layout.addRow("Backend:", self.combo_diarization)
+
+        # Status label showing if pyannote is available
+        self.label_diarization_status = QLabel()
+        self._update_diarization_status()
+        diarization_layout.addRow("Status:", self.label_diarization_status)
 
         diarization_group.setLayout(diarization_layout)
         layout.addWidget(diarization_group)
@@ -141,6 +151,53 @@ class SettingsDialog(QDialog):
         is_mix = self.combo_audio_mode.currentText() == "Mix"
         self.spin_ducking_amount.setEnabled(is_mix and checked)
 
+    def _update_diarization_status(self) -> None:
+        """Update the diarization status label with actionable guidance."""
+        if PyannoteBackend.is_available():
+            self.label_diarization_status.setText("✓ pyannote.audio ready")
+            self.label_diarization_status.setStyleSheet("color: green;")
+            self.label_diarization_status.setToolTip("")
+        else:
+            error = PyannoteBackend.get_error() or "Not loaded"
+            # Parse error and provide actionable message
+            short_msg, tooltip = self._parse_diarization_error(error)
+            self.label_diarization_status.setText(f"⚠ {short_msg}")
+            self.label_diarization_status.setStyleSheet("color: orange;")
+            self.label_diarization_status.setToolTip(tooltip)
+
+    @staticmethod
+    def _parse_diarization_error(error: str) -> tuple[str, str]:
+        """Parse pyannote error and return (short_msg, tooltip)."""
+        error_lower = error.lower()
+
+        if "401" in error or "unauthorized" in error_lower:
+            return (
+                "Auth required → hf auth login",
+                "Run 'hf auth login' in terminal with your HuggingFace token"
+            )
+        if "gated" in error_lower or "access" in error_lower:
+            return (
+                "Accept model → hf.co/pyannote",
+                "Visit https://hf.co/pyannote/speaker-diarization-3.1 and click 'Agree'"
+            )
+        if "token" in error_lower:
+            return (
+                "Missing token → hf auth login",
+                "Create token at hf.co/settings/tokens, then run 'hf auth login'"
+            )
+        if "not installed" in error_lower:
+            return (
+                "pyannote not installed",
+                "Run: pip install pyannote.audio"
+            )
+        if "could not load" in error_lower or "could not download" in error_lower:
+            return (
+                "Model unavailable → check auth",
+                "Run 'hf auth login' and accept model at hf.co/pyannote/speaker-diarization-3.1"
+            )
+        # Fallback: truncate error
+        return (error[:40] + "..." if len(error) > 40 else error, error)
+
     def _load_settings(self) -> None:
         """Load current settings from QSettings."""
         self.spin_min_switch.setValue(
@@ -155,9 +212,14 @@ class SettingsDialog(QDialog):
         self.combo_quality.setCurrentText(
             self.settings.value("output/quality", "1080p", type=str)
         )
-        self.combo_diarization.setCurrentText(
-            self.settings.value("diarization/backend", "mock", type=str)
+        # Diarization: find index by stored value
+        diarization_value = self.settings.value(
+            "diarization/mode", DiarizationMode.REAL.value, type=str
         )
+        for i in range(self.combo_diarization.count()):
+            if self.combo_diarization.itemData(i) == diarization_value:
+                self.combo_diarization.setCurrentIndex(i)
+                break
 
         # Audio mix settings
         audio_mode = self.settings.value("audio_mix/mode", "Replace", type=str)
@@ -189,7 +251,10 @@ class SettingsDialog(QDialog):
             "decision_engine/bg_short_remark_ms", self.spin_bg_short_remark.value()
         )
         self.settings.setValue("output/quality", self.combo_quality.currentText())
-        self.settings.setValue("diarization/backend", self.combo_diarization.currentText())
+        # Save the enum value (from itemData), not the display text
+        self.settings.setValue(
+            "diarization/mode", self.combo_diarization.currentData()
+        )
 
         # Audio mix settings
         self.settings.setValue("audio_mix/mode", self.combo_audio_mode.currentText())
@@ -225,3 +290,13 @@ def get_audio_mix_settings() -> AudioMixSettings:
         ducking_enabled=settings.value("audio_mix/ducking_enabled", False, type=bool),
         ducking_amount_db=settings.value("audio_mix/ducking_amount_db", -12.0, type=float),
     ).clamp_gains()
+
+
+def get_diarization_mode() -> DiarizationMode:
+    """Load diarization mode from QSettings (standalone helper)."""
+    settings = QSettings("MultiCamEditor", "MultiCamEditor")
+    mode_value = settings.value("diarization/mode", DiarizationMode.REAL.value, type=str)
+    try:
+        return DiarizationMode(mode_value)
+    except ValueError:
+        return DiarizationMode.REAL

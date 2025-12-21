@@ -114,6 +114,57 @@ pyinstaller multicam_editor.spec
 The executable and all dependencies will be in `dist/MulticamEditor/`.
 Run `MulticamEditor.exe` to launch the application.
 
+### Real Speaker Diarization (pyannote.audio) – Windows Setup
+
+The REAL diarization backend uses `pyannote.audio` which requires HuggingFace
+authentication due to gated model access.
+
+#### 1. Create a HuggingFace Account
+Visit https://huggingface.co/join and create a free account.
+
+#### 2. Accept Gated Model Access
+Visit https://hf.co/pyannote/speaker-diarization-3.1 and click **"Agree and access repository"**.
+You must accept the model's user conditions before downloading.
+
+#### 3. Create a Read Token
+Go to https://hf.co/settings/tokens → **Create new token** → Select **Read** access → Copy the token.
+
+#### 4. Login to HuggingFace
+
+**Preferred (new CLI):**
+```powershell
+hf auth login
+# Paste your token when prompted
+```
+
+**Legacy CLI:**
+```powershell
+huggingface-cli login
+```
+
+#### 5. Verify Authentication
+The `hf whoami` command may not exist in all environments. Use these instead:
+
+```powershell
+# Option A: Check auth status
+hf auth status
+
+# Option B: Python verification
+python -c "from huggingface_hub import HfApi; print(HfApi().whoami())"
+```
+
+#### 6. First Run
+On first use, the model downloads to:
+- Windows: `C:\Users\<username>\.cache\huggingface\hub\`
+- Linux/Mac: `~/.cache/huggingface/hub/`
+
+Initial download is ~1-2GB. Subsequent runs use the cached model.
+
+#### Troubleshooting
+- **401 Unauthorized**: Run `hf auth login` again with a valid token
+- **Gated model not accepted**: Visit the model page and click "Agree and access"
+- **Model not found**: Check your internet connection and HuggingFace status
+
 ### License
 
 This project is licensed under the MIT License.  See `LICENSE` for

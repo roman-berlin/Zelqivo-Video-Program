@@ -223,9 +223,9 @@ class ProcessingPipeline:
                 return PipelineResult(success=False, cancelled=True)
 
             # Stage 4: Sync external audio (optional)
-            synced_audio_path = None
+            self._synced_audio_path = None
             if external_audio:
-                synced_audio_path = self._stage_sync(external_audio)
+                self._synced_audio_path = self._stage_sync(external_audio)
                 if self._check_cancelled():
                     return PipelineResult(success=False, cancelled=True)
             else:
@@ -427,7 +427,7 @@ class ProcessingPipeline:
     def _stage_concat(
         self, segment_paths: List[str], output_path: Optional[str]
     ) -> Optional[str]:
-        """Concatenate rendered segments into final output."""
+        """Concatenate rendered segments into final output, optionally replacing audio."""
         self._advance_stage(PipelineStage.CONCAT)
 
         if not segment_paths:
@@ -441,18 +441,100 @@ class ProcessingPipeline:
             timestamp = time.strftime("%Y%m%d_%H%M%S")
             output_path = os.path.join(output_dir, f"multicam_output_{timestamp}.mp4")
 
-        self._emit_progress(50, f"Concatenating {len(segment_paths)} segments...")
+        self._emit_progress(30, f"Concatenating {len(segment_paths)} segments...")
 
-        result_path = concatenate_segments(segment_paths, output_path)
+        # If we have synced external audio, concat to temp first then replace audio
+        synced_audio = getattr(self, "_synced_audio_path", None)
+        if synced_audio and os.path.isfile(synced_audio):
+            # Concat to temp file first
+            temp_concat_path = output_path.replace(".mp4", "_temp_video.mp4")
+            result_path = concatenate_segments(segment_paths, temp_concat_path)
+            if not result_path:
+                logger.error("Concatenation failed")
+                self.signals.error.emit("Failed to concatenate segments")
+                return None
 
-        if result_path:
-            self._emit_progress(100, "Concatenation complete")
-            logger.info("Concat complete: %s", result_path)
+            self._temp_files.append(temp_concat_path)
+            self._emit_progress(70, "Replacing audio with external audio...")
 
-            # Cleanup temp segments (but not final output)
-            self._cleanup()
-            return result_path
+            # Replace audio track with synced external audio
+            final_path = self._replace_audio_track(temp_concat_path, synced_audio, output_path)
+            if final_path:
+                self._emit_progress(100, "Audio replaced successfully")
+                logger.info("Concat + audio replace complete: %s", final_path)
+                self._cleanup()
+                return final_path
+            else:
+                # Fallback: use video without external audio
+                logger.warning("Audio replace failed, using original audio")
+                self._emit_progress(100, "Using original audio (replace failed)")
+                import shutil
+                try:
+                    shutil.move(temp_concat_path, output_path)
+                    self._cleanup()
+                    return output_path
+                except Exception as e:
+                    logger.error("Failed to move temp file: %s", e)
+                    self._cleanup()
+                    return None
+        else:
+            # No external audio - just concatenate normally
+            self._emit_progress(50, f"Concatenating {len(segment_paths)} segments...")
+            result_path = concatenate_segments(segment_paths, output_path)
 
-        logger.error("Concatenation failed")
-        self.signals.error.emit("Failed to concatenate segments")
-        return None
+            if result_path:
+                self._emit_progress(100, "Concatenation complete")
+                logger.info("Concat complete: %s", result_path)
+                self._cleanup()
+                return result_path
+
+            logger.error("Concatenation failed")
+            self.signals.error.emit("Failed to concatenate segments")
+            return None
+
+    def _replace_audio_track(
+        self, video_path: str, audio_path: str, output_path: str
+    ) -> Optional[str]:
+        """Replace video's audio track with external audio using ffmpeg.
+
+        Args:
+            video_path: Path to video file
+            audio_path: Path to audio file (synced)
+            output_path: Where to write final output
+
+        Returns:
+            output_path on success, None on failure
+        """
+        from ..utils.ffmpeg import FFmpegProcess, is_ffmpeg_available
+
+        if not is_ffmpeg_available():
+            logger.error("ffmpeg not available for audio replacement")
+            return None
+
+        try:
+            # ffmpeg -i video.mp4 -i audio.wav -c:v copy -map 0:v:0 -map 1:a:0 -shortest output.mp4
+            args = [
+                "ffmpeg", "-y",
+                "-i", video_path,
+                "-i", audio_path,
+                "-c:v", "copy",  # Copy video stream (no re-encode)
+                "-map", "0:v:0",  # Take video from first input
+                "-map", "1:a:0",  # Take audio from second input
+                "-shortest",  # Match shorter duration
+                output_path,
+            ]
+
+            logger.info("Replacing audio: %s + %s -> %s", video_path, audio_path, output_path)
+            proc = FFmpegProcess(args, output_path)
+            result = proc.run()
+
+            if result.success:
+                logger.info("Audio replacement successful: %s", output_path)
+                return output_path
+
+            logger.error("Audio replacement failed: %s", result.error)
+            return None
+
+        except Exception as e:
+            logger.error("Audio replacement error: %s", e, exc_info=True)
+            return None

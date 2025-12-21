@@ -41,8 +41,10 @@ class TestCrossCorrelateOffset:
     def test_no_offset(self):
         """Identical signals should have zero offset."""
         signal = _create_chirp(2.0)
-        offset = _cross_correlate_offset(signal, signal, SR)
-        assert abs(offset) < 10.0  # Within 10ms tolerance
+        offset_ms, corr_score, window_sec = _cross_correlate_offset(signal, signal, SR)
+        assert abs(offset_ms) < 10.0  # Within 10ms tolerance
+        assert corr_score > 0  # Should have positive correlation
+        assert window_sec > 0  # Should report sample window
 
     def test_positive_offset_200ms(self):
         """External audio delayed by 200ms should return ~200ms offset."""
@@ -51,8 +53,9 @@ class TestCrossCorrelateOffset:
         # ext starts later -> pad with zeros at beginning
         ext = np.concatenate([np.zeros(offset_samples, dtype=np.float32), ref[:-offset_samples]])
 
-        offset = _cross_correlate_offset(ref, ext, SR)
-        assert abs(offset - 200.0) < 20.0  # Within 20ms tolerance
+        offset_ms, corr_score, window_sec = _cross_correlate_offset(ref, ext, SR)
+        assert abs(offset_ms - 200.0) < 20.0  # Within 20ms tolerance
+        assert corr_score > 0
 
     def test_negative_offset_200ms(self):
         """External audio early by 200ms should return ~-200ms offset."""
@@ -62,9 +65,9 @@ class TestCrossCorrelateOffset:
         # This simulates ext recording starting 200ms before ref
         ext = np.concatenate([ref[offset_samples:], np.zeros(offset_samples, dtype=np.float32)])
 
-        offset = _cross_correlate_offset(ref, ext, SR)
+        offset_ms, corr_score, window_sec = _cross_correlate_offset(ref, ext, SR)
         # ext content is ahead of ref by 200ms -> negative offset
-        assert abs(offset + 200.0) < 20.0  # Should be ~-200ms
+        assert abs(offset_ms + 200.0) < 20.0  # Should be ~-200ms
 
 
 class TestApplyOffset:

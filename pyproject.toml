@@ -58,6 +58,9 @@ disable_error_code = [
 [tool.pytest.ini_options]
 addopts = "-q --cov=src --cov-report=term-missing"
 testpaths = ["tests"]
+markers = [
+    "integration: marks tests as integration tests (require external setup, e.g., HuggingFace auth)",
+]
 
 [tool.setuptools]
 package-dir = {"" = "src"}

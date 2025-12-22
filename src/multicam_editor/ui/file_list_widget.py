@@ -5,7 +5,7 @@ import os
 from typing import Iterable, List, Tuple
 
 from PyQt6.QtCore import Qt, QModelIndex, QMimeData, pyqtSignal
-from PyQt6.QtGui import QStandardItemModel, QStandardItem
+from PyQt6.QtGui import QStandardItemModel, QStandardItem, QKeyEvent
 from PyQt6.QtWidgets import QListView, QVBoxLayout, QWidget
 
 # Use a relative import to ensure we access the utils module within the
@@ -260,3 +260,48 @@ class FileListWidget(QWidget):
             path = item.data(Qt.ItemDataRole.UserRole)
             if path:
                 self.currentPathChanged.emit(path)
+
+    # ------------------------ Keyboard Events ------------------------
+    def keyPressEvent(self, event: QKeyEvent) -> None:
+        """Handle Delete/Backspace to remove selected items."""
+        key = event.key()
+        if key in (Qt.Key.Key_Delete, Qt.Key.Key_Backspace):
+            self.remove_selected()
+            event.accept()
+        else:
+            super().keyPressEvent(event)
+
+    def remove_selected(self) -> bool:
+        """Remove selected item(s) from the list.
+
+        Returns True if item(s) were removed, False if nothing selected.
+        Emits videoCountChanged after removal.
+        """
+        idx = self._view.currentIndex()
+        if not idx.isValid():
+            return False
+
+        item = self._model.itemFromIndex(idx)
+        if item is None:
+            return False
+
+        path = item.data(Qt.ItemDataRole.UserRole)
+        is_result = item.data(Qt.ItemDataRole.UserRole + 1)  # Result files don't count
+
+        # Remove from model
+        self._model.removeRow(idx.row())
+
+        # Update state
+        if path and path in self._path_set:
+            self._path_set.discard(path)
+            if not is_result:
+                self._video_count = max(0, self._video_count - 1)
+                self.videoCountChanged.emit(self._video_count)
+
+        # Select next item or previous if removed was last
+        new_count = self._model.rowCount()
+        if new_count > 0:
+            new_row = min(idx.row(), new_count - 1)
+            self._view.setCurrentIndex(self._model.index(new_row, 0))
+
+        return True

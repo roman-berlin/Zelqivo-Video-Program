@@ -18,7 +18,6 @@ from PyQt6.QtWidgets import (
     QMainWindow,
     QPushButton,
     QSplitter,
-    QToolBar,
     QVBoxLayout,
     QWidget,
 )
@@ -289,15 +288,30 @@ class MainWindow(QMainWindow):
         layout.addWidget(ext_row)
         self._update_external_audio_ui()
 
-        # 4) Camera-to-Speaker Mapping section
-        mapping_lbl = QLabel("Camera → Speaker Mapping:")
-        mapping_lbl.setObjectName("lblCameraMapping")
-        layout.addWidget(mapping_lbl)
+        # 4) Camera-to-Speaker Mapping section (collapsed by default)
+        mapping_header = QWidget()
+        mapping_header_lay = QHBoxLayout(mapping_header)
+        mapping_header_lay.setContentsMargins(0, 0, 0, 0)
+        mapping_header_lay.setSpacing(4)
+
+        self.lbl_mapping_summary = QLabel("Speaker mapping: Auto")
+        self.lbl_mapping_summary.setObjectName("lblMappingSummary")
+        mapping_header_lay.addWidget(self.lbl_mapping_summary)
+
+        self.btn_edit_mapping = QPushButton("Advanced…")
+        self.btn_edit_mapping.setObjectName("btnEditMapping")
+        self.btn_edit_mapping.setToolTip("Configure advanced camera-to-speaker mapping")
+        self.btn_edit_mapping.clicked.connect(self._toggle_mapping_expanded)
+        mapping_header_lay.addWidget(self.btn_edit_mapping)
+        mapping_header_lay.addStretch(1)
+
+        layout.addWidget(mapping_header)
 
         self.mapping_container = QWidget()
         self.mapping_layout = QVBoxLayout(self.mapping_container)
         self.mapping_layout.setContentsMargins(8, 0, 0, 0)
         self.mapping_layout.setSpacing(2)
+        self.mapping_container.setVisible(False)  # Hidden by default
         layout.addWidget(self.mapping_container)
 
         # Placeholder label when no cameras
@@ -308,10 +322,11 @@ class MainWindow(QMainWindow):
 
         # Store mapping combos: {camera_index: QComboBox}
         self._camera_combos: dict[int, QComboBox] = {}
-        # Available speakers (updated after diarization)
-        self._available_speakers: list[str] = ["Auto (best effort)", "speaker_0", "speaker_1"]
+        # Available speakers (only Auto initially; real speakers added after diarization)
+        self._available_speakers: list[str] = ["Auto (best effort)"]
+        self._mapping_expanded: bool = False
 
-        # Warning label for unmapped cameras
+        # Warning label for unmapped cameras (hidden - no warnings by default)
         self.lbl_mapping_warning = QLabel("")
         self.lbl_mapping_warning.setObjectName("lblMappingWarning")
         self.lbl_mapping_warning.setStyleSheet("color: orange;")
@@ -408,6 +423,14 @@ class MainWindow(QMainWindow):
 
         self.lbl_no_cameras.setVisible(False)
 
+        # Update available speakers based on camera count
+        num_cameras = len(clips)
+        self._available_speakers = ["Auto (best effort)"]
+        # Add speaker options: at least 2, or match camera count if more
+        num_speakers = max(2, num_cameras)
+        for s in range(num_speakers):
+            self._available_speakers.append(f"Speaker {s + 1}")
+
         # Create combo for each camera
         for i, clip in enumerate(clips):
             row = QWidget()
@@ -448,8 +471,26 @@ class MainWindow(QMainWindow):
         logger.debug("Camera %d mapped to %s", camera_index, speaker)
         self._check_mapping_warnings()
 
+    def _toggle_mapping_expanded(self) -> None:
+        """Toggle speaker mapping section visibility."""
+        self._mapping_expanded = not self._mapping_expanded
+        self.mapping_container.setVisible(self._mapping_expanded)
+        self.btn_edit_mapping.setText("Hide" if self._mapping_expanded else "Edit…")
+        # Only show warning when expanded
+        if self._mapping_expanded:
+            self._check_mapping_warnings()
+        else:
+            self.lbl_mapping_warning.setVisible(False)
+
     def _check_mapping_warnings(self) -> None:
-        """Show warning if all cameras use auto-mapping."""
+        """Show warning if user edited mapping and all cameras use auto-mapping.
+
+        Only shown when mapping UI is expanded (user opted in to edit).
+        """
+        # Hide warning if mapping section is collapsed
+        if not self._mapping_expanded:
+            self.lbl_mapping_warning.setVisible(False)
+            return
         if not self._camera_combos:
             self.lbl_mapping_warning.setVisible(False)
             return
@@ -459,7 +500,7 @@ class MainWindow(QMainWindow):
         )
         if all_auto and len(self._camera_combos) > 1:
             self.lbl_mapping_warning.setText(
-                "⚠ All cameras use Auto. For best results, map cameras to specific speakers."
+                "Tip: For best results, map cameras to specific speakers."
             )
             self.lbl_mapping_warning.setVisible(True)
         else:
@@ -473,28 +514,22 @@ class MainWindow(QMainWindow):
         }
 
     def _init_undo_toolbar(self) -> None:
-        """Initialize undo/redo toolbar with actions and keyboard shortcuts."""
-        toolbar = QToolBar("Edit", self)
-        toolbar.setObjectName("editToolbar")
-        self.addToolBar(Qt.ToolBarArea.TopToolBarArea, toolbar)
-
-        # Create undo action with Ctrl+Z shortcut
+        """Initialize undo/redo actions with keyboard shortcuts (hidden from UI)."""
+        # Keep internal undo/redo functionality but hide from UI
+        # Create undo action with Ctrl+Z shortcut (invisible - no toolbar/menu)
         self.action_undo = self.undo_stack.createUndoAction(self, "Undo")
         self.action_undo.setShortcut(QKeySequence.StandardKey.Undo)  # Ctrl+Z
         self.action_undo.setObjectName("actionUndo")
-        toolbar.addAction(self.action_undo)
+        self.addAction(self.action_undo)  # Add to window for shortcut to work
 
-        # Create redo action with Ctrl+Y (and Ctrl+Shift+Z)
+        # Create redo action with Ctrl+Y (invisible - no toolbar/menu)
         self.action_redo = self.undo_stack.createRedoAction(self, "Redo")
         self.action_redo.setShortcuts([
-            QKeySequence.StandardKey.Redo,  # Ctrl+Y or Ctrl+Shift+Z depending on platform
-            QKeySequence("Ctrl+Y")  # Explicit Ctrl+Y
+            QKeySequence.StandardKey.Redo,
+            QKeySequence("Ctrl+Y")
         ])
         self.action_redo.setObjectName("actionRedo")
-        toolbar.addAction(self.action_redo)
-
-        # Actions are automatically disabled when stack is empty
-        # and enabled when operations are available
+        self.addAction(self.action_redo)  # Add to window for shortcut to work
 
     def _init_menu(self) -> None:
         """Initialize menu bar with File and View menus."""

@@ -26,6 +26,7 @@ class StreamInfo:
     fps: Optional[float] = None
     sample_rate: Optional[int] = None
     channels: Optional[int] = None
+    rotation: Optional[int] = None  # degrees (90, 180, 270) if present
 
 
 @dataclass
@@ -39,6 +40,8 @@ class ProbeResult:
     audio_codec: Optional[str] = None
     streams: Optional[List[StreamInfo]] = None
     error: Optional[str] = None
+    rotation: Optional[int] = None  # degrees if rotation metadata present
+    vfr_risk: bool = False  # True if avg_fps != r_fps (likely VFR)
 
     def resolution_str(self) -> str:
         """Return resolution as 'WxH' or empty string."""
@@ -111,11 +114,65 @@ def _parse_fps(stream: dict) -> Optional[float]:
     return None
 
 
-def _parse_streams(data: dict) -> Tuple[List[StreamInfo], Optional[StreamInfo], Optional[StreamInfo]]:
-    """Parse streams from ffprobe JSON. Returns (all_streams, first_video, first_audio)."""
+def _parse_rotation(stream: dict) -> Optional[int]:
+    """Extract rotation from stream side_data_list or tags."""
+    # Check side_data_list (newer ffprobe)
+    for side_data in stream.get("side_data_list", []):
+        if side_data.get("side_data_type") == "Display Matrix":
+            rot = side_data.get("rotation")
+            if rot is not None:
+                return int(rot)
+    # Check tags (older format)
+    tags = stream.get("tags", {})
+    rot = tags.get("rotate") or tags.get("rotation")
+    if rot:
+        try:
+            return int(rot)
+        except (ValueError, TypeError):
+            pass
+    return None
+
+
+def _check_vfr_risk(stream: dict) -> bool:
+    """Check if video stream likely has variable frame rate.
+
+    Compares avg_frame_rate vs r_frame_rate - significant difference indicates VFR.
+    """
+    avg_str = stream.get("avg_frame_rate", "")
+    r_str = stream.get("r_frame_rate", "")
+    if not avg_str or not r_str:
+        return False
+
+    def parse_rate(s: str) -> Optional[float]:
+        if "/" in s:
+            try:
+                num, den = s.split("/")
+                if int(den) != 0:
+                    return float(num) / float(den)
+            except (ValueError, ZeroDivisionError):
+                pass
+        return None
+
+    avg_fps = parse_rate(avg_str)
+    r_fps = parse_rate(r_str)
+    if avg_fps is None or r_fps is None or r_fps == 0:
+        return False
+
+    # Significant difference (>5%) indicates VFR risk
+    diff = abs(avg_fps - r_fps) / max(avg_fps, r_fps)
+    return diff > 0.05
+
+
+def _parse_streams(data: dict) -> Tuple[List[StreamInfo], Optional[StreamInfo], Optional[StreamInfo], Optional[int], bool]:
+    """Parse streams from ffprobe JSON.
+
+    Returns: (all_streams, first_video, first_audio, rotation, vfr_risk)
+    """
     streams: List[StreamInfo] = []
     first_video: Optional[StreamInfo] = None
     first_audio: Optional[StreamInfo] = None
+    rotation: Optional[int] = None
+    vfr_risk: bool = False
 
     for s in data.get("streams", []):
         codec_type = s.get("codec_type", "")
@@ -127,8 +184,11 @@ def _parse_streams(data: dict) -> Tuple[List[StreamInfo], Optional[StreamInfo], 
             info.width = s.get("width")
             info.height = s.get("height")
             info.fps = _parse_fps(s)
+            info.rotation = _parse_rotation(s)
             if first_video is None:
                 first_video = info
+                rotation = info.rotation
+                vfr_risk = _check_vfr_risk(s)
         elif codec_type == "audio":
             info.sample_rate = int(s["sample_rate"]) if s.get("sample_rate") else None
             info.channels = s.get("channels")
@@ -136,7 +196,7 @@ def _parse_streams(data: dict) -> Tuple[List[StreamInfo], Optional[StreamInfo], 
                 first_audio = info
         streams.append(info)
 
-    return streams, first_video, first_audio
+    return streams, first_video, first_audio, rotation, vfr_risk
 
 
 def probe(path: str) -> ProbeResult:
@@ -199,7 +259,7 @@ def probe(path: str) -> ProbeResult:
         duration_ms = int(float(duration_str) * 1000)
 
         # Parse streams
-        streams, video, audio = _parse_streams(data)
+        streams, video, audio, rotation, vfr_risk = _parse_streams(data)
 
         probe_result = ProbeResult(
             duration_ms=duration_ms,
@@ -209,6 +269,8 @@ def probe(path: str) -> ProbeResult:
             video_codec=video.codec_name if video else None,
             audio_codec=audio.codec_name if audio else None,
             streams=streams,
+            rotation=rotation,
+            vfr_risk=vfr_risk,
         )
 
         _probe_cache[cache_key] = probe_result

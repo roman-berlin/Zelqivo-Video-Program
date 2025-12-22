@@ -18,7 +18,7 @@ class ProcessingWorker(QObject):
 
     Signals:
         progress(int): Overall progress 0-100.
-        stage(str, int, str): Stage name, stage percent, message.
+        stage(str, int, str, float): Stage name, stage percent, message, eta_seconds.
         finished(str): Output path on success.
         error(str): Error message on failure.
 
@@ -34,7 +34,7 @@ class ProcessingWorker(QObject):
     """
 
     progress = pyqtSignal(int)
-    stage = pyqtSignal(str, int, str)  # stage_name, stage_percent, message
+    stage = pyqtSignal(str, int, str, float)  # stage_name, stage_percent, message, eta_seconds
     finished = pyqtSignal(str)
     error = pyqtSignal(str)
 
@@ -64,10 +64,12 @@ class ProcessingWorker(QObject):
 
     def _on_progress_callback(self, progress: PipelineProgress) -> None:
         """Handle detailed progress from pipeline."""
+        eta = progress.eta_seconds if progress.eta_seconds is not None else -1.0
         self.stage.emit(
             progress.stage_name,
             progress.stage_percent,
             progress.message,
+            eta,
         )
 
     def run(self) -> None:
@@ -78,10 +80,20 @@ class ProcessingWorker(QObject):
         signals.error.connect(self.error.emit)
 
         try:
+            # Convert camera_speaker_mapping to speaker_to_camera_map for pipeline
+            # Note: V1 ENERGY mode ignores mapping (speaker_id == camera_id)
+            speaker_to_camera = None
+            if self.camera_speaker_mapping:
+                # Mapping format: {camera_id: speaker_name} -> not used in V1
+                logger.debug("camera_speaker_mapping provided: %s (ignored in ENERGY mode)",
+                           self.camera_speaker_mapping)
+
             self._pipeline = ProcessingPipeline(
                 self.input_files,
                 signals,
                 progress_callback=self._on_progress_callback,
+                speaker_switching_enabled=self.speaker_switching_enabled,
+                speaker_to_camera_map=speaker_to_camera,
             )
             result = self._pipeline.run(
                 external_audio=self.external_audio,
@@ -119,7 +131,7 @@ class ProcessingThread(QThread):
     """
 
     progress = pyqtSignal(int)
-    stage = pyqtSignal(str, int, str)
+    stage = pyqtSignal(str, int, str, float)  # stage_name, stage_percent, message, eta_seconds
     finished_with_path = pyqtSignal(str)
     error = pyqtSignal(str)
 

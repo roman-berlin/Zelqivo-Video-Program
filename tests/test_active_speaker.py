@@ -12,6 +12,7 @@ from multicam_editor.logic.active_speaker import (
     EnergyVADBackend,
     NullBackend,
     PyannoteBackend,
+    RealEnergyVADBackend,
     SpeakerSegment,
     create_backend,
     detect_active_speakers,
@@ -195,12 +196,94 @@ class TestDiarizationMode:
     def test_mode_values(self) -> None:
         assert DiarizationMode.OFF.value == "off"
         assert DiarizationMode.STUB.value == "stub"
+        assert DiarizationMode.ENERGY.value == "energy"
         assert DiarizationMode.REAL.value == "real"
 
     def test_from_string(self) -> None:
         assert DiarizationMode("off") == DiarizationMode.OFF
         assert DiarizationMode("stub") == DiarizationMode.STUB
+        assert DiarizationMode("energy") == DiarizationMode.ENERGY
         assert DiarizationMode("real") == DiarizationMode.REAL
+
+
+class TestRealEnergyVADBackend:
+    """Tests for RealEnergyVADBackend (ENERGY mode - CPU-only)."""
+
+    def test_is_diarization_backend(self) -> None:
+        backend = RealEnergyVADBackend()
+        assert isinstance(backend, DiarizationBackend)
+
+    def test_fallback_to_stub_without_audio_paths(self) -> None:
+        """Without camera audio paths set, falls back to stub behavior."""
+        backend = RealEnergyVADBackend()
+        # No camera paths set - should fallback to stub
+        segments = backend.diarize("dummy.wav", num_channels=2)
+        assert len(segments) > 0  # Stub returns mock segments
+
+    def test_set_camera_audio_paths(self) -> None:
+        """Test that camera audio paths can be set."""
+        backend = RealEnergyVADBackend()
+        backend.set_camera_audio_paths(["/path/cam0.wav", "/path/cam1.wav"])
+        assert len(backend._camera_audio_paths) == 2
+
+    def test_custom_window_size(self) -> None:
+        """Test custom window size initialization."""
+        backend = RealEnergyVADBackend(window_ms=100)
+        assert backend.window_ms == 100
+
+    def test_custom_silence_threshold(self) -> None:
+        """Test custom silence threshold initialization."""
+        backend = RealEnergyVADBackend(silence_threshold=0.05)
+        assert backend.silence_threshold == 0.05
+
+    def test_compute_rms_empty_samples(self) -> None:
+        """Test RMS computation with empty samples."""
+        rms = RealEnergyVADBackend._compute_rms([])
+        assert rms == 0.0
+
+    def test_compute_rms_valid_samples(self) -> None:
+        """Test RMS computation with valid samples."""
+        # Constant signal should have RMS equal to amplitude
+        samples = [0.5, 0.5, 0.5, 0.5]
+        rms = RealEnergyVADBackend._compute_rms(samples)
+        assert abs(rms - 0.5) < 0.001
+
+    def test_compute_rms_sine_wave(self) -> None:
+        """Test RMS computation with sine-like samples."""
+        import math
+        samples = [math.sin(i * 0.1) for i in range(100)]
+        rms = RealEnergyVADBackend._compute_rms(samples)
+        # RMS of sine wave is ~0.707 * amplitude
+        assert 0.6 < rms < 0.75
+
+    def test_merge_windows_empty(self) -> None:
+        """Test merging with empty window winners."""
+        backend = RealEnergyVADBackend()
+        segments = backend._merge_windows_to_segments([], 200, 10000)
+        assert segments == []
+
+    def test_merge_windows_single_speaker(self) -> None:
+        """Test merging with single speaker throughout."""
+        backend = RealEnergyVADBackend()
+        window_winners = [0, 0, 0, 0, 0]
+        segments = backend._merge_windows_to_segments(window_winners, 200, 1000)
+        assert len(segments) == 1
+        assert segments[0].speaker_id == 0
+        assert segments[0].start_ms == 0
+        assert segments[0].end_ms == 1000
+
+    def test_merge_windows_two_speakers(self) -> None:
+        """Test merging with two alternating speakers."""
+        backend = RealEnergyVADBackend(min_segment_ms=200)
+        # cam0 for 3 windows, then cam1 for 2 windows
+        window_winners = [0, 0, 0, 1, 1]
+        segments = backend._merge_windows_to_segments(window_winners, 200, 1000)
+        assert len(segments) == 2
+        assert segments[0].speaker_id == 0
+        assert segments[0].start_ms == 0
+        assert segments[0].end_ms == 600
+        assert segments[1].speaker_id == 1
+        assert segments[1].start_ms == 600
 
 
 class TestCreateBackend:
@@ -216,12 +299,18 @@ class TestCreateBackend:
         assert isinstance(backend, EnergyVADBackend)
         assert error is None
 
+    def test_energy_mode_returns_real_energy_backend(self) -> None:
+        """ENERGY mode returns RealEnergyVADBackend."""
+        backend, error = create_backend(DiarizationMode.ENERGY)
+        assert isinstance(backend, RealEnergyVADBackend)
+        assert error is None
+
     def test_real_mode_fallback_on_error(self) -> None:
-        # When pyannote not available, should fallback to stub with error msg
+        # When pyannote not available, should fallback to ENERGY with error msg
         backend, error = create_backend(DiarizationMode.REAL, fallback_on_error=True)
-        # Either pyannote works, or we get stub with error
-        assert isinstance(backend, (PyannoteBackend, EnergyVADBackend))
-        if isinstance(backend, EnergyVADBackend):
+        # Either pyannote works, or we get RealEnergyVADBackend with error
+        assert isinstance(backend, (PyannoteBackend, RealEnergyVADBackend))
+        if isinstance(backend, RealEnergyVADBackend):
             assert error is not None  # Should have error message
 
     def test_real_mode_no_fallback(self) -> None:

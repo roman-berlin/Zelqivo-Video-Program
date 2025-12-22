@@ -2,6 +2,7 @@
 from __future__ import annotations
 import logging
 import os
+import time
 from typing import List
 
 from PyQt6.QtCore import Qt, QSettings, QTimer
@@ -318,6 +319,32 @@ class MainWindow(QMainWindow):
         self.lbl_mapping_warning.setVisible(False)
         layout.addWidget(self.lbl_mapping_warning)
 
+        # 5) Output folder selection
+        output_lbl = QLabel("Output Folder:")
+        output_lbl.setObjectName("lblOutputFolder")
+        layout.addWidget(output_lbl)
+
+        output_row = QWidget()
+        output_lay = QHBoxLayout(output_row)
+        output_lay.setContentsMargins(8, 0, 0, 0)
+        output_lay.setSpacing(4)
+
+        self.btn_choose_output_folder = QPushButton("Choose...")
+        self.btn_choose_output_folder.setObjectName("btnChooseOutputFolder")
+        self.btn_choose_output_folder.setToolTip("Select output folder for processed video")
+        self.btn_choose_output_folder.clicked.connect(self._on_choose_output_folder)
+        output_lay.addWidget(self.btn_choose_output_folder)
+
+        # Load last used folder from settings
+        self._output_folder: str | None = self.settings.value("output/folder", None)
+        folder_text = os.path.basename(self._output_folder) if self._output_folder else "(Same as input)"
+        self.lbl_output_folder = QLabel(folder_text)
+        self.lbl_output_folder.setObjectName("lblOutputFolderPath")
+        self.lbl_output_folder.setToolTip(self._output_folder or "Output will be saved next to input files")
+        output_lay.addWidget(self.lbl_output_folder, 1)
+
+        layout.addWidget(output_row)
+
         parent_layout.addWidget(group)
 
     def _on_external_audio_toggled(self, checked: bool) -> None:
@@ -349,6 +376,21 @@ class MainWindow(QMainWindow):
         self.settings.setValue("last_audio_dir", os.path.dirname(path))
         self.lbl_external_audio.setText(os.path.basename(path))
         logger.info("External audio selected: %s", path)
+
+    def _on_choose_output_folder(self) -> None:
+        """Open folder dialog to select output folder."""
+        start_dir = self._output_folder or os.path.expanduser("~")
+        folder = QFileDialog.getExistingDirectory(
+            self, "Select Output Folder", start_dir,
+            QFileDialog.Option.ShowDirsOnly
+        )
+        if not folder:
+            return
+        self._output_folder = folder
+        self.settings.setValue("output/folder", folder)
+        self.lbl_output_folder.setText(os.path.basename(folder))
+        self.lbl_output_folder.setToolTip(folder)
+        logger.info("Output folder selected: %s", folder)
 
     def _refresh_camera_mapping_ui(self) -> None:
         """Rebuild camera mapping combos based on current file list."""
@@ -765,6 +807,34 @@ class MainWindow(QMainWindow):
         self.btn_process.setEnabled(count >= MIN_VIDEOS_FOR_PROCESS)
 
     # --- Processing ---
+    def _generate_output_path(self, input_paths: List[str]) -> str:
+        """Generate deterministic, user-friendly output path.
+
+        Format: multicam_YYYY-MM-DD_HH-MM.mp4
+        Uses selected output folder or same folder as first input.
+        """
+        # Determine output folder
+        if self._output_folder and os.path.isdir(self._output_folder):
+            output_dir = self._output_folder
+        else:
+            # Fallback to same folder as first input
+            output_dir = os.path.dirname(input_paths[0]) if input_paths else os.getcwd()
+
+        # Generate user-friendly filename with date-time
+        timestamp = time.strftime("%Y-%m-%d_%H-%M")
+        filename = f"multicam_{timestamp}.mp4"
+        output_path = os.path.join(output_dir, filename)
+
+        # If file exists, add counter
+        counter = 1
+        base_path = output_path
+        while os.path.exists(output_path):
+            output_path = base_path.replace(".mp4", f"_{counter}.mp4")
+            counter += 1
+
+        logger.info("Output path: %s", output_path)
+        return output_path
+
     def on_process_videos(self) -> None:
         """Start the video processing pipeline."""
         clips = self.project.clips()
@@ -793,10 +863,13 @@ class MainWindow(QMainWindow):
         # Read output quality from settings
         quality = self.settings.value("output/quality", "1080p", type=str)
 
+        # Generate deterministic output path
+        output_path = self._generate_output_path(paths)
+
         # Log processing configuration
         logger.info(
-            "Processing: speaker_switching=%s, external_audio=%s, cameras=%d, quality=%s",
-            speaker_switching_enabled, external_audio is not None, len(paths), quality
+            "Processing: speaker_switching=%s, external_audio=%s, cameras=%d, quality=%s, output=%s",
+            speaker_switching_enabled, external_audio is not None, len(paths), quality, output_path
         )
 
         # Run preflight checks and display warnings (non-blocking)
@@ -808,12 +881,14 @@ class MainWindow(QMainWindow):
 
         # Create and show progress dialog
         self._progress_dialog = ProcessingProgressDialog(self)
+        self._progress_dialog.set_output_path(output_path)
 
         # Create processing thread with all options
         self._processing_thread = ProcessingThread(
             input_files=paths,
             external_audio=external_audio,
             resolution=quality,
+            output_path=output_path,
             speaker_switching_enabled=speaker_switching_enabled,
             camera_speaker_mapping=camera_mapping,
             parent=self,

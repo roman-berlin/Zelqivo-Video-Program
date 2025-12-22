@@ -12,6 +12,7 @@ from PyQt6.QtWidgets import (
     QComboBox,
     QFileDialog,
     QFrame,
+    QGridLayout,
     QGroupBox,
     QHBoxLayout,
     QLabel,
@@ -256,85 +257,78 @@ class MainWindow(QMainWindow):
         """Initialize processing options group: speaker switching, external audio, mapping."""
         group = QGroupBox("Processing Options")
         group.setObjectName("groupProcessingOptions")
-        layout = QVBoxLayout(group)
-        layout.setContentsMargins(6, 6, 6, 6)
-        layout.setSpacing(4)
+        layout = QGridLayout(group)
+        layout.setContentsMargins(10, 12, 10, 12)
+        layout.setHorizontalSpacing(8)
+        layout.setVerticalSpacing(8)
+        layout.setColumnStretch(1, 1)  # Value column expands
 
-        # Speaker switching is always enabled (core feature)
-        # No checkbox needed - auto-switch is the main purpose of this app
+        row = 0
 
-        # 1) Use External Audio checkbox
+        # 1) External Audio checkbox (spans both columns)
         self.chk_external_audio = QCheckBox("Use external audio")
         self.chk_external_audio.setObjectName("chkExternalAudio")
-        self.chk_external_audio.setToolTip("If provided, external audio replaces camera audio in the final export")
+        self.chk_external_audio.setToolTip("Replace camera audio with external audio file")
         self.chk_external_audio.setChecked(
             self.settings.value("processing/use_external_audio", False, type=bool)
         )
         self.chk_external_audio.toggled.connect(self._on_external_audio_toggled)
-        layout.addWidget(self.chk_external_audio)
+        layout.addWidget(self.chk_external_audio, row, 0, 1, 3)
+        row += 1
 
-        # Subtext under checkbox
-        self.lbl_external_audio_hint = QLabel("If provided, external audio replaces camera audio in the final export.")
+        # Helper text under checkbox (smaller, grey)
+        self.lbl_external_audio_hint = QLabel("External audio replaces camera audio in final video")
         self.lbl_external_audio_hint.setObjectName("lblExternalAudioHint")
-        self.lbl_external_audio_hint.setStyleSheet("color: gray; font-size: 10px;")
-        self.lbl_external_audio_hint.setWordWrap(True)
+        self.lbl_external_audio_hint.setStyleSheet("color: gray; font-size: 9pt;")
         self.lbl_external_audio_hint.setContentsMargins(20, 0, 0, 0)
-        layout.addWidget(self.lbl_external_audio_hint)
+        layout.addWidget(self.lbl_external_audio_hint, row, 0, 1, 3)
+        row += 1
 
-        # 3) External audio file row
-        ext_row = QWidget()
-        ext_lay = QHBoxLayout(ext_row)
-        ext_lay.setContentsMargins(16, 0, 0, 0)  # indent
-        ext_lay.setSpacing(4)
-
+        # External audio file row: [Choose Audio...] button + filename value
         self.btn_add_external_audio = QPushButton("Choose Audio…")
         self.btn_add_external_audio.setObjectName("btnAddExternalAudio")
         self.btn_add_external_audio.setToolTip("Select external audio file (WAV, MP3, AAC, M4A)")
+        self.btn_add_external_audio.setFixedWidth(120)
         self.btn_add_external_audio.clicked.connect(self._on_add_external_audio)
-        ext_lay.addWidget(self.btn_add_external_audio)
+        layout.addWidget(self.btn_add_external_audio, row, 0)
 
         self.lbl_external_audio = QLabel("No audio selected")
         self.lbl_external_audio.setObjectName("lblExternalAudio")
+        self.lbl_external_audio.setStyleSheet("color: gray;")
         self._external_audio_path: str | None = self.settings.value("processing/external_audio_path", None)
         if self._external_audio_path:
-            self.lbl_external_audio.setText(f"Audio: {os.path.basename(self._external_audio_path)}")
-        ext_lay.addWidget(self.lbl_external_audio, 1)
+            self.lbl_external_audio.setText(os.path.basename(self._external_audio_path))
+            self.lbl_external_audio.setStyleSheet("")  # Normal color when file selected
+        layout.addWidget(self.lbl_external_audio, row, 1, 1, 2)
+        row += 1
 
-        layout.addWidget(ext_row)
         self._update_external_audio_ui()
 
-        # 4) Camera-to-Speaker Mapping section (collapsed by default)
-        mapping_header = QWidget()
-        mapping_header_lay = QHBoxLayout(mapping_header)
-        mapping_header_lay.setContentsMargins(0, 0, 0, 0)
-        mapping_header_lay.setSpacing(4)
+        # 2) Speaker mapping row: label "Speaker mapping" + value "Auto" + [Edit...] button
+        lbl_mapping = QLabel("Speaker mapping")
+        lbl_mapping.setObjectName("lblMappingLabel")
+        layout.addWidget(lbl_mapping, row, 0)
 
-        self.lbl_mapping_summary = QLabel("Speaker mapping: Auto")
+        self.lbl_mapping_summary = QLabel("Auto")
         self.lbl_mapping_summary.setObjectName("lblMappingSummary")
-        mapping_header_lay.addWidget(self.lbl_mapping_summary)
+        layout.addWidget(self.lbl_mapping_summary, row, 1)
 
-        self.btn_edit_mapping = QPushButton("Edit mapping…")
+        self.btn_edit_mapping = QPushButton("Edit…")
         self.btn_edit_mapping.setObjectName("btnEditMapping")
         self.btn_edit_mapping.setToolTip("Choose which speaker each camera should follow")
+        self.btn_edit_mapping.setFixedWidth(80)
         self.btn_edit_mapping.clicked.connect(self._toggle_mapping_expanded)
-        mapping_header_lay.addWidget(self.btn_edit_mapping)
-        mapping_header_lay.addStretch(1)
+        layout.addWidget(self.btn_edit_mapping, row, 2)
+        row += 1
 
-        layout.addWidget(mapping_header)
-
+        # Mapping expanded section (hidden by default)
         self.mapping_container = QWidget()
         self.mapping_layout = QVBoxLayout(self.mapping_container)
-        self.mapping_layout.setContentsMargins(8, 0, 0, 0)
-        self.mapping_layout.setSpacing(2)
-        self.mapping_container.setVisible(False)  # Hidden by default
-        layout.addWidget(self.mapping_container)
-
-        # Helper text
-        helper = QLabel("Choose which speaker each camera should follow. Leave Auto for best effort.")
-        helper.setObjectName("lblMappingHelper")
-        helper.setStyleSheet("color: gray; font-size: 10px;")
-        helper.setWordWrap(True)
-        self.mapping_layout.addWidget(helper)
+        self.mapping_layout.setContentsMargins(20, 4, 0, 4)
+        self.mapping_layout.setSpacing(4)
+        self.mapping_container.setVisible(False)
+        layout.addWidget(self.mapping_container, row, 0, 1, 3)
+        row += 1
 
         # Placeholder label when no cameras
         self.lbl_no_cameras = QLabel("(Add videos to configure mapping)")
@@ -344,43 +338,36 @@ class MainWindow(QMainWindow):
 
         # Store mapping combos: {camera_index: QComboBox}
         self._camera_combos: dict[int, QComboBox] = {}
-        # Available speakers (only Auto initially; real speakers added after diarization)
         self._available_speakers: list[str] = ["Auto (best effort)"]
         self._mapping_expanded: bool = False
 
-        # Warning label for unmapped cameras (hidden - no warnings by default)
+        # Warning label (hidden by default)
         self.lbl_mapping_warning = QLabel("")
         self.lbl_mapping_warning.setObjectName("lblMappingWarning")
         self.lbl_mapping_warning.setStyleSheet("color: orange;")
         self.lbl_mapping_warning.setWordWrap(True)
         self.lbl_mapping_warning.setVisible(False)
-        layout.addWidget(self.lbl_mapping_warning)
+        layout.addWidget(self.lbl_mapping_warning, row, 0, 1, 3)
+        row += 1
 
-        # 5) Output folder selection
-        output_lbl = QLabel("Output folder")
-        output_lbl.setObjectName("lblOutputFolder")
-        layout.addWidget(output_lbl)
+        # 3) Output folder row: label + value + [Choose...] button
+        lbl_output = QLabel("Output folder")
+        lbl_output.setObjectName("lblOutputFolder")
+        layout.addWidget(lbl_output, row, 0)
 
-        output_row = QWidget()
-        output_lay = QHBoxLayout(output_row)
-        output_lay.setContentsMargins(8, 0, 0, 0)
-        output_lay.setSpacing(4)
+        self._output_folder: str | None = self.settings.value("output/folder", None)
+        folder_text = os.path.basename(self._output_folder) if self._output_folder else "Downloads"
+        self.lbl_output_folder = QLabel(folder_text)
+        self.lbl_output_folder.setObjectName("lblOutputFolderPath")
+        self.lbl_output_folder.setToolTip(self._output_folder or "Output will be saved next to input files")
+        layout.addWidget(self.lbl_output_folder, row, 1)
 
         self.btn_choose_output_folder = QPushButton("Choose…")
         self.btn_choose_output_folder.setObjectName("btnChooseOutputFolder")
         self.btn_choose_output_folder.setToolTip("Select output folder for processed video")
+        self.btn_choose_output_folder.setFixedWidth(80)
         self.btn_choose_output_folder.clicked.connect(self._on_choose_output_folder)
-        output_lay.addWidget(self.btn_choose_output_folder)
-
-        # Load last used folder from settings
-        self._output_folder: str | None = self.settings.value("output/folder", None)
-        folder_text = os.path.basename(self._output_folder) if self._output_folder else "(Same as input)"
-        self.lbl_output_folder = QLabel(folder_text)
-        self.lbl_output_folder.setObjectName("lblOutputFolderPath")
-        self.lbl_output_folder.setToolTip(self._output_folder or "Output will be saved next to input files")
-        output_lay.addWidget(self.lbl_output_folder, 1)
-
-        layout.addWidget(output_row)
+        layout.addWidget(self.btn_choose_output_folder, row, 2)
 
         parent_layout.addWidget(group)
 
@@ -411,7 +398,8 @@ class MainWindow(QMainWindow):
         self._external_audio_path = path
         self.settings.setValue("processing/external_audio_path", path)
         self.settings.setValue("last_audio_dir", os.path.dirname(path))
-        self.lbl_external_audio.setText(f"Audio: {os.path.basename(path)}")
+        self.lbl_external_audio.setText(os.path.basename(path))
+        self.lbl_external_audio.setStyleSheet("")  # Normal color when file selected
         logger.info("External audio selected: %s", path)
 
     def _on_choose_output_folder(self) -> None:

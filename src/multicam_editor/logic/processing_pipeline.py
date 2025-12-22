@@ -162,15 +162,64 @@ class ProcessingPipeline:
         return False
 
     def _cleanup(self) -> None:
-        """Remove all temp files created during pipeline."""
+        """Remove all temp files and directories created during pipeline.
+
+        Uses retry logic with small delays to handle files still being released
+        by ffmpeg processes. Logs warnings for files that couldn't be removed.
+        """
+        max_retries = 3
+        retry_delay = 0.5  # seconds
+
+        failed_paths: List[str] = []
+
         for path in self._temp_files:
-            if os.path.isfile(path):
+            if not path:
+                continue
+
+            removed = False
+            for attempt in range(max_retries):
                 try:
-                    os.remove(path)
-                    logger.debug("Cleaned up: %s", path)
+                    if os.path.isfile(path):
+                        os.remove(path)
+                        logger.debug("Cleaned up file: %s", path)
+                        removed = True
+                        break
+                    elif os.path.isdir(path):
+                        import shutil
+                        shutil.rmtree(path, ignore_errors=True)
+                        logger.debug("Cleaned up directory: %s", path)
+                        removed = True
+                        break
+                    else:
+                        # Path doesn't exist, consider it cleaned
+                        removed = True
+                        break
+                except PermissionError as e:
+                    # File might still be in use by ffmpeg process
+                    if attempt < max_retries - 1:
+                        logger.debug(
+                            "Cleanup retry %d/%d for %s (permission error)",
+                            attempt + 1, max_retries, os.path.basename(path)
+                        )
+                        time.sleep(retry_delay)
+                    else:
+                        logger.warning(
+                            "Failed to cleanup %s after %d attempts: %s",
+                            os.path.basename(path), max_retries, e
+                        )
+                        failed_paths.append(path)
                 except Exception as e:
                     logger.debug("Cleanup failed for %s: %s", path, e)
+                    failed_paths.append(path)
+                    break
+
         self._temp_files.clear()
+
+        if failed_paths:
+            logger.warning(
+                "Cleanup incomplete: %d files could not be removed",
+                len(failed_paths)
+            )
 
     def _emit_progress(self, stage_percent: int = 0, message: str = "") -> None:
         """Emit progress update via signals and callback."""

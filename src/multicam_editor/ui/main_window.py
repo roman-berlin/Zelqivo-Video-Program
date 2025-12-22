@@ -251,17 +251,10 @@ class MainWindow(QMainWindow):
         layout.setContentsMargins(6, 6, 6, 6)
         layout.setSpacing(4)
 
-        # 1) Enable Speaker Switching checkbox
-        self.chk_speaker_switching = QCheckBox("Enable Speaker Switching")
-        self.chk_speaker_switching.setObjectName("chkSpeakerSwitching")
-        self.chk_speaker_switching.setToolTip("Automatically switch cameras based on active speaker")
-        self.chk_speaker_switching.setChecked(
-            self.settings.value("processing/speaker_switching", True, type=bool)
-        )
-        self.chk_speaker_switching.toggled.connect(self._on_speaker_switching_toggled)
-        layout.addWidget(self.chk_speaker_switching)
+        # Speaker switching is always enabled (core feature)
+        # No checkbox needed - auto-switch is the main purpose of this app
 
-        # 2) Use External Audio checkbox
+        # 1) Use External Audio checkbox
         self.chk_external_audio = QCheckBox("Use External Audio (Replace camera audio)")
         self.chk_external_audio.setObjectName("chkExternalAudio")
         self.chk_external_audio.setToolTip("Use external audio file for diarization and final output")
@@ -324,11 +317,6 @@ class MainWindow(QMainWindow):
         layout.addWidget(self.lbl_mapping_warning)
 
         parent_layout.addWidget(group)
-
-    def _on_speaker_switching_toggled(self, checked: bool) -> None:
-        """Save speaker switching setting."""
-        self.settings.setValue("processing/speaker_switching", checked)
-        logger.debug("Speaker switching: %s", "enabled" if checked else "disabled")
 
     def _on_external_audio_toggled(self, checked: bool) -> None:
         """Save external audio setting and update UI state."""
@@ -777,8 +765,8 @@ class MainWindow(QMainWindow):
             self._toast(f"Need at least {MIN_VIDEOS_FOR_PROCESS} videos to process.")
             return
 
-        # Read processing options from UI state
-        speaker_switching_enabled = self.chk_speaker_switching.isChecked()
+        # Speaker switching is always enabled (core feature of this app)
+        speaker_switching_enabled = True
         use_external_audio = self.chk_external_audio.isChecked()
 
         # Get external audio path if enabled

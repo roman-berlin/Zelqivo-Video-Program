@@ -78,11 +78,20 @@ class ProcessingWorker(QObject):
         signals.error.connect(self.error.emit)
 
         try:
+            # Convert camera_speaker_mapping to speaker_to_camera_map for pipeline
+            # Note: V1 ENERGY mode ignores mapping (speaker_id == camera_id)
+            speaker_to_camera = None
+            if self.camera_speaker_mapping:
+                # Mapping format: {camera_id: speaker_name} -> not used in V1
+                logger.debug("camera_speaker_mapping provided: %s (ignored in ENERGY mode)",
+                           self.camera_speaker_mapping)
+
             self._pipeline = ProcessingPipeline(
                 self.input_files,
                 signals,
                 progress_callback=self._on_progress_callback,
                 speaker_switching_enabled=self.speaker_switching_enabled,
+                speaker_to_camera_map=speaker_to_camera,
             )
             result = self._pipeline.run(
                 external_audio=self.external_audio,

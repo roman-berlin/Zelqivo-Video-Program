@@ -85,6 +85,11 @@ class ProcessingPipeline:
         pipeline.run(external_audio, resolution)
         # To cancel from another thread:
         pipeline.cancel()
+
+    Mapping note (V1):
+        ENERGY mode: speaker_id == camera_id, no mapping needed.
+        REAL/pyannote mode: requires speaker-to-camera mapping; without it,
+        falls back to single-camera output (primary) with a warning.
     """
 
     def __init__(
@@ -93,6 +98,7 @@ class ProcessingPipeline:
         signals: ProcessingSignals,
         progress_callback: Optional[Callable[[PipelineProgress], None]] = None,
         speaker_switching_enabled: bool = True,
+        speaker_to_camera_map: Optional[dict[int, int]] = None,
     ) -> None:
         if len(input_files) < 2:
             raise ValueError("At least 2 input files required")
@@ -100,6 +106,11 @@ class ProcessingPipeline:
         self.signals = signals
         self.progress_callback = progress_callback
         self.speaker_switching_enabled = speaker_switching_enabled
+
+        # Speaker-to-camera mapping (only used by pyannote mode, ignored in ENERGY)
+        # Format: {speaker_id: camera_id}
+        self._speaker_to_camera_map: dict[int, int] = speaker_to_camera_map or {}
+        self._diarization_mode = DiarizationMode.ENERGY  # V1 default
 
         # Cancellation state
         self._cancelled = False
@@ -460,6 +471,65 @@ class ProcessingPipeline:
             logger.error("Diarization failed: %s", e, exc_info=True)
             self.signals.error.emit(f"Diarization failed: {e}")
             return False
+
+    def _apply_speaker_to_camera_mapping(
+        self,
+        segments: List[SpeakerSegment],
+    ) -> tuple[List[SpeakerSegment], bool]:
+        """Apply speaker-to-camera mapping if using pyannote mode.
+
+        V1 behavior:
+        - ENERGY mode: speaker_id == camera_id, no mapping needed; return as-is.
+        - REAL/pyannote mode: requires mapping. If missing/incomplete, fallback
+          to primary camera (camera 0) for all segments with warning.
+
+        Args:
+            segments: Raw diarization segments
+
+        Returns:
+            (mapped_segments, fallback_triggered) - fallback_triggered is True
+            if mapping was missing and we fell back to single-camera.
+        """
+        # ENERGY mode: speaker_id already equals camera_id - no mapping needed
+        if self._diarization_mode == DiarizationMode.ENERGY:
+            logger.debug("ENERGY mode: no speaker-to-camera mapping required")
+            return segments, False
+
+        # REAL/pyannote mode: check if we have complete mapping
+        if not self._speaker_to_camera_map:
+            logger.warning(
+                "Pyannote mode but no speaker-to-camera mapping provided; "
+                "falling back to single-camera output (primary camera)"
+            )
+            return [], True  # Empty segments = single-camera fallback in decision
+
+        # Check if mapping is complete for all detected speakers
+        detected_speakers = {s.speaker_id for s in segments}
+        missing_speakers = detected_speakers - set(self._speaker_to_camera_map.keys())
+
+        if missing_speakers:
+            logger.warning(
+                "Incomplete speaker-to-camera mapping: speakers %s not mapped; "
+                "falling back to single-camera output (primary camera)",
+                missing_speakers,
+            )
+            return [], True
+
+        # Apply mapping: convert speaker_id to camera_id
+        mapped: List[SpeakerSegment] = []
+        num_cameras = len(self.input_files)
+        for seg in segments:
+            camera_id = self._speaker_to_camera_map.get(seg.speaker_id, 0)
+            # Clamp to valid camera range
+            camera_id = min(camera_id, num_cameras - 1)
+            mapped.append(SpeakerSegment(
+                start_ms=seg.start_ms,
+                end_ms=seg.end_ms,
+                speaker_id=camera_id,  # Now speaker_id == camera_id
+            ))
+
+        logger.info("Applied speaker-to-camera mapping: %d segments mapped", len(mapped))
+        return mapped, False
 
     def _stage_decision(self) -> bool:
         """Generate cut plan from speaker segments.

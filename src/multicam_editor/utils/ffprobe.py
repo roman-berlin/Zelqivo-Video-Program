@@ -248,6 +248,21 @@ def is_ffprobe_available() -> bool:
     return _find_ffprobe() is not None
 
 
+def has_audio_stream(path: str) -> bool:
+    """Check if a media file has at least one audio stream.
+
+    Args:
+        path: Path to media file
+
+    Returns:
+        True if file has audio, False otherwise or on error
+    """
+    result = probe(path)
+    if result.error or not result.streams:
+        return False
+    return any(s.codec_type == "audio" for s in result.streams)
+
+
 def clear_cache() -> None:
     """Clear the probe cache. Useful for testing."""
     _probe_cache.clear()

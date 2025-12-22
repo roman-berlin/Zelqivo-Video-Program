@@ -10,10 +10,12 @@ import pytest
 import soundfile as sf
 
 from multicam_editor.logic.audio_sync import (
+    CameraAlignment,
     SyncResult,
     _apply_offset,
     _cross_correlate_offset,
     align_audio_offset,
+    align_cameras,
     sync_external_audio,
 )
 

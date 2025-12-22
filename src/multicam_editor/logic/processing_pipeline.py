@@ -27,6 +27,7 @@ from .active_speaker import (
     create_backend,
 )
 from .decision_engine import DecisionEngine, CutSegment
+from .pipeline_config import PipelineConfig
 from .qa_artifacts import QAArtifactExporter
 from .video_merger import SegmentRenderer, CutDefinition, concatenate_segments
 
@@ -81,7 +82,8 @@ class ProcessingPipeline:
     """Pipeline that merges multiple videos based on active speaker detection.
 
     Usage:
-        pipeline = ProcessingPipeline(input_files, signals)
+        config = PipelineConfig(speaker_switching_enabled=True)
+        pipeline = ProcessingPipeline(input_files, signals, config=config)
         pipeline.run(external_audio, resolution)
         # To cancel from another thread:
         pipeline.cancel()
@@ -97,6 +99,8 @@ class ProcessingPipeline:
         input_files: List[str],
         signals: ProcessingSignals,
         progress_callback: Optional[Callable[[PipelineProgress], None]] = None,
+        config: Optional[PipelineConfig] = None,
+        # Legacy params for backwards compatibility
         speaker_switching_enabled: bool = True,
         speaker_to_camera_map: Optional[dict[int, int]] = None,
     ) -> None:
@@ -105,11 +109,18 @@ class ProcessingPipeline:
         self.input_files = input_files
         self.signals = signals
         self.progress_callback = progress_callback
-        self.speaker_switching_enabled = speaker_switching_enabled
 
-        # Speaker-to-camera mapping (only used by pyannote mode, ignored in ENERGY)
-        # Format: {speaker_id: camera_id}
-        self._speaker_to_camera_map: dict[int, int] = speaker_to_camera_map or {}
+        # Use config if provided, otherwise fall back to legacy params
+        if config is not None:
+            self._config = config
+        else:
+            self._config = PipelineConfig(
+                speaker_switching_enabled=speaker_switching_enabled,
+                speaker_to_camera_map=speaker_to_camera_map or {},
+            )
+
+        # Convenience accessor
+        self.speaker_switching_enabled = self._config.speaker_switching_enabled
         self._diarization_mode = DiarizationMode.ENERGY  # V1 default
 
         # Cancellation state
@@ -496,7 +507,8 @@ class ProcessingPipeline:
             return segments, False
 
         # REAL/pyannote mode: check if we have complete mapping
-        if not self._speaker_to_camera_map:
+        speaker_map = self._config.speaker_to_camera_map
+        if not speaker_map:
             logger.warning(
                 "Pyannote mode but no speaker-to-camera mapping provided; "
                 "falling back to single-camera output (primary camera)"
@@ -505,7 +517,7 @@ class ProcessingPipeline:
 
         # Check if mapping is complete for all detected speakers
         detected_speakers = {s.speaker_id for s in segments}
-        missing_speakers = detected_speakers - set(self._speaker_to_camera_map.keys())
+        missing_speakers = detected_speakers - set(speaker_map.keys())
 
         if missing_speakers:
             logger.warning(
@@ -519,7 +531,7 @@ class ProcessingPipeline:
         mapped: List[SpeakerSegment] = []
         num_cameras = len(self.input_files)
         for seg in segments:
-            camera_id = self._speaker_to_camera_map.get(seg.speaker_id, 0)
+            camera_id = speaker_map.get(seg.speaker_id, 0)
             # Clamp to valid camera range
             camera_id = min(camera_id, num_cameras - 1)
             mapped.append(SpeakerSegment(

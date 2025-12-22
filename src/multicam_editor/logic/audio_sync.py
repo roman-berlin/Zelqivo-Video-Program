@@ -9,11 +9,48 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import List, Optional
 
-import librosa
 import numpy as np
-import soundfile as sf
 
 logger = logging.getLogger(__name__)
+
+# Lazy import flags for optional AI dependencies
+_librosa = None
+_soundfile = None
+_ai_import_error: Optional[str] = None
+
+
+def _ensure_ai_deps():
+    """Lazy-load librosa and soundfile. Raises ImportError if not available."""
+    global _librosa, _soundfile, _ai_import_error
+    if _librosa is not None and _soundfile is not None:
+        return
+    if _ai_import_error is not None:
+        raise ImportError(_ai_import_error)
+    try:
+        import librosa
+        import soundfile as sf
+        _librosa = librosa
+        _soundfile = sf
+        logger.debug("AI audio dependencies loaded: librosa, soundfile")
+    except ImportError as e:
+        _ai_import_error = (
+            f"AI audio dependencies not installed: {e}. "
+            "Install with: pip install multicam-editor[ai]"
+        )
+        raise ImportError(_ai_import_error) from e
+
+
+def is_audio_sync_available() -> tuple[bool, Optional[str]]:
+    """Check if audio sync (librosa/soundfile) is available.
+
+    Returns:
+        (available, error_message) - error_message is None if available.
+    """
+    try:
+        _ensure_ai_deps()
+        return True, None
+    except ImportError as e:
+        return False, str(e)
 
 # Target sample rate for cross-correlation (lower for faster processing)
 _SYNC_SR = 16000
@@ -42,7 +79,8 @@ class CameraAlignment:
 
 def _load_audio_mono(path: str, sr: int = _SYNC_SR) -> tuple[np.ndarray, int]:
     """Load audio file as mono at specified sample rate."""
-    audio, sr_out = librosa.load(path, sr=sr, mono=True)
+    _ensure_ai_deps()
+    audio, sr_out = _librosa.load(path, sr=sr, mono=True)
     return audio, sr_out
 
 
@@ -155,7 +193,8 @@ def sync_external_audio(
         logger.info("Detected offset: %.1f ms (correlation=%.4f)", offset_ms, corr_score)
 
         # Reload at original quality for output
-        ext_full, sr_full = librosa.load(external_audio, sr=None, mono=False)
+        _ensure_ai_deps()
+        ext_full, sr_full = _librosa.load(external_audio, sr=None, mono=False)
         if ext_full.ndim == 1:
             ext_full = ext_full.reshape(1, -1)
 
@@ -178,7 +217,7 @@ def sync_external_audio(
         if output_dir is None:
             output_dir = tempfile.gettempdir()
         out_path = Path(output_dir) / f"{ext_path.stem}_synced.wav"
-        sf.write(str(out_path), adjusted.T if adjusted.ndim > 1 else adjusted, sr_full)
+        _soundfile.write(str(out_path), adjusted.T if adjusted.ndim > 1 else adjusted, sr_full)
 
         logger.info("Synced audio saved: %s (offset=%.1fms, status=%s)", out_path, offset_ms, status)
         return SyncResult(str(out_path), offset_ms, status, message)

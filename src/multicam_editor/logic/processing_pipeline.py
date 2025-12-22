@@ -19,7 +19,13 @@ from PyQt6.QtCore import QSettings
 
 from ..utils.ffprobe import probe, ProbeResult
 from ..utils.signals import ProcessingSignals
-from .active_speaker import ActiveSpeakerDetector, SpeakerSegment
+from .active_speaker import (
+    ActiveSpeakerDetector,
+    DiarizationMode,
+    RealEnergyVADBackend,
+    SpeakerSegment,
+    create_backend,
+)
 from .decision_engine import DecisionEngine, CutSegment
 from .qa_artifacts import QAArtifactExporter
 from .video_merger import SegmentRenderer, CutDefinition, concatenate_segments
@@ -79,6 +85,11 @@ class ProcessingPipeline:
         pipeline.run(external_audio, resolution)
         # To cancel from another thread:
         pipeline.cancel()
+
+    Mapping note (V1):
+        ENERGY mode: speaker_id == camera_id, no mapping needed.
+        REAL/pyannote mode: requires speaker-to-camera mapping; without it,
+        falls back to single-camera output (primary) with a warning.
     """
 
     def __init__(
@@ -86,12 +97,20 @@ class ProcessingPipeline:
         input_files: List[str],
         signals: ProcessingSignals,
         progress_callback: Optional[Callable[[PipelineProgress], None]] = None,
+        speaker_switching_enabled: bool = True,
+        speaker_to_camera_map: Optional[dict[int, int]] = None,
     ) -> None:
         if len(input_files) < 2:
             raise ValueError("At least 2 input files required")
         self.input_files = input_files
         self.signals = signals
         self.progress_callback = progress_callback
+        self.speaker_switching_enabled = speaker_switching_enabled
+
+        # Speaker-to-camera mapping (only used by pyannote mode, ignored in ENERGY)
+        # Format: {speaker_id: camera_id}
+        self._speaker_to_camera_map: dict[int, int] = speaker_to_camera_map or {}
+        self._diarization_mode = DiarizationMode.ENERGY  # V1 default
 
         # Cancellation state
         self._cancelled = False
@@ -366,21 +385,78 @@ class ProcessingPipeline:
             self._emit_progress(100, "Alignment failed, using default offsets")
 
     def _stage_diarize(self) -> bool:
-        """Run speaker diarization on first video's audio."""
+        """Run speaker diarization using ENERGY backend (CPU-only RMS analysis).
+
+        If speaker_switching_enabled is False, skips diarization entirely.
+        Extracts audio from each camera, computes energy per window,
+        and determines which camera has the active speaker.
+        """
         self._advance_stage(PipelineStage.DIARIZE)
 
-        # Use first video as reference for diarization
-        # In production, this would extract audio and analyze all tracks
-        detector = ActiveSpeakerDetector()
+        # If switching is OFF, skip diarization - decision stage will create single-camera plan
+        if not self.speaker_switching_enabled:
+            logger.info("Speaker switching disabled, skipping diarization")
+            self._speaker_segments = []
+            self._qa_exporter.set_diarization([])
+            self._emit_progress(100, "Speaker switching disabled (single camera mode)")
+            return True
+
+        from ..utils.ffmpeg import extract_audio_to_wav
+
+        num_cameras = len(self.input_files)
+        camera_audio_paths: List[str] = []
 
         try:
-            # Stub: diarize using first video path as reference
-            # Real implementation would extract audio track first
-            self._emit_progress(50, "Analyzing speaker activity...")
+            # Step 1: Extract audio from each camera
+            self._emit_progress(10, f"Extracting audio from {num_cameras} cameras...")
+            logger.info("Extracting audio from %d cameras for energy analysis", num_cameras)
 
-            num_cameras = len(self.input_files)
+            for i, video_path in enumerate(self.input_files):
+                if self._cancelled:
+                    # Cleanup any extracted audio before returning
+                    for p in camera_audio_paths:
+                        self._temp_files.append(p)
+                    return False
+
+                self._emit_progress(
+                    10 + int((i + 1) * 30 / num_cameras),
+                    f"Extracting audio {i + 1}/{num_cameras}..."
+                )
+
+                result = extract_audio_to_wav(
+                    video_path,
+                    sample_rate=16000,  # Standard for speech analysis
+                    mono=True,
+                    timeout=120.0,
+                )
+
+                if not result.success or not result.output_path:
+                    logger.error("Failed to extract audio from camera %d: %s", i, result.error)
+                    # Continue with empty for this camera - it will have 0 energy
+                    camera_audio_paths.append("")
+                else:
+                    camera_audio_paths.append(result.output_path)
+                    self._temp_files.append(result.output_path)
+                    logger.info("Extracted audio from camera %d: %s",
+                               i, os.path.basename(result.output_path))
+
+            # Step 2: Create ENERGY backend and set camera audio paths
+            self._emit_progress(50, "Analyzing speaker energy levels...")
+
+            backend, error = create_backend(DiarizationMode.ENERGY)
+            if error:
+                logger.warning("Backend creation warning: %s", error)
+
+            # Set the camera audio paths for RealEnergyVADBackend
+            if isinstance(backend, RealEnergyVADBackend):
+                backend.set_camera_audio_paths(camera_audio_paths)
+            else:
+                logger.warning("Backend is not RealEnergyVADBackend, falling back to stub")
+
+            # Step 3: Run diarization
+            detector = ActiveSpeakerDetector(backend=backend)
             self._speaker_segments = detector.detect(
-                self.input_files[0],  # Use as audio reference
+                self.input_files[0],  # Reference path (not used by ENERGY backend)
                 num_channels=num_cameras,
             )
 
@@ -388,7 +464,7 @@ class ProcessingPipeline:
             self._qa_exporter.set_diarization(self._speaker_segments)
 
             self._emit_progress(100, f"Found {len(self._speaker_segments)} speaker segments")
-            logger.info("Diarization complete: %d segments", len(self._speaker_segments))
+            logger.info("Diarization complete (ENERGY mode): %d segments", len(self._speaker_segments))
             return True
 
         except Exception as e:
@@ -396,14 +472,84 @@ class ProcessingPipeline:
             self.signals.error.emit(f"Diarization failed: {e}")
             return False
 
+    def _apply_speaker_to_camera_mapping(
+        self,
+        segments: List[SpeakerSegment],
+    ) -> tuple[List[SpeakerSegment], bool]:
+        """Apply speaker-to-camera mapping if using pyannote mode.
+
+        V1 behavior:
+        - ENERGY mode: speaker_id == camera_id, no mapping needed; return as-is.
+        - REAL/pyannote mode: requires mapping. If missing/incomplete, fallback
+          to primary camera (camera 0) for all segments with warning.
+
+        Args:
+            segments: Raw diarization segments
+
+        Returns:
+            (mapped_segments, fallback_triggered) - fallback_triggered is True
+            if mapping was missing and we fell back to single-camera.
+        """
+        # ENERGY mode: speaker_id already equals camera_id - no mapping needed
+        if self._diarization_mode == DiarizationMode.ENERGY:
+            logger.debug("ENERGY mode: no speaker-to-camera mapping required")
+            return segments, False
+
+        # REAL/pyannote mode: check if we have complete mapping
+        if not self._speaker_to_camera_map:
+            logger.warning(
+                "Pyannote mode but no speaker-to-camera mapping provided; "
+                "falling back to single-camera output (primary camera)"
+            )
+            return [], True  # Empty segments = single-camera fallback in decision
+
+        # Check if mapping is complete for all detected speakers
+        detected_speakers = {s.speaker_id for s in segments}
+        missing_speakers = detected_speakers - set(self._speaker_to_camera_map.keys())
+
+        if missing_speakers:
+            logger.warning(
+                "Incomplete speaker-to-camera mapping: speakers %s not mapped; "
+                "falling back to single-camera output (primary camera)",
+                missing_speakers,
+            )
+            return [], True
+
+        # Apply mapping: convert speaker_id to camera_id
+        mapped: List[SpeakerSegment] = []
+        num_cameras = len(self.input_files)
+        for seg in segments:
+            camera_id = self._speaker_to_camera_map.get(seg.speaker_id, 0)
+            # Clamp to valid camera range
+            camera_id = min(camera_id, num_cameras - 1)
+            mapped.append(SpeakerSegment(
+                start_ms=seg.start_ms,
+                end_ms=seg.end_ms,
+                speaker_id=camera_id,  # Now speaker_id == camera_id
+            ))
+
+        logger.info("Applied speaker-to-camera mapping: %d segments mapped", len(mapped))
+        return mapped, False
+
     def _stage_decision(self) -> bool:
-        """Generate cut plan from speaker segments."""
+        """Generate cut plan from speaker segments.
+
+        If speaker_switching_enabled is False OR diarization returned empty,
+        creates a single-segment plan covering full duration on primary camera.
+        """
         self._advance_stage(PipelineStage.DECISION)
 
         # Get total duration from probe results
         total_duration_ms = max(r.duration_ms for r in self._probe_results)
 
         self._emit_progress(50, "Generating cut plan...")
+
+        # Fallback: if switching enabled but diarization returned empty, warn user
+        if self.speaker_switching_enabled and not self._speaker_segments:
+            logger.warning(
+                "Speaker switching enabled but diarization returned no segments; "
+                "falling back to single-camera output on primary camera"
+            )
 
         # Read settings for decision engine
         settings = QSettings("MultiCamEditor", "MultiCamEditor")

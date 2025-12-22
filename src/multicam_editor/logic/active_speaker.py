@@ -3,7 +3,10 @@
 from __future__ import annotations
 
 import logging
+import struct
+import tempfile
 import time
+import wave
 from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
@@ -16,6 +19,7 @@ class DiarizationMode(Enum):
     """Diarization backend mode selection."""
     OFF = "off"          # No diarization, single camera
     STUB = "stub"        # Dev-only stub (EnergyVADBackend)
+    ENERGY = "energy"    # CPU-only RMS energy-based switching (default for V1)
     REAL = "real"        # Real pyannote.audio backend
 
 
@@ -89,6 +93,236 @@ class EnergyVADBackend:
                 speaker_id=speaker_id,
             ))
             current_ms += segment_duration_ms
+
+        return segments
+
+
+class RealEnergyVADBackend:
+    """
+    CPU-only energy-based speaker detection for multicam switching.
+
+    Analyzes RMS energy in fixed windows across multiple camera audio tracks.
+    For each window, picks the camera with highest energy above threshold.
+    Merges consecutive windows with same speaker into segments.
+
+    This is the default V1 backend - works without pyannote or HuggingFace setup.
+    """
+
+    # Default parameters
+    DEFAULT_WINDOW_MS = 200
+    DEFAULT_SILENCE_THRESHOLD = 0.01  # RMS below this = silence
+    DEFAULT_MIN_SEGMENT_MS = 200  # Minimum segment length
+
+    def __init__(
+        self,
+        window_ms: int = DEFAULT_WINDOW_MS,
+        silence_threshold: float = DEFAULT_SILENCE_THRESHOLD,
+        min_segment_ms: int = DEFAULT_MIN_SEGMENT_MS,
+    ) -> None:
+        self.window_ms = window_ms
+        self.silence_threshold = silence_threshold
+        self.min_segment_ms = min_segment_ms
+        # Paths to camera audio WAV files (set before diarize)
+        self._camera_audio_paths: List[str] = []
+
+    def set_camera_audio_paths(self, paths: List[str]) -> None:
+        """Set paths to extracted WAV audio for each camera."""
+        self._camera_audio_paths = list(paths)
+        logger.debug("RealEnergyVADBackend: set %d camera audio paths", len(paths))
+
+    def diarize(self, audio_path: str, num_channels: int = 2) -> List[SpeakerSegment]:
+        """
+        Analyze energy across camera audio files and return speaker segments.
+
+        If camera_audio_paths are set, uses those. Otherwise falls back to stub.
+        speaker_id maps directly to camera_id (cam0, cam1, etc.).
+        """
+        if not self._camera_audio_paths:
+            logger.warning("RealEnergyVADBackend: no camera audio paths set, using stub")
+            return EnergyVADBackend().diarize(audio_path, num_channels)
+
+        num_cameras = len(self._camera_audio_paths)
+        logger.info("RealEnergyVADBackend: analyzing %d cameras, window=%dms",
+                   num_cameras, self.window_ms)
+
+        try:
+            # Load audio data from each camera
+            camera_samples: List[List[float]] = []
+            sample_rate = 16000  # Expected from ffmpeg extraction
+
+            for i, wav_path in enumerate(self._camera_audio_paths):
+                samples, sr = self._load_wav_samples(wav_path)
+                if sr != sample_rate and sr > 0:
+                    logger.warning("Camera %d sample rate %d != expected %d", i, sr, sample_rate)
+                    sample_rate = sr
+                camera_samples.append(samples)
+                logger.debug("Camera %d: loaded %d samples", i, len(samples))
+
+            if not camera_samples or all(len(s) == 0 for s in camera_samples):
+                logger.error("No audio samples loaded from any camera")
+                return []
+
+            # Find max duration across cameras
+            max_samples = max(len(s) for s in camera_samples)
+            total_duration_ms = int(max_samples * 1000 / sample_rate)
+            logger.info("Total duration: %dms, sample_rate: %d", total_duration_ms, sample_rate)
+
+            # Compute RMS energy per window for each camera
+            window_samples = int(self.window_ms * sample_rate / 1000)
+            num_windows = max(1, max_samples // window_samples)
+
+            # energy_matrix[camera][window] = RMS energy
+            energy_matrix: List[List[float]] = []
+            for cam_idx, samples in enumerate(camera_samples):
+                cam_energy = []
+                for w in range(num_windows):
+                    start = w * window_samples
+                    end = min(start + window_samples, len(samples))
+                    if start >= len(samples):
+                        cam_energy.append(0.0)
+                    else:
+                        rms = self._compute_rms(samples[start:end])
+                        cam_energy.append(rms)
+                energy_matrix.append(cam_energy)
+                logger.debug("Camera %d: %d windows, avg RMS=%.4f",
+                            cam_idx, len(cam_energy),
+                            sum(cam_energy) / len(cam_energy) if cam_energy else 0)
+
+            # For each window, pick camera with highest energy above threshold
+            window_winners: List[int] = []
+            current_camera = 0  # Default to cam0
+
+            for w in range(num_windows):
+                max_energy = 0.0
+                winner = current_camera  # Prefer current when unclear
+
+                for cam_idx in range(num_cameras):
+                    energy = energy_matrix[cam_idx][w] if w < len(energy_matrix[cam_idx]) else 0.0
+                    if energy > max_energy and energy > self.silence_threshold:
+                        max_energy = energy
+                        winner = cam_idx
+
+                # If all below threshold, keep current camera (no flicker)
+                if max_energy <= self.silence_threshold:
+                    winner = current_camera
+
+                window_winners.append(winner)
+                current_camera = winner
+
+            # Merge consecutive windows with same winner into segments
+            segments = self._merge_windows_to_segments(
+                window_winners, self.window_ms, total_duration_ms
+            )
+
+            logger.info("RealEnergyVADBackend: created %d segments from %d windows",
+                       len(segments), num_windows)
+            return segments
+
+        except Exception as e:
+            logger.error("RealEnergyVADBackend error: %s", e, exc_info=True)
+            return []
+
+    @staticmethod
+    def _load_wav_samples(wav_path: str) -> tuple[List[float], int]:
+        """Load WAV file and return normalized samples (-1.0 to 1.0) and sample rate."""
+        if not Path(wav_path).exists():
+            logger.error("WAV file not found: %s", wav_path)
+            return [], 0
+
+        try:
+            with wave.open(wav_path, 'rb') as wf:
+                n_channels = wf.getnchannels()
+                sample_width = wf.getsampwidth()
+                sample_rate = wf.getframerate()
+                n_frames = wf.getnframes()
+
+                raw_data = wf.readframes(n_frames)
+
+            # Convert to float samples
+            if sample_width == 2:  # 16-bit
+                fmt = f"<{n_frames * n_channels}h"
+                samples = struct.unpack(fmt, raw_data)
+                max_val = 32768.0
+            elif sample_width == 1:  # 8-bit
+                samples = list(raw_data)
+                max_val = 128.0
+            else:
+                logger.warning("Unsupported sample width: %d", sample_width)
+                return [], sample_rate
+
+            # Normalize and convert to mono if stereo
+            float_samples: List[float] = []
+            for i in range(0, len(samples), n_channels):
+                # Average channels for mono
+                val = sum(samples[i:i + n_channels]) / n_channels
+                float_samples.append(val / max_val)
+
+            return float_samples, sample_rate
+
+        except Exception as e:
+            logger.error("Failed to load WAV %s: %s", wav_path, e)
+            return [], 0
+
+    @staticmethod
+    def _compute_rms(samples: List[float]) -> float:
+        """Compute RMS (root mean square) energy of samples."""
+        if not samples:
+            return 0.0
+        sum_sq = sum(s * s for s in samples)
+        return (sum_sq / len(samples)) ** 0.5
+
+    def _merge_windows_to_segments(
+        self,
+        window_winners: List[int],
+        window_ms: int,
+        total_duration_ms: int,
+    ) -> List[SpeakerSegment]:
+        """Merge consecutive windows with same speaker into segments."""
+        if not window_winners:
+            return []
+
+        segments: List[SpeakerSegment] = []
+        current_speaker = window_winners[0]
+        segment_start_ms = 0
+
+        for i, speaker in enumerate(window_winners[1:], start=1):
+            if speaker != current_speaker:
+                # Close current segment
+                end_ms = i * window_ms
+                if end_ms - segment_start_ms >= self.min_segment_ms:
+                    segments.append(SpeakerSegment(
+                        start_ms=segment_start_ms,
+                        end_ms=end_ms,
+                        speaker_id=current_speaker,
+                    ))
+                else:
+                    # Too short, merge with previous if exists
+                    if segments:
+                        # Extend previous segment
+                        prev = segments[-1]
+                        segments[-1] = SpeakerSegment(
+                            start_ms=prev.start_ms,
+                            end_ms=end_ms,
+                            speaker_id=prev.speaker_id,
+                        )
+                    else:
+                        # First segment too short, still add it
+                        segments.append(SpeakerSegment(
+                            start_ms=segment_start_ms,
+                            end_ms=end_ms,
+                            speaker_id=current_speaker,
+                        ))
+                segment_start_ms = end_ms
+                current_speaker = speaker
+
+        # Close final segment
+        end_ms = total_duration_ms
+        if end_ms > segment_start_ms:
+            segments.append(SpeakerSegment(
+                start_ms=segment_start_ms,
+                end_ms=end_ms,
+                speaker_id=current_speaker,
+            ))
 
         return segments
 
@@ -267,7 +501,7 @@ def create_backend(
 
     Args:
         mode: Which backend to use
-        fallback_on_error: If True and REAL backend fails, fall back to STUB
+        fallback_on_error: If True and REAL backend fails, fall back to ENERGY
 
     Returns:
         (backend, error_message) - error_message is None if OK
@@ -278,19 +512,22 @@ def create_backend(
     if mode == DiarizationMode.STUB:
         return EnergyVADBackend(), None
 
+    if mode == DiarizationMode.ENERGY:
+        return RealEnergyVADBackend(), None
+
     if mode == DiarizationMode.REAL:
         if PyannoteBackend.is_available():
             return PyannoteBackend(), None
         else:
             error = PyannoteBackend.get_error() or "Unknown error loading pyannote"
             if fallback_on_error:
-                logger.warning("Falling back to stub backend: %s", error)
-                return EnergyVADBackend(), error
+                logger.warning("Falling back to ENERGY backend: %s", error)
+                return RealEnergyVADBackend(), error
             else:
                 return NullBackend(), error
 
-    # Unknown mode, default to stub
-    return EnergyVADBackend(), f"Unknown mode: {mode}"
+    # Unknown mode, default to ENERGY
+    return RealEnergyVADBackend(), f"Unknown mode: {mode}"
 
 
 class ActiveSpeakerDetector:

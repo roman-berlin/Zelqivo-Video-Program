@@ -65,6 +65,20 @@ class TestProcessingPipeline:
         assert len(pipeline.input_files) == 2
         assert pipeline._cancelled is False
 
+    def test_init_speaker_switching_default_enabled(self):
+        """Pipeline defaults to speaker_switching_enabled=True."""
+        signals = ProcessingSignals()
+        pipeline = ProcessingPipeline(["file1.mp4", "file2.mp4"], signals)
+        assert pipeline.speaker_switching_enabled is True
+
+    def test_init_speaker_switching_can_be_disabled(self):
+        """Pipeline can be created with speaker_switching_enabled=False."""
+        signals = ProcessingSignals()
+        pipeline = ProcessingPipeline(
+            ["file1.mp4", "file2.mp4"], signals, speaker_switching_enabled=False
+        )
+        assert pipeline.speaker_switching_enabled is False
+
     def test_cancel_sets_flag(self):
         """Cancel should set cancelled flag."""
         signals = ProcessingSignals()

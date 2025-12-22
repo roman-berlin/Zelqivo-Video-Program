@@ -465,25 +465,67 @@ class ProcessingPipeline:
         return True
 
     def _stage_sync(self, external_audio: str) -> Optional[str]:
-        """Sync external audio to video reference."""
+        """Sync external audio to video reference.
+
+        Extracts reference audio from primary camera to temp WAV first,
+        then uses cross-correlation to sync. Falls back gracefully on error.
+        """
         self._advance_stage(PipelineStage.SYNC)
 
         from .audio_sync import sync_external_audio
+        from ..utils.ffmpeg import extract_audio_to_wav
 
+        self._emit_progress(20, "Extracting reference audio from primary camera...")
+
+        # Step 1: Extract audio from primary video to temp WAV
+        primary_video = self.input_files[0]
+        logger.info("Extracting reference audio from: %s", os.path.basename(primary_video))
+
+        try:
+            extract_result = extract_audio_to_wav(
+                primary_video,
+                sample_rate=16000,  # Match sync sample rate
+                mono=True,
+                timeout=120.0,
+            )
+        except Exception as e:
+            error_msg = f"Reference audio extraction error: {e}"
+            logger.error(error_msg, exc_info=True)
+            self._qa_exporter.set_sync_info(offset_ms=0, success=False, message=error_msg)
+            self._emit_progress(100, "Sync failed (extraction error), using original audio")
+            return None
+
+        if not extract_result.success or not extract_result.output_path:
+            error_msg = f"Failed to extract reference audio: {extract_result.error}"
+            logger.error(error_msg)
+            self._qa_exporter.set_sync_info(offset_ms=0, success=False, message=error_msg)
+            self._emit_progress(100, "Sync failed (no reference audio), using original audio")
+            return None
+
+        ref_wav_path = extract_result.output_path
+        self._temp_files.append(ref_wav_path)
+        logger.info("Reference audio extracted: %s", os.path.basename(ref_wav_path))
+
+        # Step 2: Sync external audio to extracted reference
         self._emit_progress(50, "Synchronizing external audio...")
 
-        # Use first video as reference
-        result = sync_external_audio(
-            external_audio=external_audio,
-            reference_audio=self.input_files[0],
-        )
+        try:
+            result = sync_external_audio(
+                external_audio=external_audio,
+                reference_audio=ref_wav_path,  # Use extracted WAV, not video
+            )
+        except Exception as e:
+            error_msg = f"Audio sync error: {e}"
+            logger.error(error_msg, exc_info=True)
+            self._qa_exporter.set_sync_info(offset_ms=0, success=False, message=error_msg)
+            self._emit_progress(100, "Sync failed (correlation error), using original audio")
+            return None
 
         if result is None or result.status == "failed":
-            error_msg = result.message if result else "Sync failed"
+            error_msg = result.message if result else "Sync returned no result"
             logger.error("Audio sync failed: %s", error_msg)
             self._qa_exporter.set_sync_info(offset_ms=0, success=False, message=error_msg)
-            self.signals.error.emit(f"Audio sync failed: {error_msg}")
-            self._emit_progress(100, "Sync failed, continuing without external audio")
+            self._emit_progress(100, "Sync failed, using original audio")
             return None
 
         if result.output_path:

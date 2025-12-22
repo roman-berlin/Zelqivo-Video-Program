@@ -28,31 +28,71 @@ continuous integration workflow.
 
 ### Getting Started
 
-The GUI depends on a number of heavy multimedia libraries (PyQt6, torch,
-moviepy, etc.) which are *not* included in the default installation.  To
-install these optional runtime dependencies use the original `requirements.txt`
-or install the packages you need manually.  The following steps focus on
-setting up a development environment for running the tests and static
-analysis tools.
+MultiCamEditor offers two installation modes:
 
-1. **Create a virtual environment** (recommended):
+- **Core (default)**: CPU-only operation with energy-based speaker detection.
+  No torch/pyannote required. Ideal for non-technical users.
+- **AI extras**: Adds real AI diarization (pyannote.audio) and advanced audio
+  sync (librosa). Requires ~2GB disk space for models.
 
-   ```bash
-   python -m venv .venv
-   source .venv/bin/activate
-   ```
+#### Option A: Core Installation (Recommended for Most Users)
 
-2. **Install development dependencies**:
+```bash
+python -m venv .venv
+source .venv/bin/activate  # Windows: .venv\Scripts\activate
+pip install -e .
+```
 
-   ```bash
-   pip install -r requirements.txt
-   ```
+The app will run in CPU-only mode with energy-based speaker switching.
 
-3. **Run the test suite**:
+#### Option B: Full AI Installation
 
-   ```bash
-   pytest -q
-   ```
+```bash
+python -m venv .venv
+source .venv/bin/activate  # Windows: .venv\Scripts\activate
+pip install -e ".[ai]"
+```
+
+This enables:
+- Real pyannote.audio speaker diarization
+- Advanced librosa-based audio sync
+
+#### Option C: Development Installation
+
+```bash
+python -m venv .venv
+source .venv/bin/activate
+pip install -e ".[dev]"       # Core + dev tools (pytest, black, ruff, mypy)
+pip install -e ".[all]"       # Everything (core + ai + dev)
+```
+
+#### Check Backend Status
+
+To verify which features are available:
+
+```bash
+python -m multicam_editor.utils.backends
+```
+
+Output example:
+```
+=== MultiCamEditor Backend Status ===
+
+  [OK] Core (PyQt, numpy, ffmpeg)
+  [OK] Energy VAD (CPU speaker detection)
+  [--] Audio Sync (librosa, soundfile)
+       AI audio dependencies not installed...
+  [--] Pyannote (AI diarization)
+       pyannote.audio not installed...
+
+To enable AI features, install: pip install multicam-editor[ai]
+```
+
+#### Run the Test Suite
+
+```bash
+pytest -q
+```
 
 4. **Lint, format and type‑check the code**:
 

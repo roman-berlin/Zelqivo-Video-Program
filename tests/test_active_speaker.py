@@ -236,6 +236,21 @@ class TestRealEnergyVADBackend:
         backend = RealEnergyVADBackend(silence_threshold=0.05)
         assert backend.silence_threshold == 0.05
 
+    def test_robustness_parameters_initialization(self) -> None:
+        """Test all robustness parameters can be customized."""
+        backend = RealEnergyVADBackend(
+            noise_percentile=15,
+            gate_factor=3.0,
+            hysteresis_ratio=2.0,
+            consecutive_wins=5,
+            hold_time_ms=3000,
+        )
+        assert backend.noise_percentile == 15
+        assert backend.gate_factor == 3.0
+        assert backend.hysteresis_ratio == 2.0
+        assert backend.consecutive_wins == 5
+        assert backend.hold_time_ms == 3000
+
     def test_compute_rms_empty_samples(self) -> None:
         """Test RMS computation with empty samples."""
         rms = RealEnergyVADBackend._compute_rms([])
@@ -284,6 +299,306 @@ class TestRealEnergyVADBackend:
         assert segments[0].end_ms == 600
         assert segments[1].speaker_id == 1
         assert segments[1].start_ms == 600
+
+    # --- Noise floor estimation tests ---
+
+    def test_estimate_noise_floors_empty(self) -> None:
+        """Test noise floor estimation with empty energy matrix."""
+        backend = RealEnergyVADBackend()
+        noise_floors = backend._estimate_noise_floors([[]])
+        assert len(noise_floors) == 1
+        assert noise_floors[0] == backend.silence_threshold
+
+    def test_estimate_noise_floors_constant_energy(self) -> None:
+        """Test noise floor with constant energy (all same value)."""
+        backend = RealEnergyVADBackend(noise_percentile=20, silence_threshold=0.01)
+        energy = [[0.1] * 100]  # 100 windows at 0.1 RMS
+        noise_floors = backend._estimate_noise_floors(energy)
+        assert abs(noise_floors[0] - 0.1) < 0.001
+
+    def test_estimate_noise_floors_mixed_energy(self) -> None:
+        """Test noise floor picks lower percentile ignoring speech peaks."""
+        backend = RealEnergyVADBackend(noise_percentile=20, silence_threshold=0.01)
+        # 80 windows at 0.05 (ambient), 20 windows at 0.5 (speech)
+        energy = [[0.05] * 80 + [0.5] * 20]
+        noise_floors = backend._estimate_noise_floors(energy)
+        # p20 should be in the low region (0.05)
+        assert noise_floors[0] < 0.1
+
+    def test_estimate_noise_floors_minimum_threshold(self) -> None:
+        """Test noise floor never goes below silence_threshold."""
+        backend = RealEnergyVADBackend(silence_threshold=0.02)
+        energy = [[0.001] * 100]  # Very quiet
+        noise_floors = backend._estimate_noise_floors(energy)
+        assert noise_floors[0] >= 0.02
+
+    # --- Speech gating tests ---
+
+    def test_apply_speech_gating_filters_low_energy(self) -> None:
+        """Test that gating zeros out energy below threshold."""
+        backend = RealEnergyVADBackend(gate_factor=2.0)
+        energy = [[0.01, 0.02, 0.05, 0.1, 0.2]]
+        noise_floors = [0.03]  # threshold = 0.03 * 2.0 = 0.06
+        gated = backend._apply_speech_gating(energy, noise_floors)
+        # Values below 0.06 should be zeroed
+        assert gated[0][0] == 0.0  # 0.01 < 0.06
+        assert gated[0][1] == 0.0  # 0.02 < 0.06
+        assert gated[0][2] == 0.0  # 0.05 < 0.06
+        assert gated[0][3] == 0.1  # 0.1 >= 0.06
+        assert gated[0][4] == 0.2  # 0.2 >= 0.06
+
+    # --- Robust winner determination tests ---
+
+    def test_determine_winners_all_silence(self) -> None:
+        """Test that silence keeps current camera (no guessing)."""
+        backend = RealEnergyVADBackend(consecutive_wins=3, hold_time_ms=200)
+        # All zeros - no speech detected
+        gated = [[0.0] * 20, [0.0] * 20]
+        winners = backend._determine_winners_robust(gated, 2, 20)
+        # Should stay on cam0 throughout (default)
+        assert all(w == 0 for w in winners)
+
+    def test_determine_winners_hysteresis_prevents_switch(self) -> None:
+        """Test hysteresis prevents switching on similar energy levels."""
+        backend = RealEnergyVADBackend(
+            hysteresis_ratio=1.6,
+            consecutive_wins=1,
+            hold_time_ms=0,
+        )
+        # cam0 at 0.5, cam1 at 0.6 - ratio 1.2 < 1.6, should not switch
+        gated = [[0.5] * 10, [0.6] * 10]
+        winners = backend._determine_winners_robust(gated, 2, 10)
+        # Should stay on cam0 (hysteresis blocks switch)
+        assert all(w == 0 for w in winners)
+
+    def test_determine_winners_hysteresis_allows_switch(self) -> None:
+        """Test hysteresis allows switching when clearly louder."""
+        backend = RealEnergyVADBackend(
+            hysteresis_ratio=1.6,
+            consecutive_wins=3,
+            hold_time_ms=0,
+        )
+        # cam0 at 0.3, cam1 at 0.6 - ratio 2.0 > 1.6, should switch
+        gated = [[0.3] * 20, [0.6] * 20]
+        winners = backend._determine_winners_robust(gated, 2, 20)
+        # After consecutive_wins (3), should switch to cam1
+        # Window 0,1: building count (count=1,2), window 2: count=3, switch happens
+        assert winners[0] == 0
+        assert winners[1] == 0
+        assert winners[2] == 1  # Switch happens when consecutive_wins reached
+        assert all(w == 1 for w in winners[2:])
+
+    def test_determine_winners_consecutive_requirement(self) -> None:
+        """Test that short spikes don't trigger switch (consecutive wins)."""
+        backend = RealEnergyVADBackend(
+            hysteresis_ratio=1.5,
+            consecutive_wins=3,
+            hold_time_ms=0,
+        )
+        # cam0 mostly speaking, cam1 has single spike
+        gated_cam0 = [0.3] * 20
+        gated_cam1 = [0.0] * 8 + [0.8, 0.8] + [0.0] * 10  # 2-window spike
+        gated = [gated_cam0, gated_cam1]
+        winners = backend._determine_winners_robust(gated, 2, 20)
+        # Spike only 2 windows, needs 3 consecutive - should stay on cam0
+        assert all(w == 0 for w in winners)
+
+    def test_determine_winners_hold_time(self) -> None:
+        """Test hold time prevents rapid re-switching."""
+        backend = RealEnergyVADBackend(
+            hysteresis_ratio=1.5,
+            consecutive_wins=2,
+            hold_time_ms=1000,  # 5 windows at 200ms
+            window_ms=200,
+        )
+        # Pattern: cam1 loud for 5 windows, then cam0 loud
+        gated_cam0 = [0.1] * 5 + [0.8] * 15
+        gated_cam1 = [0.8] * 5 + [0.1] * 15
+        gated = [gated_cam0, gated_cam1]
+        winners = backend._determine_winners_robust(gated, 2, 20)
+        # Initial switch to cam1 at window 1 (consecutive_wins=2, so index 1)
+        switch_to_cam1_idx = next(i for i, w in enumerate(winners) if w == 1)
+        assert switch_to_cam1_idx == 1  # First switch at index 1
+        # Hold prevents immediate switch back (hold = 5 windows)
+        assert winners[5] == 1  # Still held on cam1
+
+    def test_determine_winners_current_silent_any_speech_wins(self) -> None:
+        """Test that any speech wins when current camera is silent."""
+        backend = RealEnergyVADBackend(
+            hysteresis_ratio=2.0,
+            consecutive_wins=3,
+            hold_time_ms=0,
+        )
+        # cam0 silent, cam1 speaking (even quietly)
+        gated = [[0.0] * 20, [0.2] * 20]
+        winners = backend._determine_winners_robust(gated, 2, 20)
+        # After consecutive_wins, should switch to cam1
+        assert winners[3] == 1
+        assert all(w == 1 for w in winners[3:])
+
+    def test_determine_winners_no_windows(self) -> None:
+        """Test empty input returns empty output."""
+        backend = RealEnergyVADBackend()
+        winners = backend._determine_winners_robust([[]], 1, 0)
+        assert winners == []
+
+
+class TestRealEnergyVADBackendEdgeCases:
+    """
+    Edge case tests for robust camera switching.
+
+    Tests scenarios that previously caused issues:
+    - Pure silence
+    - Constant background noise
+    - Short noise spikes (scratching, coughing)
+    - Overlapping speech
+    - Cameras with different gain levels
+    """
+
+    def test_pure_silence_stays_on_default_camera(self) -> None:
+        """Pure silence should stay on cam0 (never guess)."""
+        backend = RealEnergyVADBackend()
+        # Simulate 10 seconds of silence (50 windows at 200ms)
+        gated = [[0.0] * 50, [0.0] * 50]
+        winners = backend._determine_winners_robust(gated, 2, 50)
+        assert all(w == 0 for w in winners)
+
+    def test_constant_low_noise_stays_on_default(self) -> None:
+        """Constant low-level noise (gated out) should stay on default."""
+        backend = RealEnergyVADBackend(gate_factor=2.0)
+        # Both cameras have same low noise - gating should zero both
+        energy = [[0.02] * 50, [0.02] * 50]
+        noise_floors = [0.02, 0.02]  # threshold = 0.04
+        gated = backend._apply_speech_gating(energy, noise_floors)
+        # All gated to zero
+        assert all(e == 0.0 for e in gated[0])
+        assert all(e == 0.0 for e in gated[1])
+        winners = backend._determine_winners_robust(gated, 2, 50)
+        assert all(w == 0 for w in winners)
+
+    def test_short_spike_ignored(self) -> None:
+        """Single-window spike (scratch, bump) should not cause switch."""
+        backend = RealEnergyVADBackend(
+            consecutive_wins=3,
+            hysteresis_ratio=1.5,
+            hold_time_ms=0,
+        )
+        # cam0 speaking steadily, cam1 has brief spike
+        gated_cam0 = [0.3] * 50
+        gated_cam1 = [0.0] * 20 + [0.9] + [0.0] * 29  # Single loud spike
+        gated = [gated_cam0, gated_cam1]
+        winners = backend._determine_winners_robust(gated, 2, 50)
+        # Should never switch to cam1
+        assert all(w == 0 for w in winners)
+
+    def test_two_window_spike_ignored(self) -> None:
+        """Two consecutive windows of noise should not switch (needs 3)."""
+        backend = RealEnergyVADBackend(
+            consecutive_wins=3,
+            hysteresis_ratio=1.5,
+            hold_time_ms=0,
+        )
+        gated_cam0 = [0.3] * 50
+        gated_cam1 = [0.0] * 20 + [0.9, 0.9] + [0.0] * 28  # 2-window spike
+        gated = [gated_cam0, gated_cam1]
+        winners = backend._determine_winners_robust(gated, 2, 50)
+        assert all(w == 0 for w in winners)
+
+    def test_sustained_speech_triggers_switch(self) -> None:
+        """Sustained speech (3+ windows) should trigger switch."""
+        backend = RealEnergyVADBackend(
+            consecutive_wins=3,
+            hysteresis_ratio=1.5,
+            hold_time_ms=0,
+        )
+        gated_cam0 = [0.3] * 50
+        gated_cam1 = [0.0] * 20 + [0.8] * 10 + [0.0] * 20  # 10 windows of speech
+        gated = [gated_cam0, gated_cam1]
+        winners = backend._determine_winners_robust(gated, 2, 50)
+        # Should switch to cam1 at window 22 (20 + consecutive_wins-1 = 22)
+        # Window 20: count=1, 21: count=2, 22: count=3 -> switch
+        assert winners[21] == 0
+        assert winners[22] == 1
+
+    def test_overlapping_speech_stays_on_current(self) -> None:
+        """When both cameras have similar energy, stay on current."""
+        backend = RealEnergyVADBackend(
+            hysteresis_ratio=1.6,
+            consecutive_wins=3,
+            hold_time_ms=0,
+        )
+        # Both cameras speaking at similar levels
+        gated = [[0.4] * 50, [0.5] * 50]  # ratio 1.25 < 1.6
+        winners = backend._determine_winners_robust(gated, 2, 50)
+        # Should stay on cam0 due to hysteresis
+        assert all(w == 0 for w in winners)
+
+    def test_different_gain_adaptive_noise_floor(self) -> None:
+        """Test that adaptive noise floor handles different camera gains."""
+        backend = RealEnergyVADBackend(
+            noise_percentile=20,
+            gate_factor=2.0,
+        )
+        # cam0: low gain (quiet ambient, quiet speech)
+        # cam1: high gain (loud ambient, loud speech)
+        # Both have 20% speech, 80% ambient noise
+        cam0_energy = [0.02] * 80 + [0.15] * 20  # low gain
+        cam1_energy = [0.1] * 80 + [0.6] * 20    # high gain (5x)
+        energy = [cam0_energy, cam1_energy]
+
+        noise_floors = backend._estimate_noise_floors(energy)
+        # Noise floors should reflect each camera's ambient level
+        assert noise_floors[0] < 0.05  # Low gain cam
+        assert noise_floors[1] < 0.2   # High gain cam
+
+        # After gating, both should have similar speech/noise separation
+        gated = backend._apply_speech_gating(energy, noise_floors)
+        # Speech windows should pass, noise should be filtered
+        cam0_speech_count = sum(1 for e in gated[0] if e > 0)
+        cam1_speech_count = sum(1 for e in gated[1] if e > 0)
+        # Both should have roughly same number of speech windows (20)
+        assert 15 <= cam0_speech_count <= 25
+        assert 15 <= cam1_speech_count <= 25
+
+    def test_gradual_transition_needs_sustained_lead(self) -> None:
+        """Gradual energy changes should not cause rapid switching."""
+        backend = RealEnergyVADBackend(
+            hysteresis_ratio=1.6,
+            consecutive_wins=3,
+            hold_time_ms=2000,
+            window_ms=200,
+        )
+        # cam0 fading out, cam1 fading in
+        gated_cam0 = [0.5 - i * 0.01 for i in range(50)]  # 0.5 -> 0.0
+        gated_cam1 = [0.0 + i * 0.01 for i in range(50)]  # 0.0 -> 0.5
+        gated = [gated_cam0, gated_cam1]
+        winners = backend._determine_winners_robust(gated, 2, 50)
+
+        # Count switches - should be minimal due to hold time
+        switches = sum(1 for i in range(1, len(winners)) if winners[i] != winners[i-1])
+        assert switches <= 2  # At most 1-2 switches for this gradual transition
+
+    def test_three_cameras_robust_switching(self) -> None:
+        """Test robust switching with 3 cameras."""
+        backend = RealEnergyVADBackend(
+            hysteresis_ratio=1.6,
+            consecutive_wins=3,
+            hold_time_ms=1000,
+            window_ms=200,
+        )
+        # cam0 speaks first, then cam2 (cam1 silent throughout)
+        gated_cam0 = [0.5] * 20 + [0.1] * 30
+        gated_cam1 = [0.0] * 50
+        gated_cam2 = [0.1] * 20 + [0.6] * 30
+        gated = [gated_cam0, gated_cam1, gated_cam2]
+        winners = backend._determine_winners_robust(gated, 3, 50)
+
+        # Should start on cam0, eventually switch to cam2
+        assert winners[0] == 0
+        # cam1 should never win (always silent)
+        assert 1 not in winners
+        # Should switch to cam2 eventually
+        assert 2 in winners
 
 
 class TestCreateBackend:

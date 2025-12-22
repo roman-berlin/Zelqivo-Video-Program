@@ -1,25 +1,28 @@
-# 1. Core heavy dependencies
+# Core dependencies (CPU-only operation)
+# Install with: pip install -e .
 numpy
-torch
-
-# 2. Audio processing libraries
-soundfile
-librosa
-pydub
-pyannote.audio
-SpeechBrain
-
-# 3. Video and image processing libraries
+PyQt6
+pyqt6-sip
 opencv-python
 ffmpeg-python
 moviepy
-
-# 4. GUI (PyQt6)
-pyqt6-sip
-PyQt6
-
-# 5. Utilities
 tqdm
 
-# 6. Build tools
+# AI extras (optional - enables real diarization and advanced audio sync)
+# Install with: pip install -e ".[ai]"
+# Uncomment below or use: pip install torch librosa soundfile pydub pyannote.audio speechbrain
+# torch
+# librosa
+# soundfile
+# pydub
+# pyannote.audio
+# speechbrain
+
+# Development dependencies
+# Install with: pip install -e ".[dev]"
+pytest
+pytest-cov
+black
+ruff
+mypy
 pyinstaller

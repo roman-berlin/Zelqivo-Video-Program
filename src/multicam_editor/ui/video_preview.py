@@ -57,7 +57,9 @@ class VideoPreview(QWidget):
         vlay.addWidget(self._video_widget, 1)
 
         ctrl = QWidget(video_page); hlay = QHBoxLayout(ctrl); hlay.setContentsMargins(8, 4, 8, 4)
-        self.btn_play = QPushButton("▶", ctrl); self.btn_play.setFixedWidth(28)
+        self.btn_play = QPushButton(ctrl)
+        self.btn_play.setFixedWidth(36)
+        self._set_play_icon(playing=False)
         self.btn_play.clicked.connect(self._toggle_play)
         self.lbl_time = QLabel("00:00", ctrl)
 
@@ -179,10 +181,23 @@ class VideoPreview(QWidget):
             self._player.play()
 
     def _on_playback_state_changed(self, state) -> None:
-        self.btn_play.setText("⏸" if self._player and state == self._player.PlaybackState.PlayingState else "▶")
+        is_playing = self._player and state == self._player.PlaybackState.PlayingState
+        self._set_play_icon(playing=is_playing)
         if self._player and not self._user_scrubbing:
             self._ui_pos_ms = int(self._player.position())
             self._apply_ui_position()
+
+    def _set_play_icon(self, playing: bool) -> None:
+        """Set Play/Pause icon using Qt standard icons with tooltip."""
+        from PyQt6.QtWidgets import QStyle
+        style = self.style()
+        if playing:
+            icon = style.standardIcon(QStyle.StandardPixmap.SP_MediaPause)
+            self.btn_play.setToolTip("Pause")
+        else:
+            icon = style.standardIcon(QStyle.StandardPixmap.SP_MediaPlay)
+            self.btn_play.setToolTip("Play")
+        self.btn_play.setIcon(icon)
 
     def _on_duration_changed(self, dur: int) -> None:
         self._duration_ms = max(0, int(dur))
@@ -254,7 +269,7 @@ class VideoPreview(QWidget):
         self._ui_pos_ms = 0
         self._set_labels(0, 0)
         self.slider.setRange(0, 1); self.slider.setValue(0)
-        self.btn_play.setText("▶")
+        self._set_play_icon(playing=False)
         self._stack.setCurrentIndex(0)
 
     def _set_labels(self, pos_ms: int, dur_ms: int) -> None:

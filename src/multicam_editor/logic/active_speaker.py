@@ -101,27 +101,57 @@ class RealEnergyVADBackend:
     """
     CPU-only energy-based speaker detection for multicam switching.
 
-    Analyzes RMS energy in fixed windows across multiple camera audio tracks.
-    For each window, picks the camera with highest energy above threshold.
-    Merges consecutive windows with same speaker into segments.
+    Robust switching logic to avoid jumping on noise spikes:
+    1. Adaptive noise floor per camera: estimated from p20 of energy distribution.
+       Frames below noise_floor * gate_factor are treated as non-speech.
+    2. Hysteresis: candidate must beat current camera by margin (ratio >= hysteresis_ratio,
+       ~3 dB) to trigger a switch consideration.
+    3. Consecutive-windows requirement: candidate must win N consecutive windows
+       (default 3 x 200ms = 600ms) to actually switch.
+    4. Min hold time: after a switch, stay on camera for at least hold_time_ms (2s default).
+    5. When uncertain (all cameras below threshold or no clear winner): stay on current camera.
+
+    Thresholds rationale:
+    - noise_percentile=20: p20 captures ambient noise floor ignoring speech peaks.
+    - gate_factor=2.0: speech typically 6-10 dB above noise; factor of 2 (~6 dB) is conservative.
+    - hysteresis_ratio=1.6: ~4 dB margin prevents ping-pong on similar levels.
+    - consecutive_wins=3: 600ms sustained speech prevents short noise bursts.
+    - hold_time_ms=2000: 2 seconds prevents rapid switching during natural pauses.
 
     This is the default V1 backend - works without pyannote or HuggingFace setup.
     """
 
     # Default parameters
     DEFAULT_WINDOW_MS = 200
-    DEFAULT_SILENCE_THRESHOLD = 0.01  # RMS below this = silence
+    DEFAULT_SILENCE_THRESHOLD = 0.01  # RMS below this = absolute silence
     DEFAULT_MIN_SEGMENT_MS = 200  # Minimum segment length
+
+    # Robustness parameters
+    DEFAULT_NOISE_PERCENTILE = 20  # Use p20 of energy distribution as noise floor
+    DEFAULT_GATE_FACTOR = 2.0  # Speech must be gate_factor * noise_floor
+    DEFAULT_HYSTERESIS_RATIO = 1.6  # Candidate must beat current by this ratio (~4 dB)
+    DEFAULT_CONSECUTIVE_WINS = 3  # Must win N consecutive windows to switch
+    DEFAULT_HOLD_TIME_MS = 2000  # Minimum time to stay on a camera after switching
 
     def __init__(
         self,
         window_ms: int = DEFAULT_WINDOW_MS,
         silence_threshold: float = DEFAULT_SILENCE_THRESHOLD,
         min_segment_ms: int = DEFAULT_MIN_SEGMENT_MS,
+        noise_percentile: int = DEFAULT_NOISE_PERCENTILE,
+        gate_factor: float = DEFAULT_GATE_FACTOR,
+        hysteresis_ratio: float = DEFAULT_HYSTERESIS_RATIO,
+        consecutive_wins: int = DEFAULT_CONSECUTIVE_WINS,
+        hold_time_ms: int = DEFAULT_HOLD_TIME_MS,
     ) -> None:
         self.window_ms = window_ms
         self.silence_threshold = silence_threshold
         self.min_segment_ms = min_segment_ms
+        self.noise_percentile = noise_percentile
+        self.gate_factor = gate_factor
+        self.hysteresis_ratio = hysteresis_ratio
+        self.consecutive_wins = consecutive_wins
+        self.hold_time_ms = hold_time_ms
         # Paths to camera audio WAV files (set before diarize)
         self._camera_audio_paths: List[str] = []
 
@@ -136,14 +166,16 @@ class RealEnergyVADBackend:
 
         If camera_audio_paths are set, uses those. Otherwise falls back to stub.
         speaker_id maps directly to camera_id (cam0, cam1, etc.).
+
+        Returns empty list (safe fallback) if audio is missing or processing fails.
         """
         if not self._camera_audio_paths:
             logger.warning("RealEnergyVADBackend: no camera audio paths set, using stub")
             return EnergyVADBackend().diarize(audio_path, num_channels)
 
         num_cameras = len(self._camera_audio_paths)
-        logger.info("RealEnergyVADBackend: analyzing %d cameras, window=%dms",
-                   num_cameras, self.window_ms)
+        logger.info("DIARIZE: analyzing %d cameras, window=%dms, hold=%dms, consecutive=%d",
+                   num_cameras, self.window_ms, self.hold_time_ms, self.consecutive_wins)
 
         try:
             # Load audio data from each camera
@@ -156,16 +188,16 @@ class RealEnergyVADBackend:
                     logger.warning("Camera %d sample rate %d != expected %d", i, sr, sample_rate)
                     sample_rate = sr
                 camera_samples.append(samples)
-                logger.debug("Camera %d: loaded %d samples", i, len(samples))
+                logger.debug("Camera %d: loaded %d samples from %s", i, len(samples), wav_path)
 
             if not camera_samples or all(len(s) == 0 for s in camera_samples):
-                logger.error("No audio samples loaded from any camera")
+                logger.error("DIARIZE: No audio samples loaded from any camera - fallback to cam0")
                 return []
 
             # Find max duration across cameras
             max_samples = max(len(s) for s in camera_samples)
             total_duration_ms = int(max_samples * 1000 / sample_rate)
-            logger.info("Total duration: %dms, sample_rate: %d", total_duration_ms, sample_rate)
+            logger.info("DIARIZE: total duration=%dms, sample_rate=%d", total_duration_ms, sample_rate)
 
             # Compute RMS energy per window for each camera
             window_samples = int(self.window_ms * sample_rate / 1000)
@@ -184,43 +216,166 @@ class RealEnergyVADBackend:
                         rms = self._compute_rms(samples[start:end])
                         cam_energy.append(rms)
                 energy_matrix.append(cam_energy)
-                logger.debug("Camera %d: %d windows, avg RMS=%.4f",
-                            cam_idx, len(cam_energy),
-                            sum(cam_energy) / len(cam_energy) if cam_energy else 0)
 
-            # For each window, pick camera with highest energy above threshold
-            window_winners: List[int] = []
-            current_camera = 0  # Default to cam0
+            # Estimate adaptive noise floor per camera (p20 of energy distribution)
+            noise_floors = self._estimate_noise_floors(energy_matrix)
+            for cam_idx, nf in enumerate(noise_floors):
+                avg_rms = sum(energy_matrix[cam_idx]) / len(energy_matrix[cam_idx]) if energy_matrix[cam_idx] else 0
+                logger.info("Camera %d: noise_floor=%.4f, avg_rms=%.4f, gate_thresh=%.4f",
+                           cam_idx, nf, avg_rms, nf * self.gate_factor)
 
-            for w in range(num_windows):
-                max_energy = 0.0
-                winner = current_camera  # Prefer current when unclear
+            # Compute speech-gated energy: zero out frames below adaptive threshold
+            gated_energy = self._apply_speech_gating(energy_matrix, noise_floors)
 
-                for cam_idx in range(num_cameras):
-                    energy = energy_matrix[cam_idx][w] if w < len(energy_matrix[cam_idx]) else 0.0
-                    if energy > max_energy and energy > self.silence_threshold:
-                        max_energy = energy
-                        winner = cam_idx
-
-                # If all below threshold, keep current camera (no flicker)
-                if max_energy <= self.silence_threshold:
-                    winner = current_camera
-
-                window_winners.append(winner)
-                current_camera = winner
+            # Determine window winners with hysteresis, consecutive wins, and hold time
+            window_winners = self._determine_winners_robust(
+                gated_energy, num_cameras, num_windows
+            )
 
             # Merge consecutive windows with same winner into segments
             segments = self._merge_windows_to_segments(
                 window_winners, self.window_ms, total_duration_ms
             )
 
-            logger.info("RealEnergyVADBackend: created %d segments from %d windows",
+            logger.info("DIARIZE: created %d segments from %d windows",
                        len(segments), num_windows)
             return segments
 
         except Exception as e:
-            logger.error("RealEnergyVADBackend error: %s", e, exc_info=True)
+            logger.error("DIARIZE error: %s - returning empty segments", e, exc_info=True)
             return []
+
+    def _estimate_noise_floors(self, energy_matrix: List[List[float]]) -> List[float]:
+        """
+        Estimate adaptive noise floor per camera using percentile of energy distribution.
+
+        Uses noise_percentile (default p20) to capture ambient noise level,
+        ignoring speech peaks. Returns at least silence_threshold to avoid div-by-zero.
+        """
+        noise_floors: List[float] = []
+        for cam_idx, cam_energy in enumerate(energy_matrix):
+            if not cam_energy:
+                noise_floors.append(self.silence_threshold)
+                continue
+
+            # Sort energies and take percentile
+            sorted_energy = sorted(cam_energy)
+            idx = max(0, min(len(sorted_energy) - 1,
+                           int(len(sorted_energy) * self.noise_percentile / 100)))
+            noise_floor = sorted_energy[idx]
+
+            # Ensure minimum threshold
+            noise_floor = max(noise_floor, self.silence_threshold)
+            noise_floors.append(noise_floor)
+
+        return noise_floors
+
+    def _apply_speech_gating(
+        self,
+        energy_matrix: List[List[float]],
+        noise_floors: List[float],
+    ) -> List[List[float]]:
+        """
+        Apply speech gating: set energy to 0 if below noise_floor * gate_factor.
+
+        This filters out low-level noise and only considers frames likely to contain speech.
+        """
+        gated: List[List[float]] = []
+        for cam_idx, cam_energy in enumerate(energy_matrix):
+            threshold = noise_floors[cam_idx] * self.gate_factor
+            gated_cam = [
+                e if e >= threshold else 0.0
+                for e in cam_energy
+            ]
+            gated.append(gated_cam)
+        return gated
+
+    def _determine_winners_robust(
+        self,
+        gated_energy: List[List[float]],
+        num_cameras: int,
+        num_windows: int,
+    ) -> List[int]:
+        """
+        Determine window winners with robust switching logic.
+
+        Implements:
+        - Hysteresis: candidate must beat current by ratio >= hysteresis_ratio
+        - Consecutive wins: candidate must win N consecutive windows
+        - Hold time: after switch, stay on camera for hold_time_ms
+        - When uncertain: stay on current camera (never guess)
+        """
+        if num_windows == 0:
+            return []
+
+        hold_windows = max(1, self.hold_time_ms // self.window_ms)
+        window_winners: List[int] = []
+        current_camera = 0  # Start on cam0
+        windows_since_switch = hold_windows  # Allow immediate switch at start
+        consecutive_candidate = -1  # Camera currently building consecutive wins
+        consecutive_count = 0  # How many consecutive windows candidate has won
+
+        for w in range(num_windows):
+            # Get energy for each camera at this window
+            energies = [
+                gated_energy[cam][w] if w < len(gated_energy[cam]) else 0.0
+                for cam in range(num_cameras)
+            ]
+
+            current_energy = energies[current_camera]
+
+            # Find best candidate (highest energy, excluding current)
+            best_candidate = -1
+            best_energy = 0.0
+            for cam_idx, energy in enumerate(energies):
+                if cam_idx != current_camera and energy > best_energy:
+                    best_energy = energy
+                    best_candidate = cam_idx
+
+            # Check if we should consider switching
+            should_consider_switch = False
+
+            if best_candidate >= 0 and best_energy > 0:
+                # Apply hysteresis: candidate must beat current by margin
+                if current_energy > 0:
+                    ratio = best_energy / current_energy
+                    should_consider_switch = ratio >= self.hysteresis_ratio
+                else:
+                    # Current is silent, any speech wins
+                    should_consider_switch = True
+
+            # Track consecutive wins for the candidate
+            if should_consider_switch:
+                if best_candidate == consecutive_candidate:
+                    consecutive_count += 1
+                else:
+                    # New candidate, reset counter
+                    consecutive_candidate = best_candidate
+                    consecutive_count = 1
+            else:
+                # No clear winner this window, reset
+                consecutive_candidate = -1
+                consecutive_count = 0
+
+            # Decide if we actually switch
+            actual_switch = False
+            if (consecutive_count >= self.consecutive_wins and
+                windows_since_switch >= hold_windows and
+                consecutive_candidate >= 0):
+                # Switch to new camera
+                current_camera = consecutive_candidate
+                actual_switch = True
+                windows_since_switch = 0
+                consecutive_candidate = -1
+                consecutive_count = 0
+                logger.debug("DIARIZE: switch to cam%d at window %d (%.1fs)",
+                           current_camera, w, w * self.window_ms / 1000)
+
+            window_winners.append(current_camera)
+            if not actual_switch:
+                windows_since_switch += 1
+
+        return window_winners
 
     @staticmethod
     def _load_wav_samples(wav_path: str) -> tuple[List[float], int]:

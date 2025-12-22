@@ -82,6 +82,7 @@ class ProcessingWorker(QObject):
                 self.input_files,
                 signals,
                 progress_callback=self._on_progress_callback,
+                speaker_switching_enabled=self.speaker_switching_enabled,
             )
             result = self._pipeline.run(
                 external_audio=self.external_audio,

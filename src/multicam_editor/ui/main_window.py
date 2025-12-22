@@ -94,13 +94,13 @@ class MainWindow(QMainWindow):
         ctrl_row = QWidget(left)
         ctrl_lay = QHBoxLayout(ctrl_row)
         ctrl_lay.setContentsMargins(0, 0, 0, 0)
-        self.btn_add = QPushButton("Add Files…", ctrl_row)
+        self.btn_add = QPushButton("Add Videos…", ctrl_row)
         self.btn_add.setObjectName("btnAddFiles")
-        self.btn_add.setToolTip("Add video files (up to 10)")
-        self.btn_process = QPushButton("Process", ctrl_row)
+        self.btn_add.setToolTip("Add 2 or more camera videos (MP4/MOV/AVI)")
+        self.btn_process = QPushButton("Create Video", ctrl_row)
         self.btn_process.setObjectName("btnProcess")
         self.btn_process.setEnabled(False)  # Enabled when >=2 videos
-        self.btn_process.setToolTip("Process videos with auto-switching (requires 2+ videos)")
+        self.btn_process.setToolTip("Automatically sync and switch cameras")
         self.lbl_counter = QLabel("Videos: 0/10", ctrl_row)
         self.lbl_counter.setObjectName("lblCounter")
         ctrl_lay.addWidget(self.btn_add)
@@ -108,13 +108,20 @@ class MainWindow(QMainWindow):
         ctrl_lay.addStretch(1)
         ctrl_lay.addWidget(self.lbl_counter)
 
-        lbl = QLabel("Media Files", left)
+        # Inline hint for "need 2+ videos"
+        self.lbl_process_hint = QLabel("Add at least 2 videos to create a multicam edit.", left)
+        self.lbl_process_hint.setObjectName("lblProcessHint")
+        self.lbl_process_hint.setStyleSheet("color: gray; font-style: italic;")
+        self.lbl_process_hint.setVisible(True)  # Visible initially
+
+        lbl = QLabel("Videos", left)
         lbl.setObjectName("lblMediaFiles")
         self.file_list = FileListWidget(left)
         self.file_list.setObjectName("fileList")
         self.file_list.set_video_cap(VIDEO_CAP)
 
         left_layout.addWidget(ctrl_row)
+        left_layout.addWidget(self.lbl_process_hint)
         left_layout.addWidget(lbl)
         left_layout.addWidget(self.file_list, 1)
 
@@ -257,14 +264,22 @@ class MainWindow(QMainWindow):
         # No checkbox needed - auto-switch is the main purpose of this app
 
         # 1) Use External Audio checkbox
-        self.chk_external_audio = QCheckBox("Use External Audio (Replace camera audio)")
+        self.chk_external_audio = QCheckBox("Use external audio")
         self.chk_external_audio.setObjectName("chkExternalAudio")
-        self.chk_external_audio.setToolTip("Use external audio file for diarization and final output")
+        self.chk_external_audio.setToolTip("If provided, external audio replaces camera audio in the final export")
         self.chk_external_audio.setChecked(
             self.settings.value("processing/use_external_audio", False, type=bool)
         )
         self.chk_external_audio.toggled.connect(self._on_external_audio_toggled)
         layout.addWidget(self.chk_external_audio)
+
+        # Subtext under checkbox
+        self.lbl_external_audio_hint = QLabel("If provided, external audio replaces camera audio in the final export.")
+        self.lbl_external_audio_hint.setObjectName("lblExternalAudioHint")
+        self.lbl_external_audio_hint.setStyleSheet("color: gray; font-size: 10px;")
+        self.lbl_external_audio_hint.setWordWrap(True)
+        self.lbl_external_audio_hint.setContentsMargins(20, 0, 0, 0)
+        layout.addWidget(self.lbl_external_audio_hint)
 
         # 3) External audio file row
         ext_row = QWidget()
@@ -272,17 +287,17 @@ class MainWindow(QMainWindow):
         ext_lay.setContentsMargins(16, 0, 0, 0)  # indent
         ext_lay.setSpacing(4)
 
-        self.btn_add_external_audio = QPushButton("Add External Audio...")
+        self.btn_add_external_audio = QPushButton("Choose Audio…")
         self.btn_add_external_audio.setObjectName("btnAddExternalAudio")
-        self.btn_add_external_audio.setToolTip("Select .wav or .mp3 file")
+        self.btn_add_external_audio.setToolTip("Select external audio file (WAV, MP3, AAC, M4A)")
         self.btn_add_external_audio.clicked.connect(self._on_add_external_audio)
         ext_lay.addWidget(self.btn_add_external_audio)
 
-        self.lbl_external_audio = QLabel("No file selected")
+        self.lbl_external_audio = QLabel("No audio selected")
         self.lbl_external_audio.setObjectName("lblExternalAudio")
         self._external_audio_path: str | None = self.settings.value("processing/external_audio_path", None)
         if self._external_audio_path:
-            self.lbl_external_audio.setText(os.path.basename(self._external_audio_path))
+            self.lbl_external_audio.setText(f"Audio: {os.path.basename(self._external_audio_path)}")
         ext_lay.addWidget(self.lbl_external_audio, 1)
 
         layout.addWidget(ext_row)
@@ -298,9 +313,9 @@ class MainWindow(QMainWindow):
         self.lbl_mapping_summary.setObjectName("lblMappingSummary")
         mapping_header_lay.addWidget(self.lbl_mapping_summary)
 
-        self.btn_edit_mapping = QPushButton("Advanced…")
+        self.btn_edit_mapping = QPushButton("Edit mapping…")
         self.btn_edit_mapping.setObjectName("btnEditMapping")
-        self.btn_edit_mapping.setToolTip("Configure advanced camera-to-speaker mapping")
+        self.btn_edit_mapping.setToolTip("Choose which speaker each camera should follow")
         self.btn_edit_mapping.clicked.connect(self._toggle_mapping_expanded)
         mapping_header_lay.addWidget(self.btn_edit_mapping)
         mapping_header_lay.addStretch(1)
@@ -313,6 +328,13 @@ class MainWindow(QMainWindow):
         self.mapping_layout.setSpacing(2)
         self.mapping_container.setVisible(False)  # Hidden by default
         layout.addWidget(self.mapping_container)
+
+        # Helper text
+        helper = QLabel("Choose which speaker each camera should follow. Leave Auto for best effort.")
+        helper.setObjectName("lblMappingHelper")
+        helper.setStyleSheet("color: gray; font-size: 10px;")
+        helper.setWordWrap(True)
+        self.mapping_layout.addWidget(helper)
 
         # Placeholder label when no cameras
         self.lbl_no_cameras = QLabel("(Add videos to configure mapping)")
@@ -335,7 +357,7 @@ class MainWindow(QMainWindow):
         layout.addWidget(self.lbl_mapping_warning)
 
         # 5) Output folder selection
-        output_lbl = QLabel("Output Folder:")
+        output_lbl = QLabel("Output folder")
         output_lbl.setObjectName("lblOutputFolder")
         layout.addWidget(output_lbl)
 
@@ -344,7 +366,7 @@ class MainWindow(QMainWindow):
         output_lay.setContentsMargins(8, 0, 0, 0)
         output_lay.setSpacing(4)
 
-        self.btn_choose_output_folder = QPushButton("Choose...")
+        self.btn_choose_output_folder = QPushButton("Choose…")
         self.btn_choose_output_folder.setObjectName("btnChooseOutputFolder")
         self.btn_choose_output_folder.setToolTip("Select output folder for processed video")
         self.btn_choose_output_folder.clicked.connect(self._on_choose_output_folder)
@@ -389,7 +411,7 @@ class MainWindow(QMainWindow):
         self._external_audio_path = path
         self.settings.setValue("processing/external_audio_path", path)
         self.settings.setValue("last_audio_dir", os.path.dirname(path))
-        self.lbl_external_audio.setText(os.path.basename(path))
+        self.lbl_external_audio.setText(f"Audio: {os.path.basename(path)}")
         logger.info("External audio selected: %s", path)
 
     def _on_choose_output_folder(self) -> None:
@@ -840,6 +862,8 @@ class MainWindow(QMainWindow):
         self.lbl_counter.setText(f"Videos: {count}/{VIDEO_CAP}")
         self.btn_add.setEnabled(count < VIDEO_CAP)
         self.btn_process.setEnabled(count >= MIN_VIDEOS_FOR_PROCESS)
+        # Show/hide inline hint based on video count
+        self.lbl_process_hint.setVisible(count < MIN_VIDEOS_FOR_PROCESS)
 
     # --- Processing ---
     def _generate_output_path(self, input_paths: List[str]) -> str:

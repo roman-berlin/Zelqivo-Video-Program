@@ -820,10 +820,12 @@ class MainWindow(QMainWindow):
         if hasattr(self, "_progress_dialog") and self._progress_dialog:
             self._progress_dialog.update_progress(percent)
 
-    def _on_processing_stage(self, stage_name: str, stage_percent: int, message: str) -> None:
-        """Update progress dialog with stage info."""
+    def _on_processing_stage(self, stage_name: str, stage_percent: int, message: str, eta_seconds: float) -> None:
+        """Update progress dialog with stage info and ETA."""
         if hasattr(self, "_progress_dialog") and self._progress_dialog:
             self._progress_dialog.update_stage(stage_name, stage_percent, message)
+            # ETA < 0 means unknown/not yet computed
+            self._progress_dialog.update_eta(eta_seconds if eta_seconds >= 0 else None)
 
     def _on_processing_finished(self, output_path: str) -> None:
         """Handle successful processing completion."""

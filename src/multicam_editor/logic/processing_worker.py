@@ -18,7 +18,7 @@ class ProcessingWorker(QObject):
 
     Signals:
         progress(int): Overall progress 0-100.
-        stage(str, int, str): Stage name, stage percent, message.
+        stage(str, int, str, float): Stage name, stage percent, message, eta_seconds.
         finished(str): Output path on success.
         error(str): Error message on failure.
 
@@ -34,7 +34,7 @@ class ProcessingWorker(QObject):
     """
 
     progress = pyqtSignal(int)
-    stage = pyqtSignal(str, int, str)  # stage_name, stage_percent, message
+    stage = pyqtSignal(str, int, str, float)  # stage_name, stage_percent, message, eta_seconds
     finished = pyqtSignal(str)
     error = pyqtSignal(str)
 
@@ -64,10 +64,12 @@ class ProcessingWorker(QObject):
 
     def _on_progress_callback(self, progress: PipelineProgress) -> None:
         """Handle detailed progress from pipeline."""
+        eta = progress.eta_seconds if progress.eta_seconds is not None else -1.0
         self.stage.emit(
             progress.stage_name,
             progress.stage_percent,
             progress.message,
+            eta,
         )
 
     def run(self) -> None:
@@ -129,7 +131,7 @@ class ProcessingThread(QThread):
     """
 
     progress = pyqtSignal(int)
-    stage = pyqtSignal(str, int, str)
+    stage = pyqtSignal(str, int, str, float)  # stage_name, stage_percent, message, eta_seconds
     finished_with_path = pyqtSignal(str)
     error = pyqtSignal(str)
 

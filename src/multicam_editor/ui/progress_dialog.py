@@ -94,21 +94,33 @@ class ProcessingProgressDialog(QDialog):
         self.lbl_message.setText(message)
 
     def update_eta(self, eta_seconds: Optional[float]) -> None:
-        """Update ETA display."""
-        if eta_seconds is None or eta_seconds <= 0:
+        """Update ETA display.
+
+        Args:
+            eta_seconds: Estimated time remaining in seconds.
+                - None: Show "Estimating..."
+                - <= 0: Hide ETA
+                - > 0: Show formatted ETA (mm:ss)
+        """
+        if eta_seconds is None:
+            self.lbl_eta.setText("Estimating...")
+            return
+
+        if eta_seconds <= 0:
             self.lbl_eta.setText("")
             return
 
+        # Format as mm:ss for consistency
         if eta_seconds < 60:
-            eta_text = f"ETA: {int(eta_seconds)}s"
+            eta_text = f"ETA: 00:{int(eta_seconds):02d}"
         elif eta_seconds < 3600:
             minutes = int(eta_seconds // 60)
             seconds = int(eta_seconds % 60)
-            eta_text = f"ETA: {minutes}m {seconds}s"
+            eta_text = f"ETA: {minutes:02d}:{seconds:02d}"
         else:
             hours = int(eta_seconds // 3600)
             minutes = int((eta_seconds % 3600) // 60)
-            eta_text = f"ETA: {hours}h {minutes}m"
+            eta_text = f"ETA: {hours}h {minutes:02d}m"
 
         self.lbl_eta.setText(eta_text)
 

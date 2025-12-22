@@ -42,6 +42,7 @@ from ..core.project import Project
 # Import undo/redo commands
 from ..logic.commands import AddClipsCommand, ReorderClipsCommand, TrimCommand
 from ..logic.processing_worker import ProcessingThread
+from ..logic.preflight import check_preflight_warnings, format_warnings_for_display
 from .progress_dialog import ProcessingProgressDialog
 
 
@@ -789,6 +790,13 @@ class MainWindow(QMainWindow):
             "Processing: speaker_switching=%s, external_audio=%s, cameras=%d, quality=%s",
             speaker_switching_enabled, external_audio is not None, len(paths), quality
         )
+
+        # Run preflight checks and display warnings (non-blocking)
+        preflight_warnings = check_preflight_warnings(paths)
+        if preflight_warnings:
+            warning_msg = format_warnings_for_display(preflight_warnings)
+            self._toast(warning_msg, 6000)  # Show longer for user to read
+            logger.warning("Preflight warnings: %s", warning_msg)
 
         # Create and show progress dialog
         self._progress_dialog = ProcessingProgressDialog(self)

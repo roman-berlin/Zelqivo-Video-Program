@@ -14,11 +14,41 @@ description = "Refactored multi‑camera video editor"
 authors = [{name = "Owner"}]
 readme = "README.md"
 requires-python = ">=3.10"
-# Runtime dependencies are intentionally kept minimal.  Users of the GUI
-# application should install optional dependencies such as PyQt6, torch,
-# librosa and others separately.  Development dependencies are pinned in
-# requirements.txt/requirements.in.
-dependencies = []
+
+# Core dependencies: CPU-only operation without ML/AI
+dependencies = [
+    "numpy",
+    "PyQt6",
+    "pyqt6-sip",
+    "opencv-python",
+    "ffmpeg-python",
+    "moviepy",
+    "tqdm",
+]
+
+[project.optional-dependencies]
+# AI extras: heavy ML dependencies for real diarization and advanced audio sync
+ai = [
+    "torch",
+    "librosa",
+    "soundfile",
+    "pydub",
+    "pyannote.audio",
+    "speechbrain",
+]
+# Development dependencies
+dev = [
+    "pytest",
+    "pytest-cov",
+    "black",
+    "ruff",
+    "mypy",
+    "pyinstaller",
+]
+# All optional dependencies
+all = [
+    "multicam-editor[ai,dev]",
+]
 
 [tool.black]
 line-length = 100

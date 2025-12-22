@@ -3,10 +3,11 @@
 from __future__ import annotations
 
 import logging
+import os
 import tempfile
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Optional
+from typing import List, Optional
 
 import librosa
 import numpy as np
@@ -25,6 +26,17 @@ class SyncResult:
     output_path: str
     offset_ms: float
     status: str  # "ok", "trimmed", "padded", "failed"
+    message: str
+
+
+@dataclass
+class CameraAlignment:
+    """Alignment result for a single camera."""
+
+    camera_index: int
+    video_path: str
+    offset_ms: float
+    status: str  # "ok", "no_audio", "failed"
     message: str
 
 
@@ -196,3 +208,190 @@ def align_audio_offset(
     except Exception as e:
         logger.error("Offset calculation failed: %s", e, exc_info=True)
         return 0.0, str(e)
+
+
+def align_cameras(
+    video_paths: List[str],
+    on_progress: Optional[callable] = None,
+) -> List[CameraAlignment]:
+    """Align multiple cameras using audio cross-correlation.
+
+    First camera (index 0) is the primary reference with offset_ms=0.
+    All other cameras are aligned relative to the primary.
+
+    Args:
+        video_paths: List of video file paths (at least 2).
+        on_progress: Optional callback(camera_index, total) for progress.
+
+    Returns:
+        List of CameraAlignment results for each camera.
+    """
+    from ..utils.ffmpeg import extract_audio_to_wav
+    from ..utils.ffprobe import has_audio_stream
+
+    if len(video_paths) < 2:
+        logger.warning("align_cameras requires at least 2 videos")
+        return [CameraAlignment(0, video_paths[0], 0.0, "ok", "Single camera")]
+
+    results: List[CameraAlignment] = []
+    temp_wavs: List[str] = []
+
+    try:
+        # Primary camera (index 0) always has offset 0
+        primary_path = video_paths[0]
+        results.append(CameraAlignment(
+            camera_index=0,
+            video_path=primary_path,
+            offset_ms=0.0,
+            status="ok",
+            message="Primary camera (reference)"
+        ))
+
+        if on_progress:
+            on_progress(0, len(video_paths))
+
+        # Check if primary has audio
+        if not has_audio_stream(primary_path):
+            logger.warning("Primary camera has no audio stream: %s", os.path.basename(primary_path))
+            # All cameras get offset 0 since we can't correlate
+            for i, path in enumerate(video_paths[1:], start=1):
+                results.append(CameraAlignment(
+                    camera_index=i,
+                    video_path=path,
+                    offset_ms=0.0,
+                    status="no_audio",
+                    message="Cannot align: primary has no audio"
+                ))
+                if on_progress:
+                    on_progress(i, len(video_paths))
+            return results
+
+        # Extract primary audio
+        logger.info("Extracting audio from primary camera: %s", os.path.basename(primary_path))
+        primary_result = extract_audio_to_wav(primary_path, sample_rate=_SYNC_SR, mono=True)
+        if not primary_result.success or not primary_result.output_path:
+            logger.error("Failed to extract primary audio: %s", primary_result.error)
+            # All cameras get offset 0
+            for i, path in enumerate(video_paths[1:], start=1):
+                results.append(CameraAlignment(
+                    camera_index=i,
+                    video_path=path,
+                    offset_ms=0.0,
+                    status="failed",
+                    message=f"Primary audio extraction failed: {primary_result.error}"
+                ))
+                if on_progress:
+                    on_progress(i, len(video_paths))
+            return results
+
+        primary_wav = primary_result.output_path
+        temp_wavs.append(primary_wav)
+
+        # Load primary audio once
+        try:
+            primary_audio, sr = _load_audio_mono(primary_wav, _SYNC_SR)
+        except Exception as e:
+            logger.error("Failed to load primary audio: %s", e)
+            for i, path in enumerate(video_paths[1:], start=1):
+                results.append(CameraAlignment(i, path, 0.0, "failed", str(e)))
+                if on_progress:
+                    on_progress(i, len(video_paths))
+            return results
+
+        min_samples = int(sr * 0.5)
+        if len(primary_audio) < min_samples:
+            logger.warning("Primary audio too short for alignment")
+            for i, path in enumerate(video_paths[1:], start=1):
+                results.append(CameraAlignment(i, path, 0.0, "failed", "Primary audio too short"))
+                if on_progress:
+                    on_progress(i, len(video_paths))
+            return results
+
+        # Process each secondary camera
+        for i, path in enumerate(video_paths[1:], start=1):
+            logger.info("Aligning camera %d: %s", i, os.path.basename(path))
+
+            # Check for audio stream
+            if not has_audio_stream(path):
+                logger.warning("Camera %d has no audio stream, using offset=0", i)
+                results.append(CameraAlignment(
+                    camera_index=i,
+                    video_path=path,
+                    offset_ms=0.0,
+                    status="no_audio",
+                    message="No audio stream in video"
+                ))
+                if on_progress:
+                    on_progress(i, len(video_paths))
+                continue
+
+            # Extract audio
+            extract_result = extract_audio_to_wav(path, sample_rate=_SYNC_SR, mono=True)
+            if not extract_result.success or not extract_result.output_path:
+                logger.error("Failed to extract audio from camera %d: %s", i, extract_result.error)
+                results.append(CameraAlignment(
+                    camera_index=i,
+                    video_path=path,
+                    offset_ms=0.0,
+                    status="failed",
+                    message=f"Audio extraction failed: {extract_result.error}"
+                ))
+                if on_progress:
+                    on_progress(i, len(video_paths))
+                continue
+
+            secondary_wav = extract_result.output_path
+            temp_wavs.append(secondary_wav)
+
+            # Cross-correlate
+            try:
+                secondary_audio, _ = _load_audio_mono(secondary_wav, _SYNC_SR)
+
+                if len(secondary_audio) < min_samples:
+                    logger.warning("Camera %d audio too short for alignment", i)
+                    results.append(CameraAlignment(
+                        camera_index=i,
+                        video_path=path,
+                        offset_ms=0.0,
+                        status="failed",
+                        message="Audio too short for correlation"
+                    ))
+                    if on_progress:
+                        on_progress(i, len(video_paths))
+                    continue
+
+                offset_ms, corr_score, _ = _cross_correlate_offset(primary_audio, secondary_audio, sr)
+                logger.info("Camera %d offset: %.1f ms (correlation=%.4f)", i, offset_ms, corr_score)
+
+                results.append(CameraAlignment(
+                    camera_index=i,
+                    video_path=path,
+                    offset_ms=offset_ms,
+                    status="ok",
+                    message=f"Aligned (correlation={corr_score:.3f})"
+                ))
+
+            except Exception as e:
+                logger.error("Correlation failed for camera %d: %s", i, e, exc_info=True)
+                results.append(CameraAlignment(
+                    camera_index=i,
+                    video_path=path,
+                    offset_ms=0.0,
+                    status="failed",
+                    message=f"Correlation failed: {e}"
+                ))
+
+            if on_progress:
+                on_progress(i, len(video_paths))
+
+    finally:
+        # Cleanup temp WAV files
+        for wav_path in temp_wavs:
+            try:
+                if os.path.isfile(wav_path):
+                    os.remove(wav_path)
+                    logger.debug("Cleaned up temp WAV: %s", os.path.basename(wav_path))
+            except Exception as e:
+                logger.debug("Failed to cleanup %s: %s", wav_path, e)
+
+    return results

@@ -134,12 +134,14 @@ class MainWindow(QMainWindow):
         preview_header_layout.addWidget(lbl_prev)
         preview_header_layout.addStretch(1)
 
+        # A/B Compare button (hidden for V1, kept for future use)
         self.btn_toggle_ab = QPushButton("A/B Compare", preview_header)
         self.btn_toggle_ab.setObjectName("btnToggleAB")
         self.btn_toggle_ab.setCheckable(True)
         self.btn_toggle_ab.setChecked(False)
         self.btn_toggle_ab.setToolTip("Compare original vs auto-switched result side-by-side")
         self.btn_toggle_ab.clicked.connect(self._toggle_ab_mode)
+        self.btn_toggle_ab.setVisible(False)  # V1: hide A/B comparison
         preview_header_layout.addWidget(self.btn_toggle_ab)
 
         right_layout.addWidget(preview_header)
@@ -189,21 +191,25 @@ class MainWindow(QMainWindow):
         self._sync_timer.setInterval(50)
         self._sync_timer.timeout.connect(self._sync_playheads)
 
-        # Trim panel
+        # Trim panel (hidden for V1 one-click workflow, backend kept for future use)
         self.trim_panel = TrimPanel(right)
+        self.trim_panel.setVisible(False)  # V1: hide manual trim controls
         right_layout.addWidget(self.trim_panel)
 
         line = QFrame(right)
         line.setFrameShape(QFrame.Shape.HLine)
+        line.setVisible(False)  # V1: hide separator
         right_layout.addWidget(line)
 
         lbl_tl = QLabel("Timeline", right)
         lbl_tl.setObjectName("lblTimeline")
+        lbl_tl.setVisible(False)  # V1: hide timeline label
         right_layout.addWidget(lbl_tl)
 
         self.timeline_scene = TimelineScene(self)
         self.timeline_view = TimelineView(self.timeline_scene, right)
         self.timeline_view.setMinimumHeight(120)
+        self.timeline_view.setVisible(False)  # V1: hide timeline view
         right_layout.addWidget(self.timeline_view, 0)
 
         splitter.addWidget(left)

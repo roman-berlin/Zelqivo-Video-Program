@@ -2,16 +2,23 @@
 
 from __future__ import annotations
 
+import logging
+import os
+import subprocess
+import sys
 from typing import Optional
 
 from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtWidgets import (
     QDialog,
+    QHBoxLayout,
     QLabel,
     QProgressBar,
     QPushButton,
     QVBoxLayout,
 )
+
+logger = logging.getLogger(__name__)
 
 
 class ProcessingProgressDialog(QDialog):
@@ -38,6 +45,7 @@ class ProcessingProgressDialog(QDialog):
         )
 
         self._cancelled = False
+        self._output_path: Optional[str] = None
         self._init_ui()
 
     def _init_ui(self) -> None:
@@ -70,11 +78,24 @@ class ProcessingProgressDialog(QDialog):
         self.lbl_eta.setAlignment(Qt.AlignmentFlag.AlignCenter)
         layout.addWidget(self.lbl_eta)
 
-        # Cancel button
+        # Button row
+        btn_row = QHBoxLayout()
+        btn_row.setSpacing(8)
+
+        # Open Output Folder button (hidden initially)
+        self.btn_open_folder = QPushButton("Open Output Folder", self)
+        self.btn_open_folder.setObjectName("btnOpenFolder")
+        self.btn_open_folder.clicked.connect(self._on_open_folder_clicked)
+        self.btn_open_folder.setVisible(False)
+        btn_row.addWidget(self.btn_open_folder)
+
+        # Cancel/Close button
         self.btn_cancel = QPushButton("Cancel", self)
         self.btn_cancel.setObjectName("btnCancel")
         self.btn_cancel.clicked.connect(self._on_cancel_clicked)
-        layout.addWidget(self.btn_cancel, alignment=Qt.AlignmentFlag.AlignCenter)
+        btn_row.addWidget(self.btn_cancel)
+
+        layout.addLayout(btn_row)
 
     def _on_cancel_clicked(self) -> None:
         """Handle cancel button click."""
@@ -94,23 +115,39 @@ class ProcessingProgressDialog(QDialog):
         self.lbl_message.setText(message)
 
     def update_eta(self, eta_seconds: Optional[float]) -> None:
-        """Update ETA display."""
-        if eta_seconds is None or eta_seconds <= 0:
+        """Update ETA display.
+
+        Args:
+            eta_seconds: Estimated time remaining in seconds.
+                - None: Show "Estimating..."
+                - <= 0: Hide ETA
+                - > 0: Show formatted ETA (mm:ss)
+        """
+        if eta_seconds is None:
+            self.lbl_eta.setText("Estimating...")
+            return
+
+        if eta_seconds <= 0:
             self.lbl_eta.setText("")
             return
 
+        # Format as mm:ss for consistency
         if eta_seconds < 60:
-            eta_text = f"ETA: {int(eta_seconds)}s"
+            eta_text = f"ETA: 00:{int(eta_seconds):02d}"
         elif eta_seconds < 3600:
             minutes = int(eta_seconds // 60)
             seconds = int(eta_seconds % 60)
-            eta_text = f"ETA: {minutes}m {seconds}s"
+            eta_text = f"ETA: {minutes:02d}:{seconds:02d}"
         else:
             hours = int(eta_seconds // 3600)
             minutes = int((eta_seconds % 3600) // 60)
-            eta_text = f"ETA: {hours}h {minutes}m"
+            eta_text = f"ETA: {hours}h {minutes:02d}m"
 
         self.lbl_eta.setText(eta_text)
+
+    def set_output_path(self, path: str) -> None:
+        """Store output path for Open Output Folder button."""
+        self._output_path = path
 
     def set_finished(self, success: bool, message: str = "") -> None:
         """Show finished state."""
@@ -119,6 +156,9 @@ class ProcessingProgressDialog(QDialog):
             self.lbl_stage.setText("Complete!")
             self.lbl_message.setText(message or "Processing finished successfully.")
             self.progress_bar.setValue(100)
+            # Show Open Output Folder button if we have a valid path
+            if self._output_path and os.path.isfile(self._output_path):
+                self.btn_open_folder.setVisible(True)
         else:
             self.lbl_stage.setText("Failed")
             self.lbl_message.setText(message or "Processing failed.")
@@ -138,6 +178,27 @@ class ProcessingProgressDialog(QDialog):
         self.btn_cancel.setEnabled(True)
         self.btn_cancel.clicked.disconnect()
         self.btn_cancel.clicked.connect(self.accept)
+
+    def _on_open_folder_clicked(self) -> None:
+        """Open the output folder in the system file browser."""
+        if not self._output_path:
+            return
+
+        folder = os.path.dirname(self._output_path)
+        if not os.path.isdir(folder):
+            logger.warning("Output folder does not exist: %s", folder)
+            return
+
+        try:
+            if sys.platform == "win32":
+                os.startfile(folder)
+            elif sys.platform == "darwin":
+                subprocess.run(["open", folder], check=True)
+            else:
+                subprocess.run(["xdg-open", folder], check=True)
+            logger.info("Opened output folder: %s", folder)
+        except Exception as e:
+            logger.error("Failed to open output folder: %s", e, exc_info=True)
 
     def closeEvent(self, event) -> None:
         """Handle close event - emit cancel if still processing."""

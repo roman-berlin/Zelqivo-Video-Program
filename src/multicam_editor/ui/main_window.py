@@ -43,6 +43,7 @@ from ..core.project import Project
 from ..logic.commands import AddClipsCommand, ReorderClipsCommand, TrimCommand
 from ..logic.processing_worker import ProcessingThread
 from ..logic.preflight import check_preflight_warnings, format_warnings_for_display
+from ..logic.debug_export import export_debug_package
 from .progress_dialog import ProcessingProgressDialog
 
 
@@ -467,6 +468,13 @@ class MainWindow(QMainWindow):
         self.action_export.setEnabled(False)  # Enabled after processing
         self.action_export.triggered.connect(self._show_export_dialog)
         file_menu.addAction(self.action_export)
+
+        # Export Debug Package action
+        self.action_export_debug = QAction("Export &Debug Package...", self)
+        self.action_export_debug.setObjectName("actionExportDebug")
+        self.action_export_debug.setToolTip("Export zip with logs, artifacts, and environment info for support")
+        self.action_export_debug.triggered.connect(self._export_debug_package)
+        file_menu.addAction(self.action_export_debug)
 
         file_menu.addSeparator()
 
@@ -930,6 +938,27 @@ class MainWindow(QMainWindow):
                 hbar.setValue(hbar.minimum())
         except Exception:
             pass
+
+    def _export_debug_package(self) -> None:
+        """Export debug package zip for QA/support."""
+        last_dir = self.settings.value("last_export_dir", os.path.expanduser("~"))
+        path, _ = QFileDialog.getSaveFileName(
+            self, "Save Debug Package", os.path.join(last_dir, "multicam_debug.zip"),
+            "Zip Files (*.zip)"
+        )
+        if not path:
+            return
+
+        self.settings.setValue("last_export_dir", os.path.dirname(path))
+
+        success, message, warnings = export_debug_package(path)
+        if success:
+            warning_text = f" ({len(warnings)} warnings)" if warnings else ""
+            self._toast(f"Debug package exported{warning_text}: {os.path.basename(path)}", 5000)
+            logger.info("Debug package exported to %s, warnings: %s", path, warnings)
+        else:
+            self._toast(f"Export failed: {message}")
+            logger.error("Debug export failed: %s", message)
 
     def _open_last_run_folder(self) -> None:
         """Open the last QA run folder in the system file browser."""

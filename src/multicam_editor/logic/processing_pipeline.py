@@ -121,7 +121,9 @@ class ProcessingPipeline:
 
         # Convenience accessor
         self.speaker_switching_enabled = self._config.speaker_switching_enabled
-        self._diarization_mode = DiarizationMode.ENERGY  # V1 default
+
+        # Load diarization mode from settings (defaults to ENERGY for V1)
+        self._diarization_mode = self._load_diarization_mode()
 
         # Cancellation state
         self._cancelled = False
@@ -145,6 +147,24 @@ class ProcessingPipeline:
 
         # QA artifacts exporter
         self._qa_exporter = QAArtifactExporter()
+
+    def _load_diarization_mode(self) -> DiarizationMode:
+        """Load diarization mode from QSettings.
+
+        Defaults to ENERGY for V1 (CPU-only speaker detection).
+        """
+        settings = QSettings("MultiCamEditor", "MultiCamEditor")
+        mode_value = settings.value("diarization/mode", "energy", type=str)
+
+        mode_map = {
+            "off": DiarizationMode.OFF,
+            "stub": DiarizationMode.STUB,
+            "energy": DiarizationMode.ENERGY,
+            "real": DiarizationMode.REAL,
+        }
+        mode = mode_map.get(mode_value.lower(), DiarizationMode.ENERGY)
+        logger.info("Diarization mode from settings: %s", mode.name)
+        return mode
 
     def cancel(self) -> None:
         """Cancel the pipeline from any thread."""
@@ -758,6 +778,12 @@ class ProcessingPipeline:
             self._emit_progress(100, "No cuts to render")
             return []
 
+        # Load QA overlay setting
+        settings = QSettings("MultiCamEditor", "MultiCamEditor")
+        qa_overlay_enabled = settings.value("qa_overlay/enabled", False, type=bool)
+        if qa_overlay_enabled:
+            logger.info("QA overlay enabled - will burn timecode/speaker info into video")
+
         # Convert CutSegments to CutDefinitions with camera offset applied
         cuts: List[CutDefinition] = []
         for i, cut in enumerate(self._cut_plan):
@@ -790,6 +816,8 @@ class ProcessingPipeline:
                 start_ms=adjusted_start,
                 end_ms=adjusted_end,
                 cut_index=i,
+                qa_overlay=qa_overlay_enabled,
+                speaker_id=cut.camera_id,  # ENERGY mode: camera_id == speaker_id
             ))
 
         # Create renderer with temp output directory

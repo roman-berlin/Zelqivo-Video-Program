@@ -216,6 +216,60 @@ def get_temp_output_path(suffix: str = ".mp4") -> str:
     return path
 
 
+def extract_audio_to_wav(
+    video_path: str,
+    output_path: Optional[str] = None,
+    sample_rate: int = 16000,
+    mono: bool = True,
+    timeout: float = 60.0,
+) -> FFmpegResult:
+    """Extract audio track from video to WAV file.
+
+    Args:
+        video_path: Path to source video
+        output_path: Destination WAV path (auto-generated if None)
+        sample_rate: Target sample rate in Hz (default 16000 for sync)
+        mono: Convert to mono (default True)
+        timeout: Max extraction time in seconds
+
+    Returns:
+        FFmpegResult with output_path on success
+    """
+    if not os.path.isfile(video_path):
+        logger.error("extract_audio_to_wav: source not found: %s", video_path)
+        return FFmpegResult(success=False, error=f"File not found: {video_path}")
+
+    if output_path is None:
+        output_path = get_temp_output_path(suffix=".wav")
+
+    args = [
+        "ffmpeg", "-y",
+        "-i", video_path,
+        "-vn",  # No video
+        "-ar", str(sample_rate),
+    ]
+
+    if mono:
+        args.extend(["-ac", "1"])
+
+    args.extend(["-f", "wav", output_path])
+
+    logger.info("Extracting audio: %s -> %s (sr=%d, mono=%s)",
+                os.path.basename(video_path), os.path.basename(output_path),
+                sample_rate, mono)
+
+    proc = FFmpegProcess(args, output_path)
+    result = proc.run(timeout=timeout)
+
+    if result.success:
+        logger.info("Audio extraction complete: %s", os.path.basename(output_path))
+    else:
+        logger.error("Audio extraction failed for %s: %s",
+                     os.path.basename(video_path), result.error)
+
+    return result
+
+
 def build_trim_args(
     input_path: str,
     output_path: str,

@@ -125,6 +125,7 @@ def export_processing_summary(
     total_duration_ms: int,
     thresholds: dict[str, int],
     sync_info: Optional[dict[str, Any]] = None,
+    camera_alignments: Optional[List[dict[str, Any]]] = None,
 ) -> None:
     """Export processing_summary.json with counts and settings."""
     data = {
@@ -136,6 +137,7 @@ def export_processing_summary(
         },
         "thresholds": thresholds,
         "external_audio_sync": sync_info or {"used": False},
+        "camera_alignments": camera_alignments or [],
     }
     out_path = run_folder / "processing_summary.json"
     with open(out_path, "w", encoding="utf-8") as f:
@@ -153,6 +155,7 @@ class QAArtifactExporter:
         self._thresholds: dict[str, int] = {}
         self._total_duration_ms: int = 0
         self._sync_info: Optional[dict[str, Any]] = None
+        self._camera_alignments: List[dict[str, Any]] = []
 
     def start_run(self) -> Path:
         """Create a new run folder and return its path."""
@@ -211,6 +214,14 @@ class QAArtifactExporter:
             "message": message,
         }
 
+    def set_camera_alignments(self, alignments: List[dict[str, Any]]) -> None:
+        """Store camera alignment offsets for export.
+
+        Args:
+            alignments: List of dicts with camera_index, offset_ms, status, message
+        """
+        self._camera_alignments = alignments
+
     def finalize(self) -> None:
         """Write all artifacts to the run folder."""
         if not self.run_folder:
@@ -230,6 +241,7 @@ class QAArtifactExporter:
                 total_duration_ms=self._total_duration_ms,
                 thresholds=self._thresholds,
                 sync_info=self._sync_info,
+                camera_alignments=self._camera_alignments,
             )
             logger.info("QA artifacts written to: %s", self.run_folder.name)
         except Exception as e:

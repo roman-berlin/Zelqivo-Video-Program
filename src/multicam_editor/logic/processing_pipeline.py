@@ -1,7 +1,8 @@
 """High-level orchestration of the video processing workflow.
 
-Pipeline stages: probe -> diarize -> decision -> (sync) -> render -> concat.
+Pipeline stages: probe -> align -> diarize -> decision -> (sync) -> render -> concat.
 Supports cancellation, cleanup, and progress callbacks with ETA.
+Camera alignment auto-syncs multiple cameras using audio cross-correlation.
 """
 
 from __future__ import annotations
@@ -29,6 +30,7 @@ logger = logging.getLogger(__name__)
 class PipelineStage(Enum):
     """Pipeline stages for progress tracking."""
     PROBE = auto()
+    ALIGN = auto()
     DIARIZE = auto()
     DECISION = auto()
     SYNC = auto()
@@ -40,11 +42,12 @@ class PipelineStage(Enum):
 # Weight for each stage (used for ETA calculation)
 STAGE_WEIGHTS = {
     PipelineStage.PROBE: 5,
+    PipelineStage.ALIGN: 10,
     PipelineStage.DIARIZE: 15,
     PipelineStage.DECISION: 5,
     PipelineStage.SYNC: 10,
-    PipelineStage.RENDER: 50,
-    PipelineStage.CONCAT: 15,
+    PipelineStage.RENDER: 45,
+    PipelineStage.CONCAT: 10,
 }
 
 
@@ -106,6 +109,9 @@ class ProcessingPipeline:
         self._probe_results: List[ProbeResult] = []
         self._speaker_segments: List[SpeakerSegment] = []
         self._cut_plan: List[CutSegment] = []
+
+        # Camera alignment offsets (camera_idx -> offset_ms)
+        self._camera_offsets: dict[int, float] = {}
 
         # QA artifacts exporter
         self._qa_exporter = QAArtifactExporter()
@@ -213,7 +219,13 @@ class ProcessingPipeline:
             if self._check_cancelled():
                 return PipelineResult(success=False, cancelled=True)
 
-            # Stage 2: Diarize (speaker detection)
+            # Stage 2: Align cameras (auto-sync by audio)
+            self._stage_align()
+
+            if self._check_cancelled():
+                return PipelineResult(success=False, cancelled=True)
+
+            # Stage 3: Diarize (speaker detection)
             if not self._stage_diarize():
                 return PipelineResult(success=False, cancelled=self._cancelled,
                                      error="Diarization stage failed")
@@ -294,6 +306,64 @@ class ProcessingPipeline:
 
         logger.info("Probed %d files", len(self._probe_results))
         return True
+
+    def _stage_align(self) -> None:
+        """Align cameras using audio cross-correlation.
+
+        First camera is primary (offset=0). Others aligned relative to it.
+        Never fails the pipeline - on error, all offsets default to 0.
+        """
+        self._advance_stage(PipelineStage.ALIGN)
+
+        from .audio_sync import align_cameras, CameraAlignment
+
+        self._camera_offsets = {0: 0.0}  # Primary always 0
+
+        if len(self.input_files) < 2:
+            self._emit_progress(100, "Skipping alignment (single camera)")
+            return
+
+        self._emit_progress(10, "Aligning cameras by audio...")
+
+        def on_progress(idx: int, total: int) -> None:
+            if total > 0:
+                percent = int((idx + 1) * 90 / total) + 10
+                self._emit_progress(percent, f"Aligning camera {idx + 1}/{total}")
+
+        try:
+            alignments = align_cameras(self.input_files, on_progress=on_progress)
+
+            # Store offsets
+            alignment_data = []
+            for align in alignments:
+                self._camera_offsets[align.camera_index] = align.offset_ms
+                alignment_data.append({
+                    "camera_index": align.camera_index,
+                    "offset_ms": align.offset_ms,
+                    "status": align.status,
+                    "message": align.message,
+                })
+                logger.info("Camera %d offset: %.1f ms (%s)",
+                           align.camera_index, align.offset_ms, align.status)
+
+            # Store for QA artifacts
+            self._qa_exporter.set_camera_alignments(alignment_data)
+
+            self._emit_progress(100, f"Aligned {len(alignments)} cameras")
+            logger.info("Camera alignment complete: %s",
+                       {k: f"{v:.1f}ms" for k, v in self._camera_offsets.items()})
+
+        except Exception as e:
+            # Never fail pipeline on alignment error - just use 0 offsets
+            logger.error("Camera alignment failed, using offset=0 for all: %s", e, exc_info=True)
+            for i in range(len(self.input_files)):
+                self._camera_offsets[i] = 0.0
+
+            self._qa_exporter.set_camera_alignments([
+                {"camera_index": i, "offset_ms": 0.0, "status": "failed", "message": str(e)}
+                for i in range(len(self.input_files))
+            ])
+            self._emit_progress(100, "Alignment failed, using default offsets")
 
     def _stage_diarize(self) -> bool:
         """Run speaker diarization on first video's audio."""
@@ -439,15 +509,37 @@ class ProcessingPipeline:
             self._emit_progress(100, "No cuts to render")
             return []
 
-        # Convert CutSegments to CutDefinitions
+        # Convert CutSegments to CutDefinitions with camera offset applied
         cuts: List[CutDefinition] = []
         for i, cut in enumerate(self._cut_plan):
             # camera_id maps to input file index
             camera_idx = min(cut.camera_id, len(self.input_files) - 1)
+
+            # Apply camera alignment offset:
+            # offset_ms > 0 means camera started late -> we need to seek earlier in that camera
+            # offset_ms < 0 means camera started early -> we need to seek later in that camera
+            # Timeline time T maps to camera time T + offset_ms
+            offset_ms = self._camera_offsets.get(camera_idx, 0.0)
+            adjusted_start = int(cut.start_ms + offset_ms)
+            adjusted_end = int(cut.end_ms + offset_ms)
+
+            # Clamp to valid range (0 to camera duration)
+            camera_duration = self._probe_results[camera_idx].duration_ms if camera_idx < len(self._probe_results) else 0
+            adjusted_start = max(0, adjusted_start)
+            adjusted_end = max(adjusted_start + 1, adjusted_end)  # Ensure positive duration
+            if camera_duration > 0:
+                adjusted_end = min(adjusted_end, camera_duration)
+                adjusted_start = min(adjusted_start, adjusted_end - 1)
+
+            if offset_ms != 0.0:
+                logger.debug("Cut %d: camera %d offset %.1fms -> %d-%d (was %d-%d)",
+                           i, camera_idx, offset_ms, adjusted_start, adjusted_end,
+                           cut.start_ms, cut.end_ms)
+
             cuts.append(CutDefinition(
                 source_path=self.input_files[camera_idx],
-                start_ms=cut.start_ms,
-                end_ms=cut.end_ms,
+                start_ms=adjusted_start,
+                end_ms=adjusted_end,
                 cut_index=i,
             ))
 

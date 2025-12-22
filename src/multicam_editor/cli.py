@@ -36,9 +36,14 @@ def parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
         description="Headless multicam processing for QA and automation.",
     )
     parser.add_argument(
+        "--health",
+        action="store_true",
+        help="Run health check and exit (verify ffmpeg, backends)",
+    )
+    parser.add_argument(
         "--videos",
         nargs="+",
-        required=True,
+        required=False,  # Not required when --health is used
         help="Input video files (at least 2)",
     )
     parser.add_argument(
@@ -66,7 +71,7 @@ def parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
     )
     parser.add_argument(
         "--out",
-        required=True,
+        required=False,  # Not required when --health is used
         help="Output file path",
     )
     parser.add_argument(
@@ -115,6 +120,20 @@ def main(argv: Optional[List[str]] = None) -> int:
     configure_logging()
     if args.verbose:
         logging.getLogger().setLevel(logging.DEBUG)
+
+    # Handle --health flag
+    if args.health:
+        from multicam_editor.utils.backends import print_health_check
+        ready = print_health_check()
+        return 0 if ready else 1
+
+    # Validate required arguments for processing
+    if not args.videos:
+        logger.error("--videos is required for processing (use --health to check system)")
+        return 1
+    if not args.out:
+        logger.error("--out is required for processing")
+        return 1
 
     logger.info("MultiCam CLI starting...")
     logger.info("Videos: %s", args.videos)

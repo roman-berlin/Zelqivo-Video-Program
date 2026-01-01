@@ -121,15 +121,9 @@ class ProcessingPipeline:
 
         # Convenience accessor
         self.speaker_switching_enabled = self._config.speaker_switching_enabled
-        
-        # Read diarization mode from user settings (fixes bug where settings were ignored)
-        settings = QSettings("MultiCamEditor", "MultiCamEditor")
-        mode_value = settings.value("diarization/mode", DiarizationMode.ENERGY.value, type=str)
-        try:
-            self._diarization_mode = DiarizationMode(mode_value)
-        except ValueError:
-            self._diarization_mode = DiarizationMode.ENERGY  # Fallback to ENERGY
-        logger.info("Using diarization mode: %s", self._diarization_mode.value)
+
+        # Load diarization mode from settings (defaults to ENERGY for V1)
+        self._diarization_mode = self._load_diarization_mode()
 
         # Cancellation state
         self._cancelled = False
@@ -154,6 +148,24 @@ class ProcessingPipeline:
         # QA artifacts exporter
         self._qa_exporter = QAArtifactExporter()
 
+    def _load_diarization_mode(self) -> DiarizationMode:
+        """Load diarization mode from QSettings.
+
+        Defaults to ENERGY for V1 (CPU-only speaker detection).
+        """
+        settings = QSettings("MultiCamEditor", "MultiCamEditor")
+        mode_value = settings.value("diarization/mode", "energy", type=str)
+
+        mode_map = {
+            "off": DiarizationMode.OFF,
+            "stub": DiarizationMode.STUB,
+            "energy": DiarizationMode.ENERGY,
+            "real": DiarizationMode.REAL,
+        }
+        mode = mode_map.get(mode_value.lower(), DiarizationMode.ENERGY)
+        logger.info("Diarization mode from settings: %s", mode.name)
+        return mode
+
     def cancel(self) -> None:
         """Cancel the pipeline from any thread."""
         logger.info("Pipeline cancellation requested")
@@ -170,15 +182,64 @@ class ProcessingPipeline:
         return False
 
     def _cleanup(self) -> None:
-        """Remove all temp files created during pipeline."""
+        """Remove all temp files and directories created during pipeline.
+
+        Uses retry logic with small delays to handle files still being released
+        by ffmpeg processes. Logs warnings for files that couldn't be removed.
+        """
+        max_retries = 3
+        retry_delay = 0.5  # seconds
+
+        failed_paths: List[str] = []
+
         for path in self._temp_files:
-            if os.path.isfile(path):
+            if not path:
+                continue
+
+            removed = False
+            for attempt in range(max_retries):
                 try:
-                    os.remove(path)
-                    logger.debug("Cleaned up: %s", path)
+                    if os.path.isfile(path):
+                        os.remove(path)
+                        logger.debug("Cleaned up file: %s", path)
+                        removed = True
+                        break
+                    elif os.path.isdir(path):
+                        import shutil
+                        shutil.rmtree(path, ignore_errors=True)
+                        logger.debug("Cleaned up directory: %s", path)
+                        removed = True
+                        break
+                    else:
+                        # Path doesn't exist, consider it cleaned
+                        removed = True
+                        break
+                except PermissionError as e:
+                    # File might still be in use by ffmpeg process
+                    if attempt < max_retries - 1:
+                        logger.debug(
+                            "Cleanup retry %d/%d for %s (permission error)",
+                            attempt + 1, max_retries, os.path.basename(path)
+                        )
+                        time.sleep(retry_delay)
+                    else:
+                        logger.warning(
+                            "Failed to cleanup %s after %d attempts: %s",
+                            os.path.basename(path), max_retries, e
+                        )
+                        failed_paths.append(path)
                 except Exception as e:
                     logger.debug("Cleanup failed for %s: %s", path, e)
+                    failed_paths.append(path)
+                    break
+
         self._temp_files.clear()
+
+        if failed_paths:
+            logger.warning(
+                "Cleanup incomplete: %d files could not be removed",
+                len(failed_paths)
+            )
 
     def _emit_progress(self, stage_percent: int = 0, message: str = "") -> None:
         """Emit progress update via signals and callback."""
@@ -721,6 +782,12 @@ class ProcessingPipeline:
             self._emit_progress(100, "No cuts to render")
             return []
 
+        # Load QA overlay setting
+        settings = QSettings("MultiCamEditor", "MultiCamEditor")
+        qa_overlay_enabled = settings.value("qa_overlay/enabled", False, type=bool)
+        if qa_overlay_enabled:
+            logger.info("QA overlay enabled - will burn timecode/speaker info into video")
+
         # Convert CutSegments to CutDefinitions with camera offset applied
         cuts: List[CutDefinition] = []
         for i, cut in enumerate(self._cut_plan):
@@ -753,6 +820,8 @@ class ProcessingPipeline:
                 start_ms=adjusted_start,
                 end_ms=adjusted_end,
                 cut_index=i,
+                qa_overlay=qa_overlay_enabled,
+                speaker_id=cut.camera_id,  # ENERGY mode: camera_id == speaker_id
             ))
 
         # Create renderer with temp output directory

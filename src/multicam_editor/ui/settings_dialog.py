@@ -17,7 +17,8 @@ from PyQt6.QtWidgets import (
 )
 
 from multicam_editor.core.project import AudioMixMode, AudioMixSettings
-from multicam_editor.logic.active_speaker import DiarizationMode, PyannoteBackend
+from multicam_editor.logic.active_speaker import DiarizationMode
+from multicam_editor.utils.backends import check_backends
 
 
 class SettingsDialog(QDialog):
@@ -174,15 +175,18 @@ class SettingsDialog(QDialog):
 
     def _update_diarization_status(self) -> None:
         """Update the diarization status label with actionable guidance."""
-        if PyannoteBackend.is_available():
-            self.label_diarization_status.setText("✓ pyannote.audio ready")
+        backends = check_backends()
+        pyannote_status = backends.get("pyannote")
+
+        if pyannote_status and pyannote_status.available:
+            self.label_diarization_status.setText("OK pyannote.audio ready")
             self.label_diarization_status.setStyleSheet("color: green;")
             self.label_diarization_status.setToolTip("")
         else:
-            error = PyannoteBackend.get_error() or "Not loaded"
+            error = pyannote_status.error if pyannote_status else "Not loaded"
             # Parse error and provide actionable message
-            short_msg, tooltip = self._parse_diarization_error(error)
-            self.label_diarization_status.setText(f"⚠ {short_msg}")
+            short_msg, tooltip = self._parse_diarization_error(error or "Unknown error")
+            self.label_diarization_status.setText(f"[!] {short_msg}")
             self.label_diarization_status.setStyleSheet("color: orange;")
             self.label_diarization_status.setToolTip(tooltip)
 

@@ -93,6 +93,17 @@ def _find_ffprobe() -> Optional[str]:
             r"C:\Program Files\ffmpeg\bin\ffprobe.exe",
             os.path.expanduser(r"~\ffmpeg\bin\ffprobe.exe"),
         ]
+        # Add WinGet installation paths (dynamic version folder)
+        winget_base = os.path.expandvars(r"%LOCALAPPDATA%\Microsoft\WinGet\Packages")
+        if os.path.isdir(winget_base):
+            for pkg_dir in os.listdir(winget_base):
+                if pkg_dir.startswith("Gyan.FFmpeg"):
+                    pkg_path = os.path.join(winget_base, pkg_dir)
+                    # Search for ffprobe.exe in the package
+                    for root, dirs, files in os.walk(pkg_path):
+                        if "ffprobe.exe" in files:
+                            common_paths.append(os.path.join(root, "ffprobe.exe"))
+                            break
         for p in common_paths:
             if os.path.isfile(p):
                 _ffprobe_path = p

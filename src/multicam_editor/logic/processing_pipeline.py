@@ -121,7 +121,15 @@ class ProcessingPipeline:
 
         # Convenience accessor
         self.speaker_switching_enabled = self._config.speaker_switching_enabled
-        self._diarization_mode = DiarizationMode.ENERGY  # V1 default
+        
+        # Read diarization mode from user settings (fixes bug where settings were ignored)
+        settings = QSettings("MultiCamEditor", "MultiCamEditor")
+        mode_value = settings.value("diarization/mode", DiarizationMode.ENERGY.value, type=str)
+        try:
+            self._diarization_mode = DiarizationMode(mode_value)
+        except ValueError:
+            self._diarization_mode = DiarizationMode.ENERGY  # Fallback to ENERGY
+        logger.info("Using diarization mode: %s", self._diarization_mode.value)
 
         # Cancellation state
         self._cancelled = False
@@ -451,10 +459,10 @@ class ProcessingPipeline:
                     logger.info("Extracted audio from camera %d: %s",
                                i, os.path.basename(result.output_path))
 
-            # Step 2: Create ENERGY backend and set camera audio paths
-            self._emit_progress(50, "Analyzing speaker energy levels...")
+            # Step 2: Create backend using user's selected diarization mode
+            self._emit_progress(50, f"Analyzing speakers ({self._diarization_mode.value} mode)...")
 
-            backend, error = create_backend(DiarizationMode.ENERGY)
+            backend, error = create_backend(self._diarization_mode)
             if error:
                 logger.warning("Backend creation warning: %s", error)
 
@@ -462,12 +470,15 @@ class ProcessingPipeline:
             if isinstance(backend, RealEnergyVADBackend):
                 backend.set_camera_audio_paths(camera_audio_paths)
             else:
-                logger.warning("Backend is not RealEnergyVADBackend, falling back to stub")
+                logger.info("Backend type: %s", type(backend).__name__)
 
             # Step 3: Run diarization
             detector = ActiveSpeakerDetector(backend=backend)
+            # For pyannote, use extracted WAV file (torchaudio can't read video files)
+            # For ENERGY mode, the audio_path isn't used (it uses camera_audio_paths)
+            audio_path_for_diarization = camera_audio_paths[0] if camera_audio_paths[0] else self.input_files[0]
             self._speaker_segments = detector.detect(
-                self.input_files[0],  # Reference path (not used by ENERGY backend)
+                audio_path_for_diarization,
                 num_channels=num_cameras,
             )
 
@@ -475,7 +486,8 @@ class ProcessingPipeline:
             self._qa_exporter.set_diarization(self._speaker_segments)
 
             self._emit_progress(100, f"Found {len(self._speaker_segments)} speaker segments")
-            logger.info("Diarization complete (ENERGY mode): %d segments", len(self._speaker_segments))
+            logger.info("Diarization complete (%s mode): %d segments", 
+                       self._diarization_mode.value, len(self._speaker_segments))
             return True
 
         except Exception as e:

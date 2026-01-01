@@ -269,9 +269,8 @@ class MainWindow(QMainWindow):
         self.chk_external_audio = QCheckBox("Use external audio")
         self.chk_external_audio.setObjectName("chkExternalAudio")
         self.chk_external_audio.setToolTip("Replace camera audio with external audio file")
-        self.chk_external_audio.setChecked(
-            self.settings.value("processing/use_external_audio", False, type=bool)
-        )
+        # Don't persist external audio - start fresh each session (like video list)
+        self.chk_external_audio.setChecked(False)
         self.chk_external_audio.toggled.connect(self._on_external_audio_toggled)
         layout.addWidget(self.chk_external_audio, row, 0, 1, 3)
         row += 1
@@ -295,10 +294,8 @@ class MainWindow(QMainWindow):
         self.lbl_external_audio = QLabel("No audio selected")
         self.lbl_external_audio.setObjectName("lblExternalAudio")
         self.lbl_external_audio.setStyleSheet("color: gray;")
-        self._external_audio_path: str | None = self.settings.value("processing/external_audio_path", None)
-        if self._external_audio_path:
-            self.lbl_external_audio.setText(os.path.basename(self._external_audio_path))
-            self.lbl_external_audio.setStyleSheet("")  # Normal color when file selected
+        # Don't persist external audio path - start fresh each session (like video list)
+        self._external_audio_path: str | None = None
         layout.addWidget(self.lbl_external_audio, row, 1, 1, 2)
         row += 1
 

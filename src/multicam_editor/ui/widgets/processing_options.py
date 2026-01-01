@@ -148,13 +148,14 @@ class ProcessingOptionsWidget(QGroupBox):
 
     def _load_settings(self) -> None:
         """Load saved settings."""
-        self.chk_external_audio.setChecked(
-            self.settings.value("processing/use_external_audio", False, type=bool)
-        )
-        self._external_audio_path = self.settings.value("processing/external_audio_path", None)
-        if self._external_audio_path:
-            self.lbl_external_audio.setText(os.path.basename(self._external_audio_path))
-            self.lbl_external_audio.setStyleSheet("")
+        # Clear any persisted external audio settings - start fresh each session
+        self.settings.remove("processing/use_external_audio")
+        self.settings.remove("processing/external_audio_path")
+
+        self.chk_external_audio.setChecked(False)
+        self._external_audio_path = None
+        self.lbl_external_audio.setText("No audio selected")
+        self.lbl_external_audio.setStyleSheet("color: gray;")
 
         self._output_folder = self.settings.value("output/folder", None)
         if self._output_folder:

@@ -151,10 +151,8 @@ class ProcessingOptionsWidget(QGroupBox):
         self.chk_external_audio.setChecked(
             self.settings.value("processing/use_external_audio", False, type=bool)
         )
-        self._external_audio_path = self.settings.value("processing/external_audio_path", None)
-        if self._external_audio_path:
-            self.lbl_external_audio.setText(os.path.basename(self._external_audio_path))
-            self.lbl_external_audio.setStyleSheet("")
+        # Don't load external_audio_path from settings - always start fresh
+        # Audio file from previous session should not persist
 
         self._output_folder = self.settings.value("output/folder", None)
         if self._output_folder:

@@ -295,10 +295,8 @@ class MainWindow(QMainWindow):
         self.lbl_external_audio = QLabel("No audio selected")
         self.lbl_external_audio.setObjectName("lblExternalAudio")
         self.lbl_external_audio.setStyleSheet("color: gray;")
-        self._external_audio_path: str | None = self.settings.value("processing/external_audio_path", None)
-        if self._external_audio_path:
-            self.lbl_external_audio.setText(os.path.basename(self._external_audio_path))
-            self.lbl_external_audio.setStyleSheet("")  # Normal color when file selected
+        # Don't load external_audio_path from settings - always start fresh
+        self._external_audio_path: str | None = None
         layout.addWidget(self.lbl_external_audio, row, 1, 1, 2)
         row += 1
 

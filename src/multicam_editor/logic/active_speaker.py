@@ -508,6 +508,16 @@ class PyannoteBackend:
             start = time.time()
 
             from pyannote.audio import Pipeline
+            
+            # Get token from huggingface_hub (cached login or HF_TOKEN env)
+            token = None
+            try:
+                from huggingface_hub import get_token
+                token = get_token()
+                if token:
+                    logger.debug("Using HuggingFace token from cached login")
+            except Exception as e:
+                logger.debug("Could not get HF token: %s", e)
 
             # Use pretrained pipeline - models auto-download on first run
             # pyannote 3.x uses HuggingFace Hub token from environment or login
@@ -519,8 +529,11 @@ class PyannoteBackend:
 
             for model_id in model_ids:
                 try:
-                    # Try without explicit token first (uses HF_TOKEN env or cached login)
-                    cls._pipeline = Pipeline.from_pretrained(model_id)
+                    # Pass token explicitly if available (newer API uses 'token', not 'use_auth_token')
+                    if token:
+                        cls._pipeline = Pipeline.from_pretrained(model_id, token=token)
+                    else:
+                        cls._pipeline = Pipeline.from_pretrained(model_id)
                     logger.info("Loaded model: %s", model_id)
                     break
                 except Exception as e:
@@ -573,32 +586,59 @@ class PyannoteBackend:
         start = time.time()
 
         try:
-            diarization = self._pipeline(audio_path)
+            # Pre-load audio with torchaudio since torchcodec doesn't work on Windows
+            # pyannote accepts {"waveform": tensor, "sample_rate": int} format
+            import torchaudio
+            waveform, sample_rate = torchaudio.load(audio_path)
+            
+            # Run diarization with pre-loaded audio
+            audio_input = {"waveform": waveform, "sample_rate": sample_rate}
+            diarization = self._pipeline(audio_input)
 
             # Convert pyannote output to SpeakerSegments
             segments: List[SpeakerSegment] = []
             speaker_map: dict[str, int] = {}
             total_speech_ms = 0
 
-            for turn, _, speaker in diarization.itertracks(yield_label=True):
-                # Map speaker labels to integer IDs
-                if speaker not in speaker_map:
-                    speaker_map[speaker] = len(speaker_map)
-                speaker_id = speaker_map[speaker]
+            # Handle different pyannote return types (Annotation vs DiarizeOutput)
+            # Access the annotation object if wrapped in DiarizeOutput
+            annotation = diarization
+            if hasattr(diarization, 'speaker_diarization'):
+                # DiarizeOutput from newer pyannote API
+                annotation = diarization.speaker_diarization
+                logger.debug("Using speaker_diarization attribute from DiarizeOutput")
+            elif hasattr(diarization, 'annotation'):
+                annotation = diarization.annotation
+            elif hasattr(diarization, 'get_timeline'):
+                # Already an Annotation object
+                pass
+            
+            # Now iterate over tracks
+            if hasattr(annotation, 'itertracks'):
+                for turn, _, speaker in annotation.itertracks(yield_label=True):
+                    # Map speaker labels to integer IDs
+                    if speaker not in speaker_map:
+                        speaker_map[speaker] = len(speaker_map)
+                    speaker_id = speaker_map[speaker]
 
-                start_ms = int(turn.start * 1000)
-                end_ms = int(turn.end * 1000)
+                    start_ms = int(turn.start * 1000)
+                    end_ms = int(turn.end * 1000)
 
-                # Skip invalid/tiny segments
-                if end_ms <= start_ms:
-                    continue
+                    # Skip invalid/tiny segments
+                    if end_ms <= start_ms:
+                        continue
 
-                segments.append(SpeakerSegment(
-                    start_ms=start_ms,
-                    end_ms=end_ms,
-                    speaker_id=speaker_id,
-                ))
-                total_speech_ms += (end_ms - start_ms)
+                    segments.append(SpeakerSegment(
+                        start_ms=start_ms,
+                        end_ms=end_ms,
+                        speaker_id=speaker_id,
+                    ))
+                    total_speech_ms += (end_ms - start_ms)
+            else:
+                # Log available attributes for debugging
+                logger.error("Diarization output has no itertracks. Type: %s, attrs: %s", 
+                           type(diarization).__name__, 
+                           [a for a in dir(diarization) if not a.startswith('_')][:20])
 
             # Sort by start time (should already be sorted, but ensure)
             segments.sort(key=lambda s: s.start_ms)

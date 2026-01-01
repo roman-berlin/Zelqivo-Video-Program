@@ -80,9 +80,16 @@ class SettingsDialog(QDialog):
 
         self.combo_diarization = QComboBox()
         # Add items with display names and store enum values as user data
+        self.combo_diarization.addItem("Energy (CPU-only)", DiarizationMode.ENERGY.value)
         self.combo_diarization.addItem("Real (pyannote.audio)", DiarizationMode.REAL.value)
         self.combo_diarization.addItem("Stub (dev only)", DiarizationMode.STUB.value)
         self.combo_diarization.addItem("Off (single camera)", DiarizationMode.OFF.value)
+        self.combo_diarization.setToolTip(
+            "Energy: CPU-only, picks loudest camera (requires isolated mics)\n"
+            "Real: AI-based speaker detection (requires HuggingFace setup)\n"
+            "Stub: Dev mode, alternating mock segments\n"
+            "Off: Single camera output, no switching"
+        )
         diarization_layout.addRow("Backend:", self.combo_diarization)
 
         # Status label showing if pyannote is available

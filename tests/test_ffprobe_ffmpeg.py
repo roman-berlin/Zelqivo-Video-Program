@@ -219,9 +219,12 @@ class TestFFmpeg:
 
     def test_ffmpeg_not_available(self):
         """is_ffmpeg_available returns False when not found."""
-        with patch("subprocess.run") as mock_run:
+        with patch("multicam_editor.utils.ffmpeg.subprocess.run") as mock_run:
             mock_run.side_effect = FileNotFoundError()
-            assert ffmpeg.is_ffmpeg_available() is False
+            # Also mock os.path.isfile to prevent finding ffmpeg in common paths
+            with patch("multicam_editor.utils.ffmpeg.os.path.isfile", return_value=False):
+                with patch("multicam_editor.utils.ffmpeg.os.path.isdir", return_value=False):
+                    assert ffmpeg.is_ffmpeg_available() is False
 
     def test_build_trim_args(self):
         """build_trim_args creates correct command."""

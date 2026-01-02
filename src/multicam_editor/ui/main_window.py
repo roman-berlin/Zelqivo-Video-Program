@@ -893,14 +893,34 @@ class MainWindow(QMainWindow):
         speaker_switching_enabled = True
         use_external_audio = self.chk_external_audio.isChecked()
 
-        # Get external audio path if enabled
+        # Get external audio path if enabled - validate it was actually selected
         external_audio: str | None = None
-        if use_external_audio and self._external_audio_path:
-            if os.path.isfile(self._external_audio_path):
+        if use_external_audio:
+            if not self._external_audio_path:
+                # User checked the box but never selected an audio file
+                from PyQt6.QtWidgets import QMessageBox
+                QMessageBox.warning(
+                    self,
+                    "External Audio Required",
+                    "You checked 'Use external audio' but no audio file was selected.\n\n"
+                    "Please either:\n"
+                    "• Click 'Choose Audio...' to select an audio file, or\n"
+                    "• Uncheck 'Use external audio' to proceed without it."
+                )
+                return
+            elif os.path.isfile(self._external_audio_path):
                 external_audio = self._external_audio_path
             else:
-                self._toast("External audio file not found. Processing without it.")
-                logger.warning("External audio file missing: %s", self._external_audio_path)
+                # File was selected but no longer exists
+                from PyQt6.QtWidgets import QMessageBox
+                QMessageBox.warning(
+                    self,
+                    "External Audio Not Found",
+                    f"The selected external audio file was not found:\n\n"
+                    f"{self._external_audio_path}\n\n"
+                    "Please select a different audio file or uncheck 'Use external audio'."
+                )
+                return
 
         # Get camera-to-speaker mapping
         camera_mapping = self.get_camera_speaker_mapping()

@@ -543,24 +543,20 @@ class ProcessingPipeline:
                 num_channels=num_cameras,
             )
 
-            # Step 4: If using pyannote (REAL mode), compute automatic speaker-camera mapping
+            # Step 4: Hybrid mode - use pyannote segments but pick camera by energy
+            # This allows all cameras to be used even when pyannote groups speakers
             if self._diarization_mode == DiarizationMode.REAL and raw_segments:
-                self._emit_progress(70, "Mapping speakers to cameras...")
-                from .active_speaker import compute_speaker_camera_mapping
-                speaker_map = compute_speaker_camera_mapping(
+                self._emit_progress(70, "Assigning cameras by audio energy...")
+                from .active_speaker import assign_cameras_by_energy
+                self._speaker_segments = assign_cameras_by_energy(
                     raw_segments, camera_audio_paths
                 )
-                logger.info("Auto speaker-camera mapping: %s", speaker_map)
-                
-                # Apply mapping: convert speaker_id to camera_id
-                self._speaker_segments = [
-                    SpeakerSegment(s.start_ms, s.end_ms, speaker_map.get(s.speaker_id, 0))
-                    for s in raw_segments
-                ]
-                logger.info("Mapped %d segments to camera IDs", len(self._speaker_segments))
+                logger.info("Hybrid mode: assigned %d segments to cameras by energy",
+                           len(self._speaker_segments))
             else:
                 # ENERGY mode: speaker_id already equals camera_id
                 self._speaker_segments = raw_segments
+
 
             # Record for QA artifacts
             self._qa_exporter.set_diarization(self._speaker_segments)

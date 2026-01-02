@@ -482,6 +482,123 @@ class RealEnergyVADBackend:
         return segments
 
 
+def compute_speaker_camera_mapping(
+    segments: List[SpeakerSegment],
+    camera_audio_paths: List[str],
+    sample_rate: int = 16000,
+) -> dict[int, int]:
+    """
+    Automatically map pyannote speakers to cameras based on audio energy.
+
+    For each speaker in segments, analyzes which camera had the highest
+    energy during that speaker's speech. Uses greedy assignment with
+    conflict resolution.
+
+    Args:
+        segments: Speaker segments from pyannote (speaker_id is arbitrary)
+        camera_audio_paths: Paths to extracted WAV audio for each camera
+        sample_rate: Expected sample rate of audio files
+
+    Returns:
+        Dict mapping speaker_id -> camera_id
+    """
+    if not segments or not camera_audio_paths:
+        logger.warning("compute_speaker_camera_mapping: no segments or audio paths")
+        return {}
+
+    num_cameras = len(camera_audio_paths)
+    unique_speakers = sorted(set(s.speaker_id for s in segments))
+    
+    if not unique_speakers:
+        return {}
+
+    logger.info("Computing speaker-camera mapping for %d speakers, %d cameras",
+               len(unique_speakers), num_cameras)
+
+    # Load audio samples from each camera
+    camera_samples: List[List[float]] = []
+    actual_sample_rate = sample_rate
+    
+    for i, wav_path in enumerate(camera_audio_paths):
+        if not wav_path:
+            camera_samples.append([])
+            continue
+        samples, sr = RealEnergyVADBackend._load_wav_samples(wav_path)
+        if sr > 0:
+            actual_sample_rate = sr
+        camera_samples.append(samples)
+        logger.debug("Loaded %d samples from camera %d", len(samples), i)
+
+    if all(len(s) == 0 for s in camera_samples):
+        logger.error("No audio loaded from any camera")
+        return {spk: spk % num_cameras for spk in unique_speakers}
+
+    # Compute energy matrix: energy_matrix[speaker_id][camera_id] = total energy
+    energy_matrix: dict[int, List[float]] = {spk: [0.0] * num_cameras for spk in unique_speakers}
+
+    for seg in segments:
+        speaker_id = seg.speaker_id
+        start_sample = int(seg.start_ms * actual_sample_rate / 1000)
+        end_sample = int(seg.end_ms * actual_sample_rate / 1000)
+
+        for cam_idx, samples in enumerate(camera_samples):
+            if not samples:
+                continue
+            # Clamp to valid range
+            start_idx = max(0, min(start_sample, len(samples) - 1))
+            end_idx = max(start_idx + 1, min(end_sample, len(samples)))
+            
+            segment_samples = samples[start_idx:end_idx]
+            if segment_samples:
+                rms = RealEnergyVADBackend._compute_rms(segment_samples)
+                duration_ms = seg.end_ms - seg.start_ms
+                # Weight by duration to handle varying segment lengths
+                energy_matrix[speaker_id][cam_idx] += rms * duration_ms
+
+    # Log energy matrix for debugging
+    for spk in unique_speakers:
+        energies = [f"cam{i}={e:.4f}" for i, e in enumerate(energy_matrix[spk])]
+        logger.debug("Speaker %d energy: %s", spk, ", ".join(energies))
+
+    # Greedy assignment: sort speakers by max energy (most confident first)
+    speaker_max_energy = [
+        (spk, max(energy_matrix[spk]), energy_matrix[spk].index(max(energy_matrix[spk])))
+        for spk in unique_speakers
+    ]
+    # Sort by max energy descending
+    speaker_max_energy.sort(key=lambda x: x[1], reverse=True)
+
+    speaker_to_camera: dict[int, int] = {}
+    assigned_cameras: set[int] = set()
+
+    for spk, max_e, preferred_cam in speaker_max_energy:
+        if preferred_cam not in assigned_cameras:
+            # Assign to preferred camera
+            speaker_to_camera[spk] = preferred_cam
+            assigned_cameras.add(preferred_cam)
+        else:
+            # Preferred camera taken, find next best available
+            cam_energies = list(enumerate(energy_matrix[spk]))
+            cam_energies.sort(key=lambda x: x[1], reverse=True)
+            
+            assigned = False
+            for cam_idx, _ in cam_energies:
+                if cam_idx not in assigned_cameras:
+                    speaker_to_camera[spk] = cam_idx
+                    assigned_cameras.add(cam_idx)
+                    assigned = True
+                    break
+            
+            if not assigned:
+                # All cameras taken, assign to preferred anyway
+                speaker_to_camera[spk] = preferred_cam
+                logger.warning("Speaker %d conflict: all cameras taken, using cam %d",
+                              spk, preferred_cam)
+
+    logger.info("Speaker-camera mapping result: %s", speaker_to_camera)
+    return speaker_to_camera
+
+
 class PyannoteBackend:
     """
     Real diarization backend using pyannote.audio.

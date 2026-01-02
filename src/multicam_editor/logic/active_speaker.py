@@ -599,6 +599,132 @@ def compute_speaker_camera_mapping(
     return speaker_to_camera
 
 
+def assign_cameras_by_energy(
+    segments: List[SpeakerSegment],
+    camera_audio_paths: List[str],
+    sample_rate: int = 16000,
+) -> List[SpeakerSegment]:
+    """
+    Hybrid approach: Use pyannote segment timing, pick camera by NORMALIZED energy.
+
+    For each speech segment from pyannote, determines which camera has
+    the highest RELATIVE energy spike (compared to its own baseline).
+    This allows cameras with different mic levels to all be used fairly.
+
+    Args:
+        segments: Speech segments from pyannote (timing is used, speaker_id ignored)
+        camera_audio_paths: Paths to extracted WAV audio for each camera
+        sample_rate: Expected sample rate of audio files
+
+    Returns:
+        New list of SpeakerSegment with speaker_id set to the loudest camera
+    """
+    if not segments or not camera_audio_paths:
+        logger.warning("assign_cameras_by_energy: no segments or audio paths")
+        return segments
+
+    num_cameras = len(camera_audio_paths)
+    logger.info("Hybrid mode: assigning %d segments to %d cameras by normalized energy",
+               len(segments), num_cameras)
+
+    # Load audio samples from each camera
+    camera_samples: List[List[float]] = []
+    actual_sample_rate = sample_rate
+    
+    for i, wav_path in enumerate(camera_audio_paths):
+        if not wav_path:
+            camera_samples.append([])
+            continue
+        samples, sr = RealEnergyVADBackend._load_wav_samples(wav_path)
+        if sr > 0:
+            actual_sample_rate = sr
+        camera_samples.append(samples)
+        logger.debug("Loaded %d samples from camera %d", len(samples), i)
+
+    if all(len(s) == 0 for s in camera_samples):
+        logger.error("No audio loaded from any camera - returning original segments")
+        return segments
+
+    # Compute baseline (average) RMS energy per camera across all speech segments
+    camera_baselines: List[float] = []
+    for cam_idx, samples in enumerate(camera_samples):
+        if not samples:
+            camera_baselines.append(0.001)  # Avoid div by zero
+            continue
+        
+        total_energy = 0.0
+        total_samples = 0
+        for seg in segments:
+            start_sample = int(seg.start_ms * actual_sample_rate / 1000)
+            end_sample = int(seg.end_ms * actual_sample_rate / 1000)
+            start_idx = max(0, min(start_sample, len(samples) - 1))
+            end_idx = max(start_idx + 1, min(end_sample, len(samples)))
+            segment_samples = samples[start_idx:end_idx]
+            if segment_samples:
+                total_energy += sum(s * s for s in segment_samples)
+                total_samples += len(segment_samples)
+        
+        if total_samples > 0:
+            baseline = (total_energy / total_samples) ** 0.5
+            camera_baselines.append(max(baseline, 0.001))  # Avoid div by zero
+        else:
+            camera_baselines.append(0.001)
+    
+    # Log baselines
+    for cam_idx, baseline in enumerate(camera_baselines):
+        logger.info("Camera %d baseline RMS: %.6f", cam_idx, baseline)
+
+    # For each segment, find the camera with highest NORMALIZED energy
+    result_segments: List[SpeakerSegment] = []
+    camera_usage_count = [0] * num_cameras
+
+    for seg in segments:
+        start_sample = int(seg.start_ms * actual_sample_rate / 1000)
+        end_sample = int(seg.end_ms * actual_sample_rate / 1000)
+
+        # Compute normalized energy for each camera during this segment
+        cam_normalized_energies = []
+        for cam_idx, samples in enumerate(camera_samples):
+            if not samples:
+                cam_normalized_energies.append(0.0)
+                continue
+            # Clamp to valid range
+            start_idx = max(0, min(start_sample, len(samples) - 1))
+            end_idx = max(start_idx + 1, min(end_sample, len(samples)))
+            
+            segment_samples = samples[start_idx:end_idx]
+            if segment_samples:
+                rms = RealEnergyVADBackend._compute_rms(segment_samples)
+                # Normalize: how much above baseline is this segment?
+                normalized = rms / camera_baselines[cam_idx]
+                cam_normalized_energies.append(normalized)
+            else:
+                cam_normalized_energies.append(0.0)
+
+        # Pick camera with highest normalized energy
+        if sum(cam_normalized_energies) > 0:
+            best_cam = cam_normalized_energies.index(max(cam_normalized_energies))
+        else:
+            best_cam = 0  # Fallback to camera 0
+
+        result_segments.append(SpeakerSegment(
+            start_ms=seg.start_ms,
+            end_ms=seg.end_ms,
+            speaker_id=best_cam,  # speaker_id now represents camera_id
+        ))
+        camera_usage_count[best_cam] += 1
+
+    # Log camera usage statistics
+    for cam_idx, count in enumerate(camera_usage_count):
+        logger.info("Camera %d: %d segments (%.1f%%)",
+                   cam_idx, count, 100 * count / len(result_segments) if result_segments else 0)
+
+    logger.info("Hybrid assignment complete: %d segments across %d cameras",
+               len(result_segments), sum(1 for c in camera_usage_count if c > 0))
+    return result_segments
+
+
+
 class PyannoteBackend:
     """
     Real diarization backend using pyannote.audio.

@@ -543,19 +543,36 @@ class ProcessingPipeline:
                 num_channels=num_cameras,
             )
 
-            # Step 4: Hybrid mode - use pyannote segments but pick camera by energy
-            # This allows all cameras to be used even when pyannote groups speakers
+            # Step 4: Map speakers to cameras
+            # Check if user provided manual mapping
             if self._diarization_mode == DiarizationMode.REAL and raw_segments:
-                self._emit_progress(70, "Assigning cameras by audio energy...")
-                from .active_speaker import assign_cameras_by_energy
-                self._speaker_segments = assign_cameras_by_energy(
-                    raw_segments, camera_audio_paths
-                )
-                logger.info("Hybrid mode: assigned %d segments to cameras by energy",
-                           len(self._speaker_segments))
+                if self._config.has_manual_mapping():
+                    # Use pyannote's speaker IDs + user's manual mapping
+                    self._emit_progress(70, "Applying manual speaker mapping...")
+                    num_cameras = len(self.input_files)
+                    self._speaker_segments = [
+                        SpeakerSegment(
+                            s.start_ms,
+                            s.end_ms,
+                            self._config.get_camera_for_speaker(s.speaker_id, num_cameras),
+                        )
+                        for s in raw_segments
+                    ]
+                    logger.info("Manual mapping: applied user's speaker->camera mapping to %d segments",
+                               len(self._speaker_segments))
+                else:
+                    # No manual mapping - fall back to energy-based assignment
+                    self._emit_progress(70, "Assigning cameras by audio energy...")
+                    from .active_speaker import assign_cameras_by_energy
+                    self._speaker_segments = assign_cameras_by_energy(
+                        raw_segments, camera_audio_paths
+                    )
+                    logger.info("Hybrid mode: assigned %d segments to cameras by energy",
+                               len(self._speaker_segments))
             else:
                 # ENERGY mode: speaker_id already equals camera_id
                 self._speaker_segments = raw_segments
+
 
 
             # Record for QA artifacts

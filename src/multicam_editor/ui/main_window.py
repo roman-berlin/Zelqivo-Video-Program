@@ -417,10 +417,13 @@ class MainWindow(QMainWindow):
 
     def _refresh_camera_mapping_ui(self) -> None:
         """Rebuild camera mapping combos based on current file list."""
-        # Clear old combos
-        for combo in self._camera_combos.values():
-            combo.setParent(None)
-            combo.deleteLater()
+        # Clear old row widgets from the layout
+        while self.mapping_layout.count():
+            item = self.mapping_layout.takeAt(0)
+            widget = item.widget()
+            if widget:
+                widget.setParent(None)
+                widget.deleteLater()
         self._camera_combos.clear()
 
         clips = self.project.clips()

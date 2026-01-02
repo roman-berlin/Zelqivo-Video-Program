@@ -29,11 +29,11 @@ class PipelineConfig:
     ) -> "PipelineConfig":
         """Create config from UI's camera-to-speaker mapping.
 
-        UI format: {camera_idx: speaker_name} e.g. {0: "speaker_0", 1: "Auto (best effort)"}
+        UI format: {camera_idx: speaker_name} e.g. {0: "Speaker 1", 1: "Auto (best effort)"}
         Pipeline format: {speaker_id: camera_id} e.g. {0: 0, 1: 1}
 
         For "Auto (best effort)", we skip that mapping entry (default behavior).
-        For "speaker_X", we extract X and map speaker X -> camera.
+        For "Speaker N", we extract N-1 (0-based) and map speaker N-1 -> camera.
         """
         speaker_to_camera: Dict[int, int] = {}
 
@@ -48,9 +48,17 @@ class PipelineConfig:
                 # Skip auto-mapped entries - let the pipeline use defaults
                 continue
 
-            # Parse "speaker_X" format
+            # Parse "Speaker N" format (UI uses 1-based numbering)
             try:
-                if speaker_name.startswith("speaker_"):
+                if speaker_name.startswith("Speaker "):
+                    # UI labels are 1-based: "Speaker 1" = speaker_id 0
+                    speaker_num = int(speaker_name.replace("Speaker ", ""))
+                    speaker_id = speaker_num - 1  # Convert to 0-based
+                    speaker_to_camera[speaker_id] = camera_idx
+                    logger.debug("Manual mapping: Speaker %d (id=%d) -> Camera %d", 
+                               speaker_num, speaker_id, camera_idx)
+                # Legacy format support
+                elif speaker_name.startswith("speaker_"):
                     speaker_id = int(speaker_name.replace("speaker_", ""))
                     speaker_to_camera[speaker_id] = camera_idx
                     logger.debug("Mapping speaker_%d -> camera %d", speaker_id, camera_idx)
@@ -58,10 +66,18 @@ class PipelineConfig:
                 logger.warning("Invalid speaker name format: %s", speaker_name)
                 continue
 
+        if speaker_to_camera:
+            logger.info("Manual speaker mapping configured: %s", speaker_to_camera)
+
         return PipelineConfig(
             speaker_switching_enabled=speaker_switching_enabled,
             speaker_to_camera_map=speaker_to_camera,
         )
+
+    def has_manual_mapping(self) -> bool:
+        """Return True if user has configured any manual speaker-to-camera mappings."""
+        return bool(self.speaker_to_camera_map)
+
 
     def get_camera_for_speaker(self, speaker_id: int, num_cameras: int) -> int:
         """Get camera ID for a speaker.

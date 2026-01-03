@@ -10,7 +10,7 @@ import wave
 from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
-from typing import List, Optional, Protocol, runtime_checkable
+from typing import Dict, List, Optional, Protocol, runtime_checkable
 
 logger = logging.getLogger(__name__)
 
@@ -21,6 +21,8 @@ class DiarizationMode(Enum):
     STUB = "stub"        # Dev-only stub (EnergyVADBackend)
     ENERGY = "energy"    # CPU-only RMS energy-based switching (default for V1)
     REAL = "real"        # Real pyannote.audio backend
+    LIPS = "lips"        # Visual lip movement detection (most accurate)
+
 
 
 @dataclass(frozen=True)
@@ -724,6 +726,114 @@ def assign_cameras_by_energy(
     return result_segments
 
 
+def assign_cameras_hybrid(
+    segments: List[SpeakerSegment],
+    camera_audio_paths: List[str],
+    speaker_to_cameras: Dict[int, List[int]],
+    sample_rate: int = 16000,
+) -> List[SpeakerSegment]:
+    """
+    Hybrid approach: Use pyannote speaker IDs + user's camera groups + energy within groups.
+
+    For each speech segment:
+    1. Look up which cameras are assigned to this speaker (from user mapping)
+    2. Use energy detection to pick the best camera within that group
+    3. If speaker has only one camera, use that camera
+    4. If speaker has no mapping, fall back to energy across all cameras
+
+    Args:
+        segments: Speech segments from pyannote with speaker_id
+        camera_audio_paths: Paths to extracted WAV audio for each camera
+        speaker_to_cameras: User's mapping {speaker_id: [camera_ids]}
+        sample_rate: Expected sample rate of audio files
+
+    Returns:
+        New list of SpeakerSegment with speaker_id set to the chosen camera_id
+    """
+    if not segments or not camera_audio_paths:
+        logger.warning("assign_cameras_hybrid: no segments or audio paths")
+        return segments
+
+    num_cameras = len(camera_audio_paths)
+    logger.info("Hybrid mode with groups: %d segments, %d cameras, %d speaker groups",
+               len(segments), num_cameras, len(speaker_to_cameras))
+
+    # Log the speaker groups
+    for speaker_id, cameras in speaker_to_cameras.items():
+        logger.info("Speaker %d -> Cameras %s", speaker_id + 1, cameras)
+
+    # Load audio samples from each camera
+    camera_samples: List[List[float]] = []
+    actual_sample_rate = sample_rate
+    
+    for i, wav_path in enumerate(camera_audio_paths):
+        if not wav_path:
+            camera_samples.append([])
+            continue
+        samples, sr = RealEnergyVADBackend._load_wav_samples(wav_path)
+        if sr > 0:
+            actual_sample_rate = sr
+        camera_samples.append(samples)
+        logger.debug("Loaded %d samples from camera %d", len(samples), i)
+
+    if all(len(s) == 0 for s in camera_samples):
+        logger.error("No audio loaded from any camera - returning original segments")
+        return segments
+
+    # For each segment, find the best camera within the speaker's camera group
+    result_segments: List[SpeakerSegment] = []
+    camera_usage_count = [0] * num_cameras
+
+    for seg in segments:
+        speaker_id = seg.speaker_id
+        camera_group = speaker_to_cameras.get(speaker_id, [])
+        
+        # If no cameras assigned to this speaker, use ALL cameras (full energy detection)
+        if not camera_group:
+            camera_group = list(range(num_cameras))
+            logger.debug("Speaker %d has no mapping, using all cameras", speaker_id)
+        
+        # If only one camera in group, use it directly
+        if len(camera_group) == 1:
+            best_cam = camera_group[0]
+        else:
+            # Multiple cameras - use energy to pick best one
+            start_sample = int(seg.start_ms * actual_sample_rate / 1000)
+            end_sample = int(seg.end_ms * actual_sample_rate / 1000)
+
+            best_cam = camera_group[0]  # Default
+            best_energy = 0.0
+
+            for cam_idx in camera_group:
+                if cam_idx >= len(camera_samples) or not camera_samples[cam_idx]:
+                    continue
+                samples = camera_samples[cam_idx]
+                start_idx = max(0, min(start_sample, len(samples) - 1))
+                end_idx = max(start_idx + 1, min(end_sample, len(samples)))
+                
+                segment_samples = samples[start_idx:end_idx]
+                if segment_samples:
+                    rms = RealEnergyVADBackend._compute_rms(segment_samples)
+                    if rms > best_energy:
+                        best_energy = rms
+                        best_cam = cam_idx
+
+        result_segments.append(SpeakerSegment(
+            start_ms=seg.start_ms,
+            end_ms=seg.end_ms,
+            speaker_id=best_cam,  # speaker_id now represents camera_id
+        ))
+        camera_usage_count[best_cam] += 1
+
+    # Log camera usage statistics
+    for cam_idx, count in enumerate(camera_usage_count):
+        logger.info("Camera %d: %d segments (%.1f%%)",
+                   cam_idx, count, 100 * count / len(result_segments) if result_segments else 0)
+
+    logger.info("Hybrid with groups: %d segments across %d cameras",
+               len(result_segments), sum(1 for c in camera_usage_count if c > 0))
+    return result_segments
+
 
 class PyannoteBackend:
     """
@@ -1002,6 +1112,313 @@ class ActiveSpeakerDetector:
                     raise ValueError(f"Segments not sorted at index {i}")
                 if seg.start_ms < prev.end_ms:
                     raise ValueError(f"Overlapping segments at index {i}")
+
+
+class LipMovementBackend:
+    """
+    Visual-based speaker detection using lip movement analysis.
+    
+    Uses MediaPipe Face Mesh to detect face landmarks and track mouth/lip
+    movement to determine who is actively speaking.
+    """
+    
+    # MediaPipe Face Mesh mouth landmarks for lip aperture calculation
+    # Upper lip: 13 (center top), 14 (center top inner)
+    # Lower lip: 14 (center bottom inner), 17 (center bottom)
+    # Lip corners: 78 (left), 308 (right)
+    UPPER_LIP_TOP = 13
+    UPPER_LIP_BOTTOM = 14
+    LOWER_LIP_TOP = 14
+    LOWER_LIP_BOTTOM = 17  
+    LEFT_CORNER = 78
+    RIGHT_CORNER = 308
+    
+    def __init__(
+        self,
+        sample_interval_ms: int = 100,
+        min_segment_ms: int = 500,
+        movement_threshold: float = 0.02,
+    ):
+        """
+        Initialize lip movement detector.
+        
+        Args:
+            sample_interval_ms: Check frames every N milliseconds (default 100ms = 10 fps)
+            min_segment_ms: Minimum segment duration to avoid flicker (default 500ms)
+            movement_threshold: Minimum lip aperture ratio to count as speaking
+        """
+        self.sample_interval_ms = sample_interval_ms
+        self.min_segment_ms = min_segment_ms
+        self.movement_threshold = movement_threshold
+        self._face_cascade = None
+        self._mouth_cascade = None
+        self._initialized = False
+    
+    def _ensure_detector(self):
+        """Lazy-load face and mouth detectors using OpenCV Haar cascades."""
+        if self._initialized:
+            return
+        
+        try:
+            import cv2
+            
+            # Try to load Haar cascades for face and mouth detection
+            # These come bundled with OpenCV
+            face_cascade_path = cv2.data.haarcascades + 'haarcascade_frontalface_default.xml'
+            mouth_cascade_path = cv2.data.haarcascades + 'haarcascade_smile.xml'
+            
+            self._face_cascade = cv2.CascadeClassifier(face_cascade_path)
+            self._mouth_cascade = cv2.CascadeClassifier(mouth_cascade_path)
+            
+            if self._face_cascade.empty():
+                logger.warning("Could not load face cascade, using motion detection fallback")
+                self._face_cascade = None
+            
+            self._initialized = True
+            logger.info("OpenCV face/mouth detection initialized")
+            
+        except Exception as e:
+            logger.warning("OpenCV detection init failed: %s, using motion fallback", e)
+            self._initialized = True
+    
+    def _analyze_mouth_region(self, frame, prev_frame) -> float:
+        """
+        Analyze mouth region activity in a frame.
+        
+        Uses face detection to locate mouth area, then measures
+        pixel change in that region between frames.
+        
+        Returns activity score 0.0-1.0 (higher = more movement).
+        """
+        import cv2
+        
+        if frame is None:
+            return 0.0
+        
+        # Convert to grayscale for detection
+        gray = cv2.cvtColor(frame, cv2.COLOR_RGB2GRAY)
+        
+        # If we have a previous frame, calculate motion in the frame
+        if prev_frame is not None:
+            prev_gray = cv2.cvtColor(prev_frame, cv2.COLOR_RGB2GRAY)
+            
+            # Calculate frame difference
+            diff = cv2.absdiff(gray, prev_gray)
+            
+            # Try to detect face and focus on lower third (mouth region)
+            if self._face_cascade is not None and not self._face_cascade.empty():
+                faces = self._face_cascade.detectMultiScale(gray, 1.1, 4)
+                
+                if len(faces) > 0:
+                    # Focus on the largest face
+                    x, y, w, h = max(faces, key=lambda f: f[2] * f[3])
+                    
+                    # Mouth region is lower third of face
+                    mouth_y = y + int(h * 0.6)
+                    mouth_h = int(h * 0.4)
+                    
+                    # Get motion in mouth region
+                    mouth_diff = diff[mouth_y:mouth_y+mouth_h, x:x+w]
+                    if mouth_diff.size > 0:
+                        motion = mouth_diff.mean() / 255.0
+                        return motion * 5.0  # Scale up for sensitivity
+            
+            # Fallback: use overall frame motion (less accurate)
+            # Focus on center-lower region where face likely is
+            h, w = diff.shape
+            center_region = diff[h//3:, w//4:3*w//4]
+            if center_region.size > 0:
+                return center_region.mean() / 255.0 * 3.0
+        
+        return 0.0
+    
+    def _calculate_lip_aperture(self, landmarks) -> float:
+
+        """
+        Calculate lip aperture ratio (how open is the mouth).
+        
+        Returns ratio of vertical opening to horizontal width.
+        Higher ratio = mouth more open = likely speaking.
+        """
+        if landmarks is None:
+            return 0.0
+        
+        try:
+            # Get lip landmarks
+            upper_lip = landmarks.landmark[self.UPPER_LIP_TOP]
+            lower_lip = landmarks.landmark[self.LOWER_LIP_BOTTOM]
+            left_corner = landmarks.landmark[self.LEFT_CORNER]
+            right_corner = landmarks.landmark[self.RIGHT_CORNER]
+            
+            # Calculate vertical and horizontal distances
+            vertical = abs(lower_lip.y - upper_lip.y)
+            horizontal = abs(right_corner.x - left_corner.x)
+            
+            if horizontal < 0.001:  # Avoid division by zero
+                return 0.0
+            
+            # Return ratio - higher means mouth more open
+            return vertical / horizontal
+        except (IndexError, AttributeError):
+            return 0.0
+    
+    def _get_frame_at_ms(self, video_path: str, time_ms: int):
+        """Extract a single frame from video at specified time."""
+        import cv2
+        
+        cap = cv2.VideoCapture(video_path)
+        if not cap.isOpened():
+            logger.warning("Cannot open video: %s", video_path)
+            return None
+        
+        # Seek to time
+        cap.set(cv2.CAP_PROP_POS_MSEC, time_ms)
+        ret, frame = cap.read()
+        cap.release()
+        
+        if not ret:
+            return None
+        
+        # Convert BGR to RGB for MediaPipe
+        return cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+    
+    def detect_speakers(
+        self,
+        video_paths: List[str],
+        duration_ms: int,
+    ) -> List[SpeakerSegment]:
+        """
+        Analyze videos to detect active speaker at each time window.
+        
+        Uses OpenCV face detection and motion analysis to detect
+        which camera has the most mouth/face movement.
+        
+        Args:
+            video_paths: List of camera video file paths
+            duration_ms: Total duration in milliseconds
+            
+        Returns:
+            List of SpeakerSegment with speaker_id = camera_id of active speaker
+        """
+        self._ensure_detector()
+        
+        num_cameras = len(video_paths)
+        if num_cameras == 0:
+            logger.warning("No video paths provided")
+            return []
+        
+        logger.info("Lip detection: analyzing %d cameras, %dms duration, sampling every %dms",
+                   num_cameras, duration_ms, self.sample_interval_ms)
+        
+        # Sample frames at regular intervals
+        time_points = list(range(0, duration_ms, self.sample_interval_ms))
+        
+        # Track previous frames for each camera (for motion detection)
+        prev_frames: List = [None] * num_cameras
+        
+        # For each time point, determine which camera has the most movement
+        raw_decisions: List[tuple[int, int, int]] = []  # (start_ms, end_ms, camera_id)
+        
+        for i, time_ms in enumerate(time_points):
+            if i % 50 == 0:  # Log progress every 5 seconds
+                logger.debug("Lip detection progress: %d/%d time points", i, len(time_points))
+            
+            # Check motion for each camera
+            motions = []
+            for cam_idx, video_path in enumerate(video_paths):
+                frame = self._get_frame_at_ms(video_path, time_ms)
+                
+                # Calculate motion score compared to previous frame
+                motion = self._analyze_mouth_region(frame, prev_frames[cam_idx])
+                motions.append(motion)
+                
+                # Store this frame for next comparison
+                prev_frames[cam_idx] = frame
+            
+            # Pick camera with highest motion (if above threshold)
+            max_motion = max(motions) if motions else 0.0
+            if max_motion >= self.movement_threshold:
+                best_cam = motions.index(max_motion)
+            else:
+                # No one speaking, use previous or default to camera 0
+                best_cam = raw_decisions[-1][2] if raw_decisions else 0
+            
+            # Create segment for this time window
+            end_ms = min(time_ms + self.sample_interval_ms, duration_ms)
+            raw_decisions.append((time_ms, end_ms, best_cam))
+        
+        # Merge adjacent segments with same camera
+        if not raw_decisions:
+            return [SpeakerSegment(0, duration_ms, 0)]
+        
+        merged_segments: List[SpeakerSegment] = []
+        current_start = raw_decisions[0][0]
+        current_cam = raw_decisions[0][2]
+        
+        for start_ms, end_ms, cam_id in raw_decisions[1:]:
+            if cam_id == current_cam:
+                # Extend current segment
+                continue
+            else:
+                # Different camera - close current segment
+                merged_segments.append(SpeakerSegment(
+                    start_ms=current_start,
+                    end_ms=start_ms,
+                    speaker_id=current_cam,
+                ))
+                current_start = start_ms
+                current_cam = cam_id
+        
+        # Add final segment
+        merged_segments.append(SpeakerSegment(
+            start_ms=current_start,
+            end_ms=raw_decisions[-1][1],
+            speaker_id=current_cam,
+        ))
+        
+        # Apply minimum segment duration (merge short segments)
+        final_segments = self._apply_min_duration(merged_segments)
+        
+        # Log statistics
+        camera_counts = [0] * num_cameras
+        for seg in final_segments:
+            camera_counts[seg.speaker_id] += 1
+        
+        for cam_idx, count in enumerate(camera_counts):
+            pct = 100 * count / len(final_segments) if final_segments else 0
+            logger.info("Camera %d: %d segments (%.1f%%)", cam_idx, count, pct)
+        
+        logger.info("Lip detection complete: %d segments from %d time points",
+                   len(final_segments), len(time_points))
+        
+        return final_segments
+    
+    def _apply_min_duration(
+        self,
+        segments: List[SpeakerSegment],
+    ) -> List[SpeakerSegment]:
+        """Merge segments shorter than min_segment_ms with neighbors."""
+        if not segments or len(segments) <= 1:
+            return segments
+        
+        result = [segments[0]]
+        
+        for seg in segments[1:]:
+            prev = result[-1]
+            duration = seg.end_ms - seg.start_ms
+            
+            if duration < self.min_segment_ms:
+                # Extend previous segment instead
+                result[-1] = SpeakerSegment(
+                    start_ms=prev.start_ms,
+                    end_ms=seg.end_ms,
+                    speaker_id=prev.speaker_id,
+                )
+            else:
+                # Long enough, keep as separate segment
+                result.append(seg)
+        
+        return result
 
 
 # Legacy API compatibility

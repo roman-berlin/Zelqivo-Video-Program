@@ -198,12 +198,14 @@ class TestDiarizationMode:
         assert DiarizationMode.STUB.value == "stub"
         assert DiarizationMode.ENERGY.value == "energy"
         assert DiarizationMode.REAL.value == "real"
+        assert DiarizationMode.LIPS.value == "lips"
 
     def test_from_string(self) -> None:
         assert DiarizationMode("off") == DiarizationMode.OFF
         assert DiarizationMode("stub") == DiarizationMode.STUB
         assert DiarizationMode("energy") == DiarizationMode.ENERGY
         assert DiarizationMode("real") == DiarizationMode.REAL
+        assert DiarizationMode("lips") == DiarizationMode.LIPS
 
 
 class TestRealEnergyVADBackend:
@@ -743,3 +745,93 @@ class TestPyannoteIntegration:
             assert segments[i].start_ms >= segments[i - 1].end_ms, (
                 f"Overlapping segments at index {i}"
             )
+
+
+class TestLipMovementBackend:
+    """Tests for LipMovementBackend (LIPS mode - visual detection)."""
+
+    def test_initialization(self) -> None:
+        """Test backend initializes with default parameters."""
+        from multicam_editor.logic.active_speaker import LipMovementBackend
+        
+        backend = LipMovementBackend()
+        assert backend.sample_interval_ms == 100
+        assert backend.min_segment_ms == 500
+        assert backend.movement_threshold == 0.02
+
+    def test_custom_parameters(self) -> None:
+        """Test backend accepts custom parameters."""
+        from multicam_editor.logic.active_speaker import LipMovementBackend
+        
+        backend = LipMovementBackend(
+            sample_interval_ms=200,
+            min_segment_ms=1000,
+            movement_threshold=0.05,
+        )
+        assert backend.sample_interval_ms == 200
+        assert backend.min_segment_ms == 1000
+        assert backend.movement_threshold == 0.05
+
+    def test_apply_min_duration_empty(self) -> None:
+        """Test min duration with empty segments."""
+        from multicam_editor.logic.active_speaker import LipMovementBackend
+        
+        backend = LipMovementBackend(min_segment_ms=500)
+        result = backend._apply_min_duration([])
+        assert result == []
+
+    def test_apply_min_duration_single_segment(self) -> None:
+        """Test min duration with single segment returns unchanged."""
+        from multicam_editor.logic.active_speaker import LipMovementBackend
+        
+        backend = LipMovementBackend(min_segment_ms=500)
+        segments = [SpeakerSegment(0, 100, 0)]  # Short segment
+        result = backend._apply_min_duration(segments)
+        assert len(result) == 1
+        assert result[0] == segments[0]
+
+    def test_apply_min_duration_merges_short_segments(self) -> None:
+        """Test that short segments are merged with previous."""
+        from multicam_editor.logic.active_speaker import LipMovementBackend
+        
+        backend = LipMovementBackend(min_segment_ms=500)
+        segments = [
+            SpeakerSegment(0, 1000, 0),    # Long segment (cam0)
+            SpeakerSegment(1000, 1200, 1), # Short segment - should merge
+        ]
+        result = backend._apply_min_duration(segments)
+        assert len(result) == 1
+        assert result[0].start_ms == 0
+        assert result[0].end_ms == 1200  # Extended to include short segment
+        assert result[0].speaker_id == 0  # Kept previous camera
+
+    def test_apply_min_duration_keeps_long_segments(self) -> None:
+        """Test that long segments are kept separate."""
+        from multicam_editor.logic.active_speaker import LipMovementBackend
+        
+        backend = LipMovementBackend(min_segment_ms=500)
+        segments = [
+            SpeakerSegment(0, 1000, 0),    # Long segment
+            SpeakerSegment(1000, 2000, 1), # Long segment - should keep
+        ]
+        result = backend._apply_min_duration(segments)
+        assert len(result) == 2
+        assert result[0].speaker_id == 0
+        assert result[1].speaker_id == 1
+
+    def test_detector_initialization(self) -> None:
+        """Test that detector initializes OpenCV cascades."""
+        from multicam_editor.logic.active_speaker import LipMovementBackend
+        
+        backend = LipMovementBackend()
+        backend._ensure_detector()
+        assert backend._initialized is True
+
+    def test_detect_speakers_empty_videos(self) -> None:
+        """Test with empty video list returns empty."""
+        from multicam_editor.logic.active_speaker import LipMovementBackend
+        
+        backend = LipMovementBackend()
+        result = backend.detect_speakers([], 5000)
+        assert result == []
+

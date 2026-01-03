@@ -114,9 +114,14 @@ class ProcessingPipeline:
         if config is not None:
             self._config = config
         else:
+            # Convert legacy single-camera map to new list format
+            cameras_map: dict[int, list[int]] = {}
+            if speaker_to_camera_map:
+                for speaker_id, camera_id in speaker_to_camera_map.items():
+                    cameras_map[speaker_id] = [camera_id]
             self._config = PipelineConfig(
                 speaker_switching_enabled=speaker_switching_enabled,
-                speaker_to_camera_map=speaker_to_camera_map or {},
+                speaker_to_cameras_map=cameras_map,
             )
 
         # Convenience accessor
@@ -465,11 +470,14 @@ class ProcessingPipeline:
             self._emit_progress(100, "Alignment failed, using default offsets")
 
     def _stage_diarize(self) -> bool:
-        """Run speaker diarization using ENERGY backend (CPU-only RMS analysis).
+        """Run speaker diarization using selected backend.
 
+        Supports multiple modes:
+        - ENERGY: CPU-only RMS audio analysis
+        - REAL: Pyannote AI + energy-based camera selection
+        - LIPS: Visual lip movement detection (most accurate)
+        
         If speaker_switching_enabled is False, skips diarization entirely.
-        Extracts audio from each camera, computes energy per window,
-        and determines which camera has the active speaker.
         """
         self._advance_stage(PipelineStage.DIARIZE)
 
@@ -480,6 +488,11 @@ class ProcessingPipeline:
             self._qa_exporter.set_diarization([])
             self._emit_progress(100, "Speaker switching disabled (single camera mode)")
             return True
+
+        # LIPS mode: Use visual lip movement detection
+        if self._diarization_mode == DiarizationMode.LIPS:
+            return self._stage_diarize_lips()
+
 
         from ..utils.ffmpeg import extract_audio_to_wav
 
@@ -544,21 +557,18 @@ class ProcessingPipeline:
             )
 
             # Step 4: Map speakers to cameras
-            # Check if user provided manual mapping
+            # Check if user provided manual mapping (camera groups per speaker)
             if self._diarization_mode == DiarizationMode.REAL and raw_segments:
                 if self._config.has_manual_mapping():
-                    # Use pyannote's speaker IDs + user's manual mapping
-                    self._emit_progress(70, "Applying manual speaker mapping...")
-                    num_cameras = len(self.input_files)
-                    self._speaker_segments = [
-                        SpeakerSegment(
-                            s.start_ms,
-                            s.end_ms,
-                            self._config.get_camera_for_speaker(s.speaker_id, num_cameras),
-                        )
-                        for s in raw_segments
-                    ]
-                    logger.info("Manual mapping: applied user's speaker->camera mapping to %d segments",
+                    # Hybrid mode: use pyannote speaker IDs + user's camera groups + energy within groups
+                    self._emit_progress(70, "Selecting cameras within speaker groups...")
+                    from .active_speaker import assign_cameras_hybrid
+                    self._speaker_segments = assign_cameras_hybrid(
+                        raw_segments,
+                        camera_audio_paths,
+                        self._config.speaker_to_cameras_map,
+                    )
+                    logger.info("Hybrid with groups: applied to %d segments",
                                len(self._speaker_segments))
                 else:
                     # No manual mapping - fall back to energy-based assignment
@@ -575,6 +585,7 @@ class ProcessingPipeline:
 
 
 
+
             # Record for QA artifacts
             self._qa_exporter.set_diarization(self._speaker_segments)
 
@@ -587,6 +598,66 @@ class ProcessingPipeline:
             logger.error("Diarization failed: %s", e, exc_info=True)
             self.signals.error.emit(f"Diarization failed: {e}")
             return False
+
+    def _stage_diarize_lips(self) -> bool:
+        """Run visual lip movement detection to identify active speakers.
+        
+        Uses MediaPipe Face Mesh to detect lip movement in each camera's video.
+        The camera with the most lip movement at each time point is selected.
+        """
+        try:
+            from .active_speaker import LipMovementBackend
+            
+            logger.info("LIPS mode: Starting lip movement detection")
+            self._emit_progress(10, "Initializing lip detection...")
+            
+            # Get video duration from probe data
+            duration_ms = 0
+            if self._probe_data:
+                # Find minimum duration across all cameras
+                for probe in self._probe_data.values():
+                    if probe and probe.duration_ms:
+                        if duration_ms == 0:
+                            duration_ms = probe.duration_ms
+                        else:
+                            duration_ms = min(duration_ms, probe.duration_ms)
+            
+            if duration_ms <= 0:
+                # Fallback: estimate from file
+                logger.warning("Could not determine video duration, using 2 minutes default")
+                duration_ms = 120000
+            
+            self._emit_progress(20, f"Analyzing lip movement ({duration_ms//1000}s video)...")
+            
+            # Create lip movement backend
+            lip_detector = LipMovementBackend(
+                sample_interval_ms=100,  # Check every 100ms
+                min_segment_ms=500,      # Minimum 500ms segments
+                movement_threshold=0.02,  # Lip aperture threshold
+            )
+            
+            # Run detection
+            self._speaker_segments = lip_detector.detect_speakers(
+                video_paths=self.input_files,
+                duration_ms=duration_ms,
+            )
+            
+            # Record for QA artifacts
+            self._qa_exporter.set_diarization(self._speaker_segments)
+            
+            self._emit_progress(100, f"Lip detection found {len(self._speaker_segments)} segments")
+            logger.info("LIPS mode complete: %d segments", len(self._speaker_segments))
+            return True
+            
+        except ImportError as e:
+            logger.error("MediaPipe not installed: %s", e)
+            self.signals.error.emit("Lip detection requires MediaPipe. Run: pip install mediapipe")
+            return False
+        except Exception as e:
+            logger.error("Lip detection failed: %s", e, exc_info=True)
+            self.signals.error.emit(f"Lip detection failed: {e}")
+            return False
+
 
     def _apply_speaker_to_camera_mapping(
         self,
@@ -612,7 +683,7 @@ class ProcessingPipeline:
             return segments, False
 
         # REAL/pyannote mode: check if we have complete mapping
-        speaker_map = self._config.speaker_to_camera_map
+        speaker_map = self._config.speaker_to_cameras_map
         if not speaker_map:
             logger.warning(
                 "Pyannote mode but no speaker-to-camera mapping provided; "

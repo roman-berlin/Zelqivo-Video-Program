@@ -238,7 +238,7 @@ class SettingsDialog(QDialog):
         )
         # Diarization: find index by stored value
         diarization_value = self.settings.value(
-            "diarization/mode", DiarizationMode.REAL.value, type=str
+            "diarization/mode", DiarizationMode.HYBRID.value, type=str
         )
         for i in range(self.combo_diarization.count()):
             if self.combo_diarization.itemData(i) == diarization_value:

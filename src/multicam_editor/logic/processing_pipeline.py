@@ -159,7 +159,7 @@ class ProcessingPipeline:
         Defaults to ENERGY for V1 (CPU-only speaker detection).
         """
         settings = QSettings("MultiCamEditor", "MultiCamEditor")
-        mode_value = settings.value("diarization/mode", "energy", type=str)
+        mode_value = settings.value("diarization/mode", "hybrid", type=str)
 
         mode_map = {
             "off": DiarizationMode.OFF,
@@ -167,8 +167,9 @@ class ProcessingPipeline:
             "energy": DiarizationMode.ENERGY,
             "real": DiarizationMode.REAL,
             "lips": DiarizationMode.LIPS,
+            "hybrid": DiarizationMode.HYBRID,
         }
-        mode = mode_map.get(mode_value.lower(), DiarizationMode.ENERGY)
+        mode = mode_map.get(mode_value.lower(), DiarizationMode.HYBRID)
         logger.info("Diarization mode from settings: %s", mode.name)
         return mode
 
@@ -311,6 +312,7 @@ class ProcessingPipeline:
         """
         self._pipeline_start_time = time.time()
         self._cancelled = False
+        self._external_audio_path = external_audio  # Store for hybrid detection
 
         # Start QA artifact collection
         self._qa_exporter.start_run()
@@ -494,6 +496,10 @@ class ProcessingPipeline:
         if self._diarization_mode == DiarizationMode.LIPS:
             return self._stage_diarize_lips()
 
+        # HYBRID mode: Use audio VAD + visual lip detection
+        if self._diarization_mode == DiarizationMode.HYBRID:
+            return self._stage_diarize_hybrid()
+
 
         from ..utils.ffmpeg import extract_audio_to_wav
 
@@ -657,6 +663,85 @@ class ProcessingPipeline:
         except Exception as e:
             logger.error("Lip detection failed: %s", e, exc_info=True)
             self.signals.error.emit(f"Lip detection failed: {e}")
+            return False
+
+
+    def _stage_diarize_hybrid(self) -> bool:
+        """
+        Diarization using hybrid audio+visual detection.
+        
+        Uses audio VAD to find speech regions, then visual lip detection
+        to determine which camera is speaking during those regions.
+        """
+        try:
+            from .active_speaker import HybridBackend
+            from ..utils.ffmpeg import extract_audio_to_wav
+            
+            logger.info("HYBRID mode: Starting hybrid detection")
+            self._emit_progress(10, "Initializing hybrid detection...")
+            
+            # Get video duration from probe results
+            duration_ms = 0
+            if self._probe_results:
+                for probe in self._probe_results:
+                    if probe and probe.duration_ms:
+                        if duration_ms == 0:
+                            duration_ms = probe.duration_ms
+                        else:
+                            duration_ms = min(duration_ms, probe.duration_ms)
+            
+            if duration_ms <= 0:
+                logger.warning("Could not determine video duration, using 2 minutes default")
+                duration_ms = 120000
+            
+            # Use external audio for VAD if available (cleaner signal)
+            # Otherwise fall back to first camera's audio
+            if hasattr(self, '_external_audio_path') and self._external_audio_path:
+                self._emit_progress(20, "Using external audio for speech detection...")
+                # External audio is already a file, but we need to convert to WAV for analysis
+                audio_path = extract_audio_to_wav(
+                    self._external_audio_path,
+                    sample_rate=16000,
+                    mono=True,
+                )
+                logger.info("HYBRID: Using external audio for VAD (cleaner signal)")
+            else:
+                self._emit_progress(20, "Extracting audio for speech detection...")
+                audio_path = extract_audio_to_wav(
+                    self.input_files[0],
+                    sample_rate=16000,
+                    mono=True,
+                )
+                logger.info("HYBRID: Using camera 1 audio for VAD")
+            self._temp_files.append(audio_path)
+            
+            self._emit_progress(30, f"Analyzing speech regions ({duration_ms//1000}s video)...")
+            
+            # Create hybrid backend
+            hybrid_detector = HybridBackend(
+                sample_interval_ms=200,
+                min_segment_ms=500,
+            )
+            
+            # Run detection
+            self._emit_progress(50, "Detecting speakers (audio + visual)...")
+            self._speaker_segments = hybrid_detector.detect_speakers(
+                video_paths=self.input_files,
+                audio_path=audio_path,
+                duration_ms=duration_ms,
+                cancel_callback=lambda: self._cancelled,
+            )
+            
+            # Record for QA artifacts
+            self._qa_exporter.set_diarization(self._speaker_segments)
+            
+            self._emit_progress(100, f"Hybrid detection found {len(self._speaker_segments)} segments")
+            logger.info("HYBRID mode complete: %d segments", len(self._speaker_segments))
+            return True
+            
+        except Exception as e:
+            logger.error("Hybrid detection failed: %s", e, exc_info=True)
+            self.signals.error.emit(f"Hybrid detection failed: {e}")
             return False
 
 

@@ -80,11 +80,13 @@ class SettingsDialog(QDialog):
 
         self.combo_diarization = QComboBox()
         # Add items with display names and store enum values as user data
+        self.combo_diarization.addItem("Lips (Visual)", DiarizationMode.LIPS.value)
         self.combo_diarization.addItem("Energy (CPU-only)", DiarizationMode.ENERGY.value)
         self.combo_diarization.addItem("Real (pyannote.audio)", DiarizationMode.REAL.value)
         self.combo_diarization.addItem("Stub (dev only)", DiarizationMode.STUB.value)
         self.combo_diarization.addItem("Off (single camera)", DiarizationMode.OFF.value)
         self.combo_diarization.setToolTip(
+            "Lips: Visual detection - picks camera with most lip movement (recommended)\n"
             "Energy: CPU-only, picks loudest camera (requires isolated mics)\n"
             "Real: AI-based speaker detection (requires HuggingFace setup)\n"
             "Stub: Dev mode, alternating mock segments\n"

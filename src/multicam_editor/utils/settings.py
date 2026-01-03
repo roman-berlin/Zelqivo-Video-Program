@@ -16,7 +16,7 @@ REPLACE_AUDIO_BY_DEFAULT: bool = True
 # Diarization settings (string constants - safe to import)
 # Use get_diarization_mode() to convert to enum
 DEFAULT_DIARIZATION_MODE_STR: str = "energy"  # V1 default
-DIARIZATION_MODE_STRINGS: tuple[str, ...] = ("off", "stub", "energy", "real")
+DIARIZATION_MODE_STRINGS: tuple[str, ...] = ("off", "stub", "energy", "real", "lips")
 
 # QA Overlay settings
 QA_OVERLAY_ENABLED_DEFAULT: bool = False
@@ -28,7 +28,7 @@ def get_diarization_mode(mode_str: str):
     Lazy-loads the enum to avoid import-time failures.
 
     Args:
-        mode_str: One of "off", "stub", "energy", "real"
+        mode_str: One of "off", "stub", "energy", "real", "lips"
 
     Returns:
         DiarizationMode enum value, or ENERGY as fallback
@@ -40,6 +40,7 @@ def get_diarization_mode(mode_str: str):
         "stub": DiarizationMode.STUB,
         "energy": DiarizationMode.ENERGY,
         "real": DiarizationMode.REAL,
+        "lips": DiarizationMode.LIPS,
     }
     return mode_map.get(mode_str.lower(), DiarizationMode.ENERGY)
 
@@ -68,6 +69,13 @@ def get_available_diarization_modes() -> list[str]:
     backends = check_backends()
     if backends.get("pyannote") and backends["pyannote"].available:
         modes.append("real")
+    
+    # LIPS mode is always available if mediapipe is installed
+    try:
+        import mediapipe  # noqa: F401
+        modes.append("lips")
+    except ImportError:
+        pass  # MediaPipe not installed
 
     return modes
 

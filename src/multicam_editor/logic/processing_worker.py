@@ -89,7 +89,7 @@ class ProcessingWorker(QObject):
             logger.debug(
                 "Pipeline config: switching=%s, mapping=%s",
                 config.speaker_switching_enabled,
-                config.speaker_to_camera_map,
+                config.speaker_to_cameras_map,
             )
 
             self._pipeline = ProcessingPipeline(

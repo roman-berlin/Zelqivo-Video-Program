@@ -10,9 +10,14 @@ import wave
 from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
-from typing import Dict, List, Optional, Protocol, runtime_checkable
+from typing import Dict, List, Optional, Protocol, runtime_checkable, Tuple
 
 logger = logging.getLogger(__name__)
+
+import warnings
+# Suppress torchcodec/torchaudio warnings on Windows
+warnings.filterwarnings("ignore", message=".*torchcodec.*")
+warnings.filterwarnings("ignore", message=".*torchaudio._backend.*")
 
 
 class DiarizationMode(Enum):
@@ -911,16 +916,52 @@ class PyannoteBackend:
             logger.error(cls._load_error, exc_info=True)
 
     @classmethod
+    def check_install(cls) -> Tuple[bool, Optional[str]]:
+        """
+        Fast check if pyannote is installed and configured.
+        
+        Returns:
+            (available, error_message)
+            Does NOT load the model (which is slow).
+        """
+        try:
+            import pyannote.audio
+            import torch
+        except ImportError as e:
+            return False, f"Import error: {e}"
+            
+        # Check for token
+        try:
+            from huggingface_hub import get_token
+            token = get_token()
+            if not token:
+                import os
+                if not os.environ.get("HF_TOKEN"):
+                    return False, "Missing HuggingFace token (run huggingface-cli login)"
+        except ImportError:
+             # If huggingface_hub missing, we can't authenticate easily
+             pass
+        except Exception:
+            pass
+            
+        return True, None
+
+    @classmethod
     def is_available(cls) -> bool:
         """Check if pyannote backend is usable."""
-        cls._ensure_loaded()
-        return cls._pipeline is not None
+        if cls._pipeline is not None:
+            return True
+        # Use fast check to avoid blocking UI
+        available, _ = cls.check_install()
+        return available
 
     @classmethod
     def get_error(cls) -> Optional[str]:
         """Get error message if backend failed to load."""
-        cls._ensure_loaded()
-        return cls._load_error
+        if cls._load_error:
+            return cls._load_error
+        available, error = cls.check_install()
+        return error
 
     def diarize(self, audio_path: str, num_channels: int = 2) -> List[SpeakerSegment]:
         """

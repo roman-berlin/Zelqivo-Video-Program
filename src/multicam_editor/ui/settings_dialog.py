@@ -38,55 +38,20 @@ class SettingsDialog(QDialog):
         """Initialize the UI components."""
         layout = QVBoxLayout(self)
 
-        # Decision Engine Settings Group
-        engine_group = QGroupBox("Decision Engine")
-        engine_layout = QFormLayout()
-
-        self.spin_min_switch = QSpinBox()
-        self.spin_min_switch.setRange(100, 10000)
-        self.spin_min_switch.setSingleStep(100)
-        self.spin_min_switch.setSuffix(" ms")
-        engine_layout.addRow("Min Switch Interval:", self.spin_min_switch)
-
-        self.spin_min_speech = QSpinBox()
-        self.spin_min_speech.setRange(100, 5000)
-        self.spin_min_speech.setSingleStep(50)
-        self.spin_min_speech.setSuffix(" ms")
-        engine_layout.addRow("Min Speech Duration:", self.spin_min_speech)
-
-        self.spin_bg_short_remark = QSpinBox()
-        self.spin_bg_short_remark.setRange(50, 2000)
-        self.spin_bg_short_remark.setSingleStep(50)
-        self.spin_bg_short_remark.setSuffix(" ms")
-        engine_layout.addRow("Ignore Short Remarks Below:", self.spin_bg_short_remark)
-
-        engine_group.setLayout(engine_layout)
-        layout.addWidget(engine_group)
-
-        # Output Settings Group
-        output_group = QGroupBox("Output")
-        output_layout = QFormLayout()
-
-        self.combo_quality = QComboBox()
-        self.combo_quality.addItems(["1080p", "720p", "480p"])
-        output_layout.addRow("Output Quality:", self.combo_quality)
-
-        output_group.setLayout(output_layout)
-        layout.addWidget(output_group)
-
-        # Diarization Settings Group
+        # 1. Basic Settings (Always Visible)
+        
+        # Diarization Settings
         diarization_group = QGroupBox("Diarization")
         diarization_layout = QFormLayout()
 
         self.combo_diarization = QComboBox()
         # Add items with display names and store enum values as user data
-        # Simplified: Hybrid (recommended), Lips Only, Off
         self.combo_diarization.addItem("Hybrid (Recommended)", DiarizationMode.HYBRID.value)
         self.combo_diarization.addItem("Lips Only (Visual)", DiarizationMode.LIPS.value)
         self.combo_diarization.addItem("Off (single camera)", DiarizationMode.OFF.value)
         self.combo_diarization.setToolTip(
-            "Hybrid: Audio + Visual detection - fastest and most accurate (recommended)\\n"
-            "Lips Only: Pure visual detection - slower but works without audio\\n"
+            "Hybrid: Audio + Visual detection - fastest and most accurate (recommended)\n"
+            "Lips Only: Pure visual detection - slower but works without audio\n"
             "Off: Single camera output, no switching"
         )
         diarization_layout.addRow("Backend:", self.combo_diarization)
@@ -99,21 +64,28 @@ class SettingsDialog(QDialog):
         diarization_group.setLayout(diarization_layout)
         layout.addWidget(diarization_group)
 
-        # QA Overlay Settings Group (Prompt 5)
-        qa_group = QGroupBox("QA Overlay")
-        qa_layout = QFormLayout()
+        # Output Settings
+        output_group = QGroupBox("Output")
+        output_layout = QFormLayout()
 
-        self.check_qa_overlay = QCheckBox()
-        self.check_qa_overlay.setToolTip(
-            "Burn timecode, speaker ID, and camera index into exported video.\n"
-            "Useful for manual QA review. OFF by default."
-        )
-        qa_layout.addRow("Enable QA Overlay:", self.check_qa_overlay)
+        self.combo_quality = QComboBox()
+        self.combo_quality.addItems(["1080p", "720p", "480p"])
+        output_layout.addRow("Output Quality:", self.combo_quality)
 
-        qa_group.setLayout(qa_layout)
-        layout.addWidget(qa_group)
+        output_group.setLayout(output_layout)
+        layout.addWidget(output_group)
 
-        # Audio Mix Settings Group
+        # 2. Advanced Settings Toggle
+        self.check_advanced = QCheckBox("Show Advanced Settings")
+        self.check_advanced.toggled.connect(self._toggle_advanced_settings)
+        layout.addWidget(self.check_advanced)
+
+        # 3. Advanced Settings Container
+        self.advanced_container = QGroupBox("Advanced Configuration")
+        self.advanced_container.setVisible(False)
+        advanced_layout = QVBoxLayout()
+        
+        # Audio Mix Settings
         audio_group = QGroupBox("Audio Mix (External Audio)")
         audio_layout = QFormLayout()
 
@@ -148,7 +120,52 @@ class SettingsDialog(QDialog):
         audio_layout.addRow("Ducking Amount:", self.spin_ducking_amount)
 
         audio_group.setLayout(audio_layout)
-        layout.addWidget(audio_group)
+        advanced_layout.addWidget(audio_group)
+
+        # Decision Engine Settings
+        engine_group = QGroupBox("Decision Engine Rules")
+        engine_layout = QFormLayout()
+
+        self.spin_min_switch = QSpinBox()
+        self.spin_min_switch.setRange(100, 10000)
+        self.spin_min_switch.setSingleStep(100)
+        self.spin_min_switch.setSuffix(" ms")
+        self.spin_min_switch.setToolTip("Minimum time between camera switches")
+        engine_layout.addRow("Min Switch Interval:", self.spin_min_switch)
+
+        self.spin_min_speech = QSpinBox()
+        self.spin_min_speech.setRange(100, 5000)
+        self.spin_min_speech.setSingleStep(50)
+        self.spin_min_speech.setSuffix(" ms")
+        self.spin_min_speech.setToolTip("Minimum speech segment duration to consider")
+        engine_layout.addRow("Min Speech Duration:", self.spin_min_speech)
+
+        self.spin_bg_short_remark = QSpinBox()
+        self.spin_bg_short_remark.setRange(50, 2000)
+        self.spin_bg_short_remark.setSingleStep(50)
+        self.spin_bg_short_remark.setSuffix(" ms")
+        self.spin_bg_short_remark.setToolTip("Ignore very short noises/remarks")
+        engine_layout.addRow("Ignore Short Remarks Below:", self.spin_bg_short_remark)
+
+        engine_group.setLayout(engine_layout)
+        advanced_layout.addWidget(engine_group)
+
+        # QA Overlay Settings
+        qa_group = QGroupBox("QA / Debugging")
+        qa_layout = QFormLayout()
+
+        self.check_qa_overlay = QCheckBox()
+        self.check_qa_overlay.setToolTip(
+            "Burn timecode, speaker ID, and camera index into exported video.\n"
+            "Useful for manual QA review. OFF by default."
+        )
+        qa_layout.addRow("Enable QA Overlay:", self.check_qa_overlay)
+
+        qa_group.setLayout(qa_layout)
+        advanced_layout.addWidget(qa_group)
+
+        self.advanced_container.setLayout(advanced_layout)
+        layout.addWidget(self.advanced_container)
 
         # Dialog buttons
         buttons = QDialogButtonBox(
@@ -174,20 +191,26 @@ class SettingsDialog(QDialog):
 
     def _update_diarization_status(self) -> None:
         """Update the diarization status label with actionable guidance."""
-        backends = check_backends()
-        pyannote_status = backends.get("pyannote")
+        # Use fast check to avoid freezing UI
+        from multicam_editor.logic.active_speaker import PyannoteBackend
+        available, error = PyannoteBackend.check_install()
 
-        if pyannote_status and pyannote_status.available:
+        if available:
             self.label_diarization_status.setText("OK pyannote.audio ready")
             self.label_diarization_status.setStyleSheet("color: green;")
             self.label_diarization_status.setToolTip("")
         else:
-            error = pyannote_status.error if pyannote_status else "Not loaded"
             # Parse error and provide actionable message
             short_msg, tooltip = self._parse_diarization_error(error or "Unknown error")
             self.label_diarization_status.setText(f"[!] {short_msg}")
             self.label_diarization_status.setStyleSheet("color: orange;")
             self.label_diarization_status.setToolTip(tooltip)
+
+    def _toggle_advanced_settings(self, checked: bool) -> None:
+        """Toggle visibility of advanced settings."""
+        self.advanced_container.setVisible(checked)
+        # Resize dialog to fit content
+        self.adjustSize()
 
     @staticmethod
     def _parse_diarization_error(error: str) -> tuple[str, str]:

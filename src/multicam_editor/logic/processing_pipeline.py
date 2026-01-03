@@ -696,10 +696,11 @@ class ProcessingPipeline:
             
             # Use external audio for VAD if available (cleaner signal)
             # Otherwise fall back to first camera's audio
+            audio_result = None
             if hasattr(self, '_external_audio_path') and self._external_audio_path:
                 self._emit_progress(20, "Using external audio for speech detection...")
                 # External audio is already a file, but we need to convert to WAV for analysis
-                audio_path = extract_audio_to_wav(
+                audio_result = extract_audio_to_wav(
                     self._external_audio_path,
                     sample_rate=16000,
                     mono=True,
@@ -707,13 +708,30 @@ class ProcessingPipeline:
                 logger.info("HYBRID: Using external audio for VAD (cleaner signal)")
             else:
                 self._emit_progress(20, "Extracting audio for speech detection...")
-                audio_path = extract_audio_to_wav(
+                audio_result = extract_audio_to_wav(
                     self.input_files[0],
                     sample_rate=16000,
                     mono=True,
                 )
                 logger.info("HYBRID: Using camera 1 audio for VAD")
+            
+            if not audio_result.success or not audio_result.output_path:
+                raise RuntimeError(f"Failed to extract audio for VAD: {audio_result.error}")
+                
+            audio_path = audio_result.output_path
+            
+            # DEBUG: Log types to diagnose mysterious "FFmpegResult has no attribute read" error
+            logger.info(f"DEBUG: audio_result type: {type(audio_result)}")
+            logger.info(f"DEBUG: audio_path type: {type(audio_path)}")
+            logger.info(f"DEBUG: audio_path value: {audio_path}")
+            
+            # Force string just in case
+            if not isinstance(audio_path, str):
+                logger.warning(f"DEBUG: audio_path was {type(audio_path)}, forcing to str")
+                audio_path = str(audio_path)
+                
             self._temp_files.append(audio_path)
+
             
             self._emit_progress(30, f"Analyzing speech regions ({duration_ms//1000}s video)...")
             

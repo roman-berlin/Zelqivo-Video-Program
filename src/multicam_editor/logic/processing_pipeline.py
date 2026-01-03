@@ -166,6 +166,7 @@ class ProcessingPipeline:
             "stub": DiarizationMode.STUB,
             "energy": DiarizationMode.ENERGY,
             "real": DiarizationMode.REAL,
+            "lips": DiarizationMode.LIPS,
         }
         mode = mode_map.get(mode_value.lower(), DiarizationMode.ENERGY)
         logger.info("Diarization mode from settings: %s", mode.name)
@@ -611,11 +612,11 @@ class ProcessingPipeline:
             logger.info("LIPS mode: Starting lip movement detection")
             self._emit_progress(10, "Initializing lip detection...")
             
-            # Get video duration from probe data
+            # Get video duration from probe results
             duration_ms = 0
-            if self._probe_data:
+            if self._probe_results:
                 # Find minimum duration across all cameras
-                for probe in self._probe_data.values():
+                for probe in self._probe_results:
                     if probe and probe.duration_ms:
                         if duration_ms == 0:
                             duration_ms = probe.duration_ms

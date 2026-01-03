@@ -719,6 +719,17 @@ class ProcessingPipeline:
                 raise RuntimeError(f"Failed to extract audio for VAD: {audio_result.error}")
                 
             audio_path = audio_result.output_path
+            
+            # DEBUG: Log types to diagnose mysterious "FFmpegResult has no attribute read" error
+            logger.info(f"DEBUG: audio_result type: {type(audio_result)}")
+            logger.info(f"DEBUG: audio_path type: {type(audio_path)}")
+            logger.info(f"DEBUG: audio_path value: {audio_path}")
+            
+            # Force string just in case
+            if not isinstance(audio_path, str):
+                logger.warning(f"DEBUG: audio_path was {type(audio_path)}, forcing to str")
+                audio_path = str(audio_path)
+                
             self._temp_files.append(audio_path)
 
             

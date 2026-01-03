@@ -48,6 +48,17 @@ def _find_ffmpeg() -> Optional[str]:
             r"C:\Program Files\ffmpeg\bin\ffmpeg.exe",
             os.path.expanduser(r"~\ffmpeg\bin\ffmpeg.exe"),
         ]
+        # Add WinGet installation paths (dynamic version folder)
+        winget_base = os.path.expandvars(r"%LOCALAPPDATA%\Microsoft\WinGet\Packages")
+        if os.path.isdir(winget_base):
+            for pkg_dir in os.listdir(winget_base):
+                if pkg_dir.startswith("Gyan.FFmpeg"):
+                    pkg_path = os.path.join(winget_base, pkg_dir)
+                    # Search for ffmpeg.exe in the package
+                    for root, dirs, files in os.walk(pkg_path):
+                        if "ffmpeg.exe" in files:
+                            common_paths.append(os.path.join(root, "ffmpeg.exe"))
+                            break
         for p in common_paths:
             if os.path.isfile(p):
                 _ffmpeg_path = p

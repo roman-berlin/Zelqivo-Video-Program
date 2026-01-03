@@ -1,3 +1,9 @@
 Run the program:
 
 python -m src.multicam_editor
+
+
+Pull:
+
+git checkout DEV
+git pull

@@ -17,7 +17,8 @@ from PyQt6.QtWidgets import (
 )
 
 from multicam_editor.core.project import AudioMixMode, AudioMixSettings
-from multicam_editor.logic.active_speaker import DiarizationMode, PyannoteBackend
+from multicam_editor.logic.active_speaker import DiarizationMode
+from multicam_editor.utils.backends import check_backends
 
 
 class SettingsDialog(QDialog):
@@ -79,9 +80,18 @@ class SettingsDialog(QDialog):
 
         self.combo_diarization = QComboBox()
         # Add items with display names and store enum values as user data
+        self.combo_diarization.addItem("Lips (Visual)", DiarizationMode.LIPS.value)
+        self.combo_diarization.addItem("Energy (CPU-only)", DiarizationMode.ENERGY.value)
         self.combo_diarization.addItem("Real (pyannote.audio)", DiarizationMode.REAL.value)
         self.combo_diarization.addItem("Stub (dev only)", DiarizationMode.STUB.value)
         self.combo_diarization.addItem("Off (single camera)", DiarizationMode.OFF.value)
+        self.combo_diarization.setToolTip(
+            "Lips: Visual detection - picks camera with most lip movement (recommended)\n"
+            "Energy: CPU-only, picks loudest camera (requires isolated mics)\n"
+            "Real: AI-based speaker detection (requires HuggingFace setup)\n"
+            "Stub: Dev mode, alternating mock segments\n"
+            "Off: Single camera output, no switching"
+        )
         diarization_layout.addRow("Backend:", self.combo_diarization)
 
         # Status label showing if pyannote is available
@@ -167,15 +177,18 @@ class SettingsDialog(QDialog):
 
     def _update_diarization_status(self) -> None:
         """Update the diarization status label with actionable guidance."""
-        if PyannoteBackend.is_available():
-            self.label_diarization_status.setText("✓ pyannote.audio ready")
+        backends = check_backends()
+        pyannote_status = backends.get("pyannote")
+
+        if pyannote_status and pyannote_status.available:
+            self.label_diarization_status.setText("OK pyannote.audio ready")
             self.label_diarization_status.setStyleSheet("color: green;")
             self.label_diarization_status.setToolTip("")
         else:
-            error = PyannoteBackend.get_error() or "Not loaded"
+            error = pyannote_status.error if pyannote_status else "Not loaded"
             # Parse error and provide actionable message
-            short_msg, tooltip = self._parse_diarization_error(error)
-            self.label_diarization_status.setText(f"⚠ {short_msg}")
+            short_msg, tooltip = self._parse_diarization_error(error or "Unknown error")
+            self.label_diarization_status.setText(f"[!] {short_msg}")
             self.label_diarization_status.setStyleSheet("color: orange;")
             self.label_diarization_status.setToolTip(tooltip)
 

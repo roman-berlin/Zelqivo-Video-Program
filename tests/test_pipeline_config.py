@@ -13,7 +13,7 @@ class TestPipelineConfigFromUIMapping:
     def test_empty_mapping(self) -> None:
         """Empty mapping returns empty dict."""
         config = PipelineConfig.from_ui_mapping({})
-        assert config.speaker_to_camera_map == {}
+        assert config.speaker_to_cameras_map == {}
         assert config.speaker_switching_enabled is True
 
     def test_all_auto_mapping(self) -> None:
@@ -23,17 +23,17 @@ class TestPipelineConfigFromUIMapping:
             1: "Auto (best effort)",
         }
         config = PipelineConfig.from_ui_mapping(ui_mapping)
-        assert config.speaker_to_camera_map == {}
+        assert config.speaker_to_cameras_map == {}
 
     def test_speaker_to_camera_conversion(self) -> None:
-        """UI format {camera: speaker_X} converts to {X: camera}."""
+        """UI format {camera: speaker_X} converts to {X: [camera]}."""
         ui_mapping = {
             0: "speaker_0",
             1: "speaker_1",
         }
         config = PipelineConfig.from_ui_mapping(ui_mapping)
-        # speaker_0 -> camera 0, speaker_1 -> camera 1
-        assert config.speaker_to_camera_map == {0: 0, 1: 1}
+        # speaker_0 -> [camera 0], speaker_1 -> [camera 1]
+        assert config.speaker_to_cameras_map == {0: [0], 1: [1]}
 
     def test_swapped_mapping(self) -> None:
         """Swapped mapping: camera 0 has speaker_1, camera 1 has speaker_0."""
@@ -42,8 +42,8 @@ class TestPipelineConfigFromUIMapping:
             1: "speaker_0",  # Camera 1 shows speaker_0
         }
         config = PipelineConfig.from_ui_mapping(ui_mapping)
-        # speaker_0 -> camera 1, speaker_1 -> camera 0
-        assert config.speaker_to_camera_map == {1: 0, 0: 1}
+        # speaker_0 -> [camera 1], speaker_1 -> [camera 0]
+        assert config.speaker_to_cameras_map == {1: [0], 0: [1]}
 
     def test_partial_auto_mapping(self) -> None:
         """Mix of auto and explicit mapping."""
@@ -54,7 +54,7 @@ class TestPipelineConfigFromUIMapping:
         }
         config = PipelineConfig.from_ui_mapping(ui_mapping)
         # Only explicit mappings
-        assert config.speaker_to_camera_map == {0: 0, 2: 2}
+        assert config.speaker_to_cameras_map == {0: [0], 2: [2]}
 
     def test_invalid_speaker_format_ignored(self) -> None:
         """Invalid formats are silently ignored."""
@@ -66,7 +66,7 @@ class TestPipelineConfigFromUIMapping:
         }
         config = PipelineConfig.from_ui_mapping(ui_mapping)
         # Only valid speaker_1 mapped
-        assert config.speaker_to_camera_map == {1: 1}
+        assert config.speaker_to_cameras_map == {1: [1]}
 
     def test_speaker_switching_disabled(self) -> None:
         """Speaker switching flag is preserved."""
@@ -75,21 +75,34 @@ class TestPipelineConfigFromUIMapping:
             speaker_switching_enabled=False,
         )
         assert config.speaker_switching_enabled is False
-        assert config.speaker_to_camera_map == {0: 0}
+        assert config.speaker_to_cameras_map == {0: [0]}
+
+    def test_multiple_cameras_same_speaker(self) -> None:
+        """Multiple cameras can be assigned to the same speaker."""
+        ui_mapping = {
+            0: "Speaker 1",
+            1: "Speaker 2",
+            2: "Speaker 1",  # Camera 2 also assigned to Speaker 1
+            3: "Speaker 2",
+        }
+        config = PipelineConfig.from_ui_mapping(ui_mapping)
+        # Speaker 1 (id=0) -> [Camera 0, Camera 2]
+        # Speaker 2 (id=1) -> [Camera 1, Camera 3]
+        assert config.speaker_to_cameras_map == {0: [0, 2], 1: [1, 3]}
 
 
 class TestPipelineConfigGetCamera:
     """Test camera lookup with mapping and fallback."""
 
     def test_direct_mapping(self) -> None:
-        """Direct mapping lookup works."""
-        config = PipelineConfig(speaker_to_camera_map={0: 1, 1: 0})
+        """Direct mapping lookup works - returns first camera in group."""
+        config = PipelineConfig(speaker_to_cameras_map={0: [1], 1: [0]})
         assert config.get_camera_for_speaker(0, num_cameras=2) == 1
         assert config.get_camera_for_speaker(1, num_cameras=2) == 0
 
     def test_fallback_to_speaker_id(self) -> None:
         """Missing mapping falls back to speaker_id as camera_id."""
-        config = PipelineConfig(speaker_to_camera_map={})
+        config = PipelineConfig(speaker_to_cameras_map={})
         # No mapping -> speaker_id == camera_id (ENERGY mode default)
         assert config.get_camera_for_speaker(0, num_cameras=3) == 0
         assert config.get_camera_for_speaker(1, num_cameras=3) == 1
@@ -97,15 +110,22 @@ class TestPipelineConfigGetCamera:
 
     def test_clamp_to_valid_range(self) -> None:
         """Camera ID clamped to valid range."""
-        config = PipelineConfig(speaker_to_camera_map={0: 10})  # Invalid camera
-        # Clamped to max camera index
-        assert config.get_camera_for_speaker(0, num_cameras=2) == 1
+        config = PipelineConfig(speaker_to_cameras_map={})
+        # Speaker 10 has no mapping, fallback to 10, clamped to max
+        assert config.get_camera_for_speaker(10, num_cameras=2) == 1
 
     def test_fallback_clamp(self) -> None:
         """Fallback speaker_id also clamped."""
-        config = PipelineConfig(speaker_to_camera_map={})
+        config = PipelineConfig(speaker_to_cameras_map={})
         # Speaker 5 has no mapping, fallback to 5, but only 2 cameras
         assert config.get_camera_for_speaker(5, num_cameras=2) == 1
+
+    def test_get_cameras_for_speaker(self) -> None:
+        """get_cameras_for_speaker returns list of cameras."""
+        config = PipelineConfig(speaker_to_cameras_map={0: [0, 2], 1: [1, 3]})
+        assert config.get_cameras_for_speaker(0) == [0, 2]
+        assert config.get_cameras_for_speaker(1) == [1, 3]
+        assert config.get_cameras_for_speaker(5) == []  # Not mapped
 
 
 class TestSpeakerSwitchingDisabled:
@@ -133,14 +153,6 @@ class TestMappingIntegration:
 
     def test_swapped_mapping_affects_cuts(self) -> None:
         """With swapped mapping, speakers select opposite cameras."""
-        # This tests the scenario where:
-        # - Speaker 0 should show camera 1
-        # - Speaker 1 should show camera 0
-
-        # In ENERGY mode, speaker_id == camera_id from diarization
-        # But if we had pyannote mode with mapping, we'd apply it
-
-        # For ENERGY mode (V1), this test verifies the mapping structure
         config = PipelineConfig.from_ui_mapping({
             0: "speaker_1",  # Camera 0 captures speaker_1
             1: "speaker_0",  # Camera 1 captures speaker_0

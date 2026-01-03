@@ -114,14 +114,21 @@ class ProcessingPipeline:
         if config is not None:
             self._config = config
         else:
+            # Convert legacy single-camera map to new list format
+            cameras_map: dict[int, list[int]] = {}
+            if speaker_to_camera_map:
+                for speaker_id, camera_id in speaker_to_camera_map.items():
+                    cameras_map[speaker_id] = [camera_id]
             self._config = PipelineConfig(
                 speaker_switching_enabled=speaker_switching_enabled,
-                speaker_to_camera_map=speaker_to_camera_map or {},
+                speaker_to_cameras_map=cameras_map,
             )
 
         # Convenience accessor
         self.speaker_switching_enabled = self._config.speaker_switching_enabled
-        self._diarization_mode = DiarizationMode.ENERGY  # V1 default
+
+        # Load diarization mode from settings (defaults to ENERGY for V1)
+        self._diarization_mode = self._load_diarization_mode()
 
         # Cancellation state
         self._cancelled = False
@@ -146,6 +153,25 @@ class ProcessingPipeline:
         # QA artifacts exporter
         self._qa_exporter = QAArtifactExporter()
 
+    def _load_diarization_mode(self) -> DiarizationMode:
+        """Load diarization mode from QSettings.
+
+        Defaults to ENERGY for V1 (CPU-only speaker detection).
+        """
+        settings = QSettings("MultiCamEditor", "MultiCamEditor")
+        mode_value = settings.value("diarization/mode", "energy", type=str)
+
+        mode_map = {
+            "off": DiarizationMode.OFF,
+            "stub": DiarizationMode.STUB,
+            "energy": DiarizationMode.ENERGY,
+            "real": DiarizationMode.REAL,
+            "lips": DiarizationMode.LIPS,
+        }
+        mode = mode_map.get(mode_value.lower(), DiarizationMode.ENERGY)
+        logger.info("Diarization mode from settings: %s", mode.name)
+        return mode
+
     def cancel(self) -> None:
         """Cancel the pipeline from any thread."""
         logger.info("Pipeline cancellation requested")
@@ -162,15 +188,64 @@ class ProcessingPipeline:
         return False
 
     def _cleanup(self) -> None:
-        """Remove all temp files created during pipeline."""
+        """Remove all temp files and directories created during pipeline.
+
+        Uses retry logic with small delays to handle files still being released
+        by ffmpeg processes. Logs warnings for files that couldn't be removed.
+        """
+        max_retries = 3
+        retry_delay = 0.5  # seconds
+
+        failed_paths: List[str] = []
+
         for path in self._temp_files:
-            if os.path.isfile(path):
+            if not path:
+                continue
+
+            removed = False
+            for attempt in range(max_retries):
                 try:
-                    os.remove(path)
-                    logger.debug("Cleaned up: %s", path)
+                    if os.path.isfile(path):
+                        os.remove(path)
+                        logger.debug("Cleaned up file: %s", path)
+                        removed = True
+                        break
+                    elif os.path.isdir(path):
+                        import shutil
+                        shutil.rmtree(path, ignore_errors=True)
+                        logger.debug("Cleaned up directory: %s", path)
+                        removed = True
+                        break
+                    else:
+                        # Path doesn't exist, consider it cleaned
+                        removed = True
+                        break
+                except PermissionError as e:
+                    # File might still be in use by ffmpeg process
+                    if attempt < max_retries - 1:
+                        logger.debug(
+                            "Cleanup retry %d/%d for %s (permission error)",
+                            attempt + 1, max_retries, os.path.basename(path)
+                        )
+                        time.sleep(retry_delay)
+                    else:
+                        logger.warning(
+                            "Failed to cleanup %s after %d attempts: %s",
+                            os.path.basename(path), max_retries, e
+                        )
+                        failed_paths.append(path)
                 except Exception as e:
                     logger.debug("Cleanup failed for %s: %s", path, e)
+                    failed_paths.append(path)
+                    break
+
         self._temp_files.clear()
+
+        if failed_paths:
+            logger.warning(
+                "Cleanup incomplete: %d files could not be removed",
+                len(failed_paths)
+            )
 
     def _emit_progress(self, stage_percent: int = 0, message: str = "") -> None:
         """Emit progress update via signals and callback."""
@@ -396,11 +471,14 @@ class ProcessingPipeline:
             self._emit_progress(100, "Alignment failed, using default offsets")
 
     def _stage_diarize(self) -> bool:
-        """Run speaker diarization using ENERGY backend (CPU-only RMS analysis).
+        """Run speaker diarization using selected backend.
 
+        Supports multiple modes:
+        - ENERGY: CPU-only RMS audio analysis
+        - REAL: Pyannote AI + energy-based camera selection
+        - LIPS: Visual lip movement detection (most accurate)
+        
         If speaker_switching_enabled is False, skips diarization entirely.
-        Extracts audio from each camera, computes energy per window,
-        and determines which camera has the active speaker.
         """
         self._advance_stage(PipelineStage.DIARIZE)
 
@@ -411,6 +489,11 @@ class ProcessingPipeline:
             self._qa_exporter.set_diarization([])
             self._emit_progress(100, "Speaker switching disabled (single camera mode)")
             return True
+
+        # LIPS mode: Use visual lip movement detection
+        if self._diarization_mode == DiarizationMode.LIPS:
+            return self._stage_diarize_lips()
+
 
         from ..utils.ffmpeg import extract_audio_to_wav
 
@@ -451,10 +534,10 @@ class ProcessingPipeline:
                     logger.info("Extracted audio from camera %d: %s",
                                i, os.path.basename(result.output_path))
 
-            # Step 2: Create ENERGY backend and set camera audio paths
-            self._emit_progress(50, "Analyzing speaker energy levels...")
+            # Step 2: Create backend using user's selected diarization mode
+            self._emit_progress(50, f"Analyzing speakers ({self._diarization_mode.value} mode)...")
 
-            backend, error = create_backend(DiarizationMode.ENERGY)
+            backend, error = create_backend(self._diarization_mode)
             if error:
                 logger.warning("Backend creation warning: %s", error)
 
@@ -462,26 +545,120 @@ class ProcessingPipeline:
             if isinstance(backend, RealEnergyVADBackend):
                 backend.set_camera_audio_paths(camera_audio_paths)
             else:
-                logger.warning("Backend is not RealEnergyVADBackend, falling back to stub")
+                logger.info("Backend type: %s", type(backend).__name__)
 
             # Step 3: Run diarization
             detector = ActiveSpeakerDetector(backend=backend)
-            self._speaker_segments = detector.detect(
-                self.input_files[0],  # Reference path (not used by ENERGY backend)
+            # For pyannote, use extracted WAV file (torchaudio can't read video files)
+            # For ENERGY mode, the audio_path isn't used (it uses camera_audio_paths)
+            audio_path_for_diarization = camera_audio_paths[0] if camera_audio_paths[0] else self.input_files[0]
+            raw_segments = detector.detect(
+                audio_path_for_diarization,
                 num_channels=num_cameras,
             )
+
+            # Step 4: Map speakers to cameras
+            # Check if user provided manual mapping (camera groups per speaker)
+            if self._diarization_mode == DiarizationMode.REAL and raw_segments:
+                if self._config.has_manual_mapping():
+                    # Hybrid mode: use pyannote speaker IDs + user's camera groups + energy within groups
+                    self._emit_progress(70, "Selecting cameras within speaker groups...")
+                    from .active_speaker import assign_cameras_hybrid
+                    self._speaker_segments = assign_cameras_hybrid(
+                        raw_segments,
+                        camera_audio_paths,
+                        self._config.speaker_to_cameras_map,
+                    )
+                    logger.info("Hybrid with groups: applied to %d segments",
+                               len(self._speaker_segments))
+                else:
+                    # No manual mapping - fall back to energy-based assignment
+                    self._emit_progress(70, "Assigning cameras by audio energy...")
+                    from .active_speaker import assign_cameras_by_energy
+                    self._speaker_segments = assign_cameras_by_energy(
+                        raw_segments, camera_audio_paths
+                    )
+                    logger.info("Hybrid mode: assigned %d segments to cameras by energy",
+                               len(self._speaker_segments))
+            else:
+                # ENERGY mode: speaker_id already equals camera_id
+                self._speaker_segments = raw_segments
+
+
+
 
             # Record for QA artifacts
             self._qa_exporter.set_diarization(self._speaker_segments)
 
             self._emit_progress(100, f"Found {len(self._speaker_segments)} speaker segments")
-            logger.info("Diarization complete (ENERGY mode): %d segments", len(self._speaker_segments))
+            logger.info("Diarization complete (%s mode): %d segments", 
+                       self._diarization_mode.value, len(self._speaker_segments))
             return True
 
         except Exception as e:
             logger.error("Diarization failed: %s", e, exc_info=True)
             self.signals.error.emit(f"Diarization failed: {e}")
             return False
+
+    def _stage_diarize_lips(self) -> bool:
+        """Run visual lip movement detection to identify active speakers.
+        
+        Uses MediaPipe Face Mesh to detect lip movement in each camera's video.
+        The camera with the most lip movement at each time point is selected.
+        """
+        try:
+            from .active_speaker import LipMovementBackend
+            
+            logger.info("LIPS mode: Starting lip movement detection")
+            self._emit_progress(10, "Initializing lip detection...")
+            
+            # Get video duration from probe results
+            duration_ms = 0
+            if self._probe_results:
+                # Find minimum duration across all cameras
+                for probe in self._probe_results:
+                    if probe and probe.duration_ms:
+                        if duration_ms == 0:
+                            duration_ms = probe.duration_ms
+                        else:
+                            duration_ms = min(duration_ms, probe.duration_ms)
+            
+            if duration_ms <= 0:
+                # Fallback: estimate from file
+                logger.warning("Could not determine video duration, using 2 minutes default")
+                duration_ms = 120000
+            
+            self._emit_progress(20, f"Analyzing lip movement ({duration_ms//1000}s video)...")
+            
+            # Create lip movement backend
+            lip_detector = LipMovementBackend(
+                sample_interval_ms=100,  # Check every 100ms
+                min_segment_ms=500,      # Minimum 500ms segments
+                movement_threshold=0.02,  # Lip aperture threshold
+            )
+            
+            # Run detection
+            self._speaker_segments = lip_detector.detect_speakers(
+                video_paths=self.input_files,
+                duration_ms=duration_ms,
+            )
+            
+            # Record for QA artifacts
+            self._qa_exporter.set_diarization(self._speaker_segments)
+            
+            self._emit_progress(100, f"Lip detection found {len(self._speaker_segments)} segments")
+            logger.info("LIPS mode complete: %d segments", len(self._speaker_segments))
+            return True
+            
+        except ImportError as e:
+            logger.error("MediaPipe not installed: %s", e)
+            self.signals.error.emit("Lip detection requires MediaPipe. Run: pip install mediapipe")
+            return False
+        except Exception as e:
+            logger.error("Lip detection failed: %s", e, exc_info=True)
+            self.signals.error.emit(f"Lip detection failed: {e}")
+            return False
+
 
     def _apply_speaker_to_camera_mapping(
         self,
@@ -507,7 +684,7 @@ class ProcessingPipeline:
             return segments, False
 
         # REAL/pyannote mode: check if we have complete mapping
-        speaker_map = self._config.speaker_to_camera_map
+        speaker_map = self._config.speaker_to_cameras_map
         if not speaker_map:
             logger.warning(
                 "Pyannote mode but no speaker-to-camera mapping provided; "
@@ -709,6 +886,12 @@ class ProcessingPipeline:
             self._emit_progress(100, "No cuts to render")
             return []
 
+        # Load QA overlay setting
+        settings = QSettings("MultiCamEditor", "MultiCamEditor")
+        qa_overlay_enabled = settings.value("qa_overlay/enabled", False, type=bool)
+        if qa_overlay_enabled:
+            logger.info("QA overlay enabled - will burn timecode/speaker info into video")
+
         # Convert CutSegments to CutDefinitions with camera offset applied
         cuts: List[CutDefinition] = []
         for i, cut in enumerate(self._cut_plan):
@@ -741,6 +924,8 @@ class ProcessingPipeline:
                 start_ms=adjusted_start,
                 end_ms=adjusted_end,
                 cut_index=i,
+                qa_overlay=qa_overlay_enabled,
+                speaker_id=cut.camera_id,  # ENERGY mode: camera_id == speaker_id
             ))
 
         # Create renderer with temp output directory

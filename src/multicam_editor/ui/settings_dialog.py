@@ -80,16 +80,13 @@ class SettingsDialog(QDialog):
 
         self.combo_diarization = QComboBox()
         # Add items with display names and store enum values as user data
-        self.combo_diarization.addItem("Lips (Visual)", DiarizationMode.LIPS.value)
-        self.combo_diarization.addItem("Energy (CPU-only)", DiarizationMode.ENERGY.value)
-        self.combo_diarization.addItem("Real (pyannote.audio)", DiarizationMode.REAL.value)
-        self.combo_diarization.addItem("Stub (dev only)", DiarizationMode.STUB.value)
+        # Simplified: Hybrid (recommended), Lips Only, Off
+        self.combo_diarization.addItem("Hybrid (Recommended)", DiarizationMode.HYBRID.value)
+        self.combo_diarization.addItem("Lips Only (Visual)", DiarizationMode.LIPS.value)
         self.combo_diarization.addItem("Off (single camera)", DiarizationMode.OFF.value)
         self.combo_diarization.setToolTip(
-            "Lips: Visual detection - picks camera with most lip movement (recommended)\n"
-            "Energy: CPU-only, picks loudest camera (requires isolated mics)\n"
-            "Real: AI-based speaker detection (requires HuggingFace setup)\n"
-            "Stub: Dev mode, alternating mock segments\n"
+            "Hybrid: Audio + Visual detection - fastest and most accurate (recommended)\\n"
+            "Lips Only: Pure visual detection - slower but works without audio\\n"
             "Off: Single camera output, no switching"
         )
         diarization_layout.addRow("Backend:", self.combo_diarization)
@@ -241,7 +238,7 @@ class SettingsDialog(QDialog):
         )
         # Diarization: find index by stored value
         diarization_value = self.settings.value(
-            "diarization/mode", DiarizationMode.REAL.value, type=str
+            "diarization/mode", DiarizationMode.HYBRID.value, type=str
         )
         for i in range(self.combo_diarization.count()):
             if self.combo_diarization.itemData(i) == diarization_value:

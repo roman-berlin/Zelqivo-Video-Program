@@ -199,6 +199,7 @@ class TestDiarizationMode:
         assert DiarizationMode.ENERGY.value == "energy"
         assert DiarizationMode.REAL.value == "real"
         assert DiarizationMode.LIPS.value == "lips"
+        assert DiarizationMode.HYBRID.value == "hybrid"
 
     def test_from_string(self) -> None:
         assert DiarizationMode("off") == DiarizationMode.OFF
@@ -206,6 +207,7 @@ class TestDiarizationMode:
         assert DiarizationMode("energy") == DiarizationMode.ENERGY
         assert DiarizationMode("real") == DiarizationMode.REAL
         assert DiarizationMode("lips") == DiarizationMode.LIPS
+        assert DiarizationMode("hybrid") == DiarizationMode.HYBRID
 
 
 class TestRealEnergyVADBackend:

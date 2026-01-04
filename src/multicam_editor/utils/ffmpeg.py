@@ -313,8 +313,21 @@ def build_trim_args(
 
     if copy_codec:
         args.extend(["-c", "copy"])
+        # For stream copy, avoid negative timestamps
+        args.extend(["-avoid_negative_ts", "make_zero"])
     else:
-        args.extend(["-c:v", "libx264", "-c:a", "aac"])
+        # Re-encode with proper timestamp handling to avoid black frames
+        args.extend([
+            "-c:v", "libx264",
+            "-preset", "fast",
+            "-c:a", "aac",
+            # Reset timestamps to start at 0 - critical for seamless concat
+            "-avoid_negative_ts", "make_zero",
+            # Force constant frame rate to avoid VFR issues
+            "-fps_mode", "cfr",
+            # Consistent timebase for all segments
+            "-video_track_timescale", "90000",
+        ])
 
     args.append(output_path)
     return args
@@ -409,8 +422,18 @@ def build_segment_with_effects_args(
     if afilters:
         args.extend(["-af", ",".join(afilters)])
 
-    # Re-encode (required for filters)
-    args.extend(["-c:v", "libx264", "-preset", "fast", "-c:a", "aac"])
+    # Re-encode with proper timestamp handling to avoid black frames
+    args.extend([
+        "-c:v", "libx264",
+        "-preset", "fast",
+        "-c:a", "aac",
+        # Reset timestamps to start at 0 - critical for seamless concat
+        "-avoid_negative_ts", "make_zero",
+        # Force constant frame rate to avoid VFR issues
+        "-fps_mode", "cfr",
+        # Consistent timebase for all segments
+        "-video_track_timescale", "90000",
+    ])
     args.append(output_path)
 
     return args
@@ -588,7 +611,18 @@ def build_segment_with_qa_overlay_args(
     if afilters:
         args.extend(["-af", ",".join(afilters)])
 
-    args.extend(["-c:v", "libx264", "-preset", "fast", "-c:a", "aac"])
+    # Re-encode with proper timestamp handling to avoid black frames
+    args.extend([
+        "-c:v", "libx264",
+        "-preset", "fast",
+        "-c:a", "aac",
+        # Reset timestamps to start at 0 - critical for seamless concat
+        "-avoid_negative_ts", "make_zero",
+        # Force constant frame rate to avoid VFR issues
+        "-fps_mode", "cfr",
+        # Consistent timebase for all segments
+        "-video_track_timescale", "90000",
+    ])
     args.append(output_path)
 
     return args

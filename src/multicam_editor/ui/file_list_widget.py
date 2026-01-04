@@ -26,6 +26,9 @@ class FileListWidget(QWidget):
     filesAdded = pyqtSignal(list)
     videoCountChanged = pyqtSignal(int)
     currentPathChanged = pyqtSignal(str)
+    # Signals for removal - MainWindow handles Project sync via RemoveClipsCommand
+    removalRequested = pyqtSignal(str)  # path to remove
+    removeAllRequested = pyqtSignal()   # remove all videos
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -272,10 +275,12 @@ class FileListWidget(QWidget):
             super().keyPressEvent(event)
 
     def remove_selected(self) -> bool:
-        """Remove selected item(s) from the list.
+        """Request removal of selected item via signal.
 
-        Returns True if item(s) were removed, False if nothing selected.
-        Emits videoCountChanged after removal.
+        MainWindow handles the actual removal via RemoveClipsCommand
+        to ensure Project model stays in sync with undo support.
+
+        Returns True if a removal was requested, False if nothing selected.
         """
         idx = self._view.currentIndex()
         if not idx.isValid():
@@ -286,22 +291,65 @@ class FileListWidget(QWidget):
             return False
 
         path = item.data(Qt.ItemDataRole.UserRole)
-        is_result = item.data(Qt.ItemDataRole.UserRole + 1)  # Result files don't count
+        is_result = item.data(Qt.ItemDataRole.UserRole + 1)
 
-        # Remove from model
-        self._model.removeRow(idx.row())
+        if not path:
+            return False
 
-        # Update state
-        if path and path in self._path_set:
-            self._path_set.discard(path)
-            if not is_result:
-                self._video_count = max(0, self._video_count - 1)
-                self.videoCountChanged.emit(self._video_count)
+        # Result files can be removed directly (not in Project)
+        if is_result:
+            self._do_remove_path(path)
+            return True
 
-        # Select next item or previous if removed was last
-        new_count = self._model.rowCount()
-        if new_count > 0:
-            new_row = min(idx.row(), new_count - 1)
-            self._view.setCurrentIndex(self._model.index(new_row, 0))
-
+        # Emit signal for MainWindow to handle via RemoveClipsCommand
+        self.removalRequested.emit(path)
         return True
+
+    def remove_all(self) -> None:
+        """Request removal of all videos via signal.
+
+        MainWindow handles via RemoveClipsCommand for proper undo support.
+        Result files are excluded from Project removal.
+        """
+        self.removeAllRequested.emit()
+
+    def _do_remove_path(self, path: str) -> bool:
+        """Internal: Actually remove a path from the UI.
+
+        Called by MainWindow after Project sync, or directly for result files.
+        Returns True if removed, False if not found.
+        """
+        if path not in self._path_set:
+            return False
+
+        # Find and remove the item
+        for row in range(self._model.rowCount()):
+            item = self._model.item(row)
+            if item and item.data(Qt.ItemDataRole.UserRole) == path:
+                is_result = item.data(Qt.ItemDataRole.UserRole + 1)
+                self._model.removeRow(row)
+                self._path_set.discard(path)
+                if not is_result:
+                    self._video_count = max(0, self._video_count - 1)
+                    self.videoCountChanged.emit(self._video_count)
+
+                # Select next item
+                new_count = self._model.rowCount()
+                if new_count > 0:
+                    new_row = min(row, new_count - 1)
+                    self._view.setCurrentIndex(self._model.index(new_row, 0))
+                return True
+        return False
+
+    def get_all_video_paths(self) -> list[str]:
+        """Return paths of all non-result videos in the list."""
+        paths: list[str] = []
+        for row in range(self._model.rowCount()):
+            item = self._model.item(row)
+            if item is not None:
+                is_result = item.data(Qt.ItemDataRole.UserRole + 1)
+                if not is_result:
+                    p = item.data(Qt.ItemDataRole.UserRole)
+                    if p:
+                        paths.append(p)
+        return paths

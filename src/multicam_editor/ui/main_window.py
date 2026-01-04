@@ -41,7 +41,7 @@ from .timeline.adapter import TimelineAdapter
 # Use the core project implementation for clip management and splitting.
 from ..core.project import Project
 # Import undo/redo commands
-from ..logic.commands import AddClipsCommand, ReorderClipsCommand, TrimCommand
+from ..logic.commands import AddClipsCommand, RemoveClipsCommand, ReorderClipsCommand, TrimCommand
 from ..logic.processing_worker import ProcessingThread
 from ..logic.preflight import check_preflight_warnings, format_warnings_for_display
 from ..logic.preflight import check_preflight_warnings, format_warnings_for_display
@@ -104,10 +104,15 @@ class MainWindow(QMainWindow):
         self.btn_process.setObjectName("btnProcess")
         self.btn_process.setEnabled(False)  # Enabled when >=2 videos
         self.btn_process.setToolTip("Automatically sync and switch cameras")
+        self.btn_remove_all = QPushButton("Remove All", ctrl_row)
+        self.btn_remove_all.setObjectName("btnRemoveAll")
+        self.btn_remove_all.setEnabled(False)  # Enabled when >0 videos
+        self.btn_remove_all.setToolTip("Remove all videos from the list")
         self.lbl_counter = QLabel("Videos: 0/10", ctrl_row)
         self.lbl_counter.setObjectName("lblCounter")
         ctrl_lay.addWidget(self.btn_add)
         ctrl_lay.addWidget(self.btn_process)
+        ctrl_lay.addWidget(self.btn_remove_all)
         ctrl_lay.addStretch(1)
         ctrl_lay.addWidget(self.lbl_counter)
 
@@ -355,11 +360,11 @@ class MainWindow(QMainWindow):
         lbl_output.setObjectName("lblOutputFolder")
         layout.addWidget(lbl_output, row, 0)
 
-        self._output_folder: str | None = self.settings.value("output/folder", None)
-        folder_text = os.path.basename(self._output_folder) if self._output_folder else "Downloads"
-        self.lbl_output_folder = QLabel(folder_text)
+        # Don't persist output folder between sessions - always start fresh
+        self._output_folder: str | None = None
+        self.lbl_output_folder = QLabel("Downloads")
         self.lbl_output_folder.setObjectName("lblOutputFolderPath")
-        self.lbl_output_folder.setToolTip(self._output_folder or "Output will be saved next to input files")
+        self.lbl_output_folder.setToolTip("Output will be saved to Downloads folder")
         layout.addWidget(self.lbl_output_folder, row, 1)
 
         self.btn_choose_output_folder = QPushButton("Choose…")
@@ -678,10 +683,14 @@ class MainWindow(QMainWindow):
         self.file_list.filesAdded.connect(self._on_files_added)
         self.file_list.videoCountChanged.connect(self._refresh_counter)
         self.file_list.videoCountChanged.connect(self._refresh_camera_mapping_ui)
+        # Removal signals for proper Project sync
+        self.file_list.removalRequested.connect(self._on_remove_video)
+        self.file_list.removeAllRequested.connect(self._on_remove_all_videos)
 
         # buttons
         self.btn_add.clicked.connect(self.on_add_files)
         self.btn_process.clicked.connect(self.on_process_videos)
+        self.btn_remove_all.clicked.connect(self.file_list.remove_all)
 
     # --- Actions ---
     def on_add_files(self) -> None:
@@ -770,6 +779,51 @@ class MainWindow(QMainWindow):
 
         # keep the view anchored to the left after adding clips
         QTimer.singleShot(0, self._scroll_timeline_left)
+
+    def _on_remove_video(self, path: str) -> None:
+        """Handle removal request for a single video.
+        
+        Uses RemoveClipsCommand for proper Project sync and undo support.
+        """
+        if not path:
+            return
+
+        # Find the clip with this path in the project
+        clips = self.project.clips()
+        clip_ids = [clip.id for clip in clips if clip.path == path]
+        
+        if not clip_ids:
+            # Path not in project (shouldn't happen), just remove from UI
+            self.file_list._do_remove_path(path)
+            return
+        
+        # Use RemoveClipsCommand for undoable removal
+        cmd = RemoveClipsCommand(
+            self.project,
+            clip_ids,
+            refresh_callback=self._refresh_after_undo_redo
+        )
+        self.undo_stack.push(cmd)
+
+    def _on_remove_all_videos(self) -> None:
+        """Handle removal request for all videos.
+        
+        Uses RemoveClipsCommand for proper Project sync and undo support.
+        """
+        clips = self.project.clips()
+        if not clips:
+            return
+        
+        # Get all clip IDs
+        clip_ids = [clip.id for clip in clips]
+        
+        # Use RemoveClipsCommand for undoable removal
+        cmd = RemoveClipsCommand(
+            self.project,
+            clip_ids,
+            refresh_callback=self._refresh_after_undo_redo
+        )
+        self.undo_stack.push(cmd)
 
     def _on_scene_selection_changed(self) -> None:
         """Mirror timeline selection to file list to drive preview."""
@@ -887,6 +941,7 @@ class MainWindow(QMainWindow):
         self.lbl_counter.setText(f"Videos: {count}/{VIDEO_CAP}")
         self.btn_add.setEnabled(count < VIDEO_CAP)
         self.btn_process.setEnabled(count >= MIN_VIDEOS_FOR_PROCESS)
+        self.btn_remove_all.setEnabled(count > 0)
         # Show/hide inline hint based on video count
         self.lbl_process_hint.setVisible(count < MIN_VIDEOS_FOR_PROCESS)
 

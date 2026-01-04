@@ -46,6 +46,7 @@ from ..logic.processing_worker import ProcessingThread
 from ..logic.preflight import check_preflight_warnings, format_warnings_for_display
 from ..logic.preflight import check_preflight_warnings, format_warnings_for_display
 from .progress_dialog import ProcessingProgressDialog
+from .loading_dialog import LoadingDialog
 
 
 
@@ -418,9 +419,9 @@ class MainWindow(QMainWindow):
 
     def _refresh_camera_mapping_ui(self) -> None:
         """Rebuild camera mapping combos based on current file list."""
-        # Clear old row widgets from the layout
-        while self.mapping_layout.count():
-            item = self.mapping_layout.takeAt(0)
+        # Clear old row widgets from the layout, but preserve lbl_no_cameras
+        while self.mapping_layout.count() > 1:  # Keep first item (lbl_no_cameras)
+            item = self.mapping_layout.takeAt(1)  # Remove from index 1 onwards
             widget = item.widget()
             if widget:
                 widget.setParent(None)
@@ -698,7 +699,53 @@ class MainWindow(QMainWindow):
         if remaining <= 0:
             self._toast("Video limit reached (10/10). Remove some to add more.")
             return
-        added, skipped_dup, _ = self.file_list.add_files(videos, cap_remaining=remaining)
+        
+        # Show progress dialog for multiple files (3+)
+        if len(videos) >= 3:
+            self._add_files_with_progress(videos, remaining)
+        else:
+            # Quick add for 1-2 files
+            added, skipped_dup, _ = self.file_list.add_files(videos, cap_remaining=remaining)
+            self._handle_add_files_result(videos, added, skipped_dup)
+
+    def _add_files_with_progress(self, videos: List[str], remaining: int) -> None:
+        """Add files with a progress dialog for user feedback."""
+        from PyQt6.QtWidgets import QApplication
+        
+        # Check current theme for dialog styling
+        is_dark = self.settings.value("appearance/theme", "light", type=str) == "dark"
+        dialog = LoadingDialog(self, "Loading Videos", dark_mode=is_dark)
+        
+        dialog.show()
+        QApplication.processEvents()
+        
+        # Process files one by one with progress updates
+        added: List[str] = []
+        skipped_dup: List[str] = []
+        total = min(len(videos), remaining)
+        
+        for i, video_path in enumerate(videos[:remaining]):
+            if dialog.is_cancelled():
+                break
+            
+            # Update progress
+            dialog.set_progress(i + 1, total, video_path)
+            QApplication.processEvents()
+            
+            # Add file (this does the probe)
+            result = self.file_list.add_files([video_path], cap_remaining=1)
+            if result[0]:  # added
+                added.extend(result[0])
+            if result[1]:  # duplicates
+                skipped_dup.extend(result[1])
+        
+        dialog.complete()
+        dialog.close()
+        
+        self._handle_add_files_result(videos, added, skipped_dup)
+
+    def _handle_add_files_result(self, videos: List[str], added: List[str], skipped_dup: List[str]) -> None:
+        """Handle the result of adding files and show appropriate messages."""
         if skipped_dup:
             self._toast(f"Skipped {len(skipped_dup)} duplicate file(s).")
         if len(videos) > len(added) + len(skipped_dup):

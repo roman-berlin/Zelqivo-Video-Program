@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from PyQt6.QtCore import QSettings
+from PyQt6.QtCore import QSettings, QTimer, QThread, pyqtSignal, QObject
 from PyQt6.QtWidgets import (
     QCheckBox,
     QDialog,
@@ -14,6 +14,8 @@ from PyQt6.QtWidgets import (
     QComboBox,
     QVBoxLayout,
     QGroupBox,
+    QLineEdit,
+    QHBoxLayout,
 )
 
 from ..core.project import AudioMixMode, AudioMixSettings
@@ -24,6 +26,18 @@ from PyQt6.QtWidgets import QPushButton, QMessageBox, QFileDialog
 import os
 
 
+class _DiarizationStatusWorker(QObject):
+    """Background worker to check diarization backend status."""
+    finished = pyqtSignal(bool, str)  # (available, error)
+
+    def run(self) -> None:
+        """Run the status check in background thread."""
+        try:
+            from ..logic.active_speaker import PyannoteBackend
+            available, error = PyannoteBackend.check_install()
+            self.finished.emit(available, error or "")
+        except Exception as e:
+            self.finished.emit(False, str(e))
 
 
 
@@ -62,10 +76,28 @@ class SettingsDialog(QDialog):
         )
         diarization_layout.addRow("Backend:", self.combo_diarization)
 
+        # HF Token Input
+        self.edit_token = QLineEdit()
+        self.edit_token.setEchoMode(QLineEdit.EchoMode.Password)
+        self.edit_token.setPlaceholderText("Paste HuggingFace Token (hf_...)")
+        self.edit_token.setToolTip("Token needed for Pyannote models (read access)")
+        
+        self.btn_save_token = QPushButton("Save Token")
+        self.btn_save_token.setToolTip("Login and save token to system")
+        self.btn_save_token.clicked.connect(self._on_save_token_clicked)
+        
+        token_layout = QHBoxLayout()
+        token_layout.addWidget(self.edit_token)
+        token_layout.addWidget(self.btn_save_token)
+        diarization_layout.addRow("HF Token:", token_layout)
+
         # Status label showing if pyannote is available
-        self.label_diarization_status = QLabel()
-        self._update_diarization_status()
+        self.label_diarization_status = QLabel("⏳ Checking...")
+        self.label_diarization_status.setStyleSheet("color: gray;")
         diarization_layout.addRow("Status:", self.label_diarization_status)
+        
+        # Defer status check to avoid blocking dialog open
+        QTimer.singleShot(50, self._start_async_status_check)
 
         diarization_group.setLayout(diarization_layout)
         layout.addWidget(diarization_group)
@@ -208,23 +240,35 @@ class SettingsDialog(QDialog):
         is_mix = self.combo_audio_mode.currentText() == "Mix"
         self.spin_ducking_amount.setEnabled(is_mix and checked)
 
-    def _update_diarization_status(self) -> None:
-        """Update the diarization status label with actionable guidance."""
-        # Use fast check to avoid freezing UI
-        from ..logic.active_speaker import PyannoteBackend
+    def _start_async_status_check(self) -> None:
+        """Start background thread to check diarization status."""
+        self._status_thread = QThread()
+        self._status_worker = _DiarizationStatusWorker()
+        self._status_worker.moveToThread(self._status_thread)
+        self._status_thread.started.connect(self._status_worker.run)
+        self._status_worker.finished.connect(self._on_status_check_complete)
+        self._status_worker.finished.connect(self._status_thread.quit)
+        self._status_worker.finished.connect(self._status_worker.deleteLater)
+        self._status_thread.finished.connect(self._status_thread.deleteLater)
+        self._status_thread.start()
 
-        available, error = PyannoteBackend.check_install()
-
+    def _on_status_check_complete(self, available: bool, error: str) -> None:
+        """Handle background status check completion."""
         if available:
-            self.label_diarization_status.setText("OK pyannote.audio ready")
+            self.label_diarization_status.setText("✓ pyannote.audio ready")
             self.label_diarization_status.setStyleSheet("color: green;")
             self.label_diarization_status.setToolTip("")
         else:
-            # Parse error and provide actionable message
             short_msg, tooltip = self._parse_diarization_error(error or "Unknown error")
             self.label_diarization_status.setText(f"[!] {short_msg}")
             self.label_diarization_status.setStyleSheet("color: orange;")
             self.label_diarization_status.setToolTip(tooltip)
+
+    def _update_diarization_status(self) -> None:
+        """Update the diarization status label (sync version for token save)."""
+        from ..logic.active_speaker import PyannoteBackend
+        available, error = PyannoteBackend.check_install()
+        self._on_status_check_complete(available, error or "")
 
     def _toggle_advanced_settings(self, checked: bool) -> None:
         """Toggle visibility of advanced settings."""
@@ -262,8 +306,32 @@ class SettingsDialog(QDialog):
                 "Model unavailable → check auth",
                 "Run 'hf auth login' and accept model at hf.co/pyannote/speaker-diarization-3.1"
             )
-        # Fallback: truncate error
         return (error[:40] + "..." if len(error) > 40 else error, error)
+
+    def _on_save_token_clicked(self) -> None:
+        """Save the HF token and attempt login."""
+        token = self.edit_token.text().strip()
+        if not token:
+            QMessageBox.warning(self, "Input Error", "Please enter a token.")
+            return
+
+        try:
+            from huggingface_hub import login
+            # write_permission=False is enough for reading models
+            login(token=token, add_to_git_credential=False)
+            
+            QMessageBox.information(
+                self, 
+                "Success", 
+                "Token saved successfully!\n\nRe-checking status..."
+            )
+            self.edit_token.clear()
+            self._update_diarization_status()
+            
+        except ImportError:
+            QMessageBox.critical(self, "Error", "huggingface_hub not installed.")
+        except Exception as e:
+            QMessageBox.critical(self, "Login Failed", f"Failed to login: {e}")
 
     def _load_settings(self) -> None:
         """Load current settings from QSettings."""

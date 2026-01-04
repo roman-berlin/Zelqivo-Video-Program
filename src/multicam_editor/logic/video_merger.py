@@ -97,7 +97,7 @@ class SegmentRenderer:
         self,
         cuts: List[CutDefinition],
         on_progress: Optional[Callable[[int, int], None]] = None,
-        try_stream_copy: bool = True,
+        try_stream_copy: bool = False,  # Re-encode by default to avoid black frames at cut points
     ) -> RenderResult:
         """Render all cuts to temp mp4 segments.
 

@@ -849,6 +849,10 @@ class PyannoteBackend:
     Requires HuggingFace token for some models (see pyannote docs).
     """
 
+    # Embedded token for packaged app (fallback when user hasn't logged in)
+    # Replace with your own token from https://huggingface.co/settings/tokens
+    _EMBEDDED_TOKEN: Optional[str] = None  # Set your token here: "hf_xxxxxxxxxxxx"
+
     _pipeline: Optional["Pipeline"] = None  # type: ignore[name-defined]
     _load_error: Optional[str] = None
 
@@ -868,7 +872,7 @@ class PyannoteBackend:
 
             from pyannote.audio import Pipeline
             
-            # Get token from huggingface_hub (cached login or HF_TOKEN env)
+            # Get token: try cached login, env var, or embedded fallback
             token = None
             try:
                 from huggingface_hub import get_token
@@ -876,7 +880,19 @@ class PyannoteBackend:
                 if token:
                     logger.debug("Using HuggingFace token from cached login")
             except Exception as e:
-                logger.debug("Could not get HF token: %s", e)
+                logger.debug("Could not get HF token from login: %s", e)
+            
+            # Fallback to environment variable
+            if not token:
+                import os
+                token = os.environ.get("HF_TOKEN")
+                if token:
+                    logger.debug("Using HuggingFace token from HF_TOKEN env var")
+            
+            # Fallback to embedded token (for packaged exe)
+            if not token and cls._EMBEDDED_TOKEN:
+                token = cls._EMBEDDED_TOKEN
+                logger.debug("Using embedded HuggingFace token")
 
             # Use pretrained pipeline - models auto-download on first run
             # pyannote 3.x uses HuggingFace Hub token from environment or login

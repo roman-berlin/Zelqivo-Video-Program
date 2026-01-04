@@ -30,6 +30,7 @@ from .decision_engine import DecisionEngine, CutSegment
 from .pipeline_config import PipelineConfig
 from .qa_artifacts import QAArtifactExporter
 from .video_merger import SegmentRenderer, CutDefinition, concatenate_segments
+from .checkpoint import PipelineCheckpoint, save_checkpoint, delete_checkpoint
 
 logger = logging.getLogger(__name__)
 
@@ -153,6 +154,24 @@ class ProcessingPipeline:
         # QA artifacts exporter
         self._qa_exporter = QAArtifactExporter()
 
+        # Checkpoint for crash recovery
+        self._run_id = time.strftime("%Y%m%d_%H%M%S")
+        self._checkpoint = PipelineCheckpoint(
+            run_id=self._run_id,
+            current_stage="INIT",
+            input_files=list(input_files),
+        )
+
+    def _save_checkpoint(self, stage: str, rendered_segments: Optional[List[str]] = None) -> None:
+        """Save current pipeline state for crash recovery."""
+        self._checkpoint.current_stage = stage
+        if stage not in self._checkpoint.completed_stages:
+            self._checkpoint.completed_stages.append(stage)
+        self._checkpoint.camera_offsets = dict(self._camera_offsets)
+        if rendered_segments:
+            self._checkpoint.rendered_segments = rendered_segments
+        save_checkpoint(self._checkpoint)
+
     def _load_diarization_mode(self) -> DiarizationMode:
         """Load diarization mode from QSettings.
 
@@ -248,6 +267,44 @@ class ProcessingPipeline:
                 len(failed_paths)
             )
 
+    def _check_disk_space(self, output_dir: Optional[str] = None, num_segments: int = 1) -> None:
+        """Check if there's sufficient disk space for rendering.
+        
+        Args:
+            output_dir: Directory to check. Uses temp dir if None.
+            num_segments: Number of segments to render (for estimation).
+            
+        Raises:
+            RuntimeError: If insufficient disk space.
+        """
+        import shutil
+        
+        # Use temp directory if no output specified
+        check_dir = output_dir or tempfile.gettempdir()
+        
+        # Estimate required space:
+        # - ~10MB per segment (conservative for 1080p)
+        # - ~50% of total for final output
+        # - 500MB buffer
+        segment_mb = 10 * num_segments
+        output_mb = segment_mb // 2
+        buffer_mb = 500
+        required_mb = segment_mb + output_mb + buffer_mb
+        
+        try:
+            usage = shutil.disk_usage(check_dir)
+            free_mb = usage.free // (1024 * 1024)
+            
+            logger.debug("Disk space check: %d MB free, %d MB required", free_mb, required_mb)
+            
+            if free_mb < required_mb:
+                raise RuntimeError(
+                    f"Insufficient disk space: {free_mb} MB available, "
+                    f"~{required_mb} MB required. Free up disk space and try again."
+                )
+        except OSError as e:
+            logger.warning("Could not check disk space: %s (continuing anyway)", e)
+
     def _emit_progress(self, stage_percent: int = 0, message: str = "") -> None:
         """Emit progress update via signals and callback."""
         # Calculate overall progress
@@ -322,12 +379,14 @@ class ProcessingPipeline:
             if not self._stage_probe():
                 return PipelineResult(success=False, cancelled=self._cancelled,
                                      error="Probe stage failed")
+            self._save_checkpoint("PROBE")
 
             if self._check_cancelled():
                 return PipelineResult(success=False, cancelled=True)
 
             # Stage 2: Align cameras (auto-sync by audio)
             self._stage_align()
+            self._save_checkpoint("ALIGN")
 
             if self._check_cancelled():
                 return PipelineResult(success=False, cancelled=True)
@@ -336,6 +395,7 @@ class ProcessingPipeline:
             if not self._stage_diarize():
                 return PipelineResult(success=False, cancelled=self._cancelled,
                                      error="Diarization stage failed")
+            self._save_checkpoint("DIARIZE")
 
             if self._check_cancelled():
                 return PipelineResult(success=False, cancelled=True)
@@ -344,6 +404,7 @@ class ProcessingPipeline:
             if not self._stage_decision():
                 return PipelineResult(success=False, cancelled=self._cancelled,
                                      error="Decision stage failed")
+            self._save_checkpoint("DECISION")
 
             if self._check_cancelled():
                 return PipelineResult(success=False, cancelled=True)
@@ -363,6 +424,7 @@ class ProcessingPipeline:
             if segment_paths is None:
                 return PipelineResult(success=False, cancelled=self._cancelled,
                                      error="Render stage failed")
+            self._save_checkpoint("RENDER", rendered_segments=segment_paths)
 
             if self._check_cancelled():
                 return PipelineResult(success=False, cancelled=True)
@@ -384,6 +446,10 @@ class ProcessingPipeline:
             logger.info("Pipeline completed in %.1fs: %s", total_time, final_path)
 
             self.signals.finished.emit(final_path)
+
+            # Delete checkpoint on successful completion
+            delete_checkpoint(self._run_id)
+
             return PipelineResult(success=True, output_path=final_path)
 
         except Exception as e:
@@ -988,6 +1054,14 @@ class ProcessingPipeline:
             logger.warning("No cuts to render")
             self._emit_progress(100, "No cuts to render")
             return []
+
+        # Check disk space before starting render (Fix #3: disk space validation)
+        try:
+            self._check_disk_space(num_segments=len(self._cut_plan))
+        except RuntimeError as e:
+            logger.error("Disk space check failed: %s", e)
+            self.signals.error.emit(str(e))
+            return None
 
         # Load QA overlay setting
         settings = QSettings("MultiCamEditor", "MultiCamEditor")

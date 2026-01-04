@@ -44,8 +44,10 @@ from ..core.project import Project
 from ..logic.commands import AddClipsCommand, ReorderClipsCommand, TrimCommand
 from ..logic.processing_worker import ProcessingThread
 from ..logic.preflight import check_preflight_warnings, format_warnings_for_display
-from ..logic.debug_export import export_debug_package
+from ..logic.preflight import check_preflight_warnings, format_warnings_for_display
 from .progress_dialog import ProcessingProgressDialog
+from .loading_dialog import LoadingDialog
+
 
 
 VIDEO_CAP = 10
@@ -417,9 +419,9 @@ class MainWindow(QMainWindow):
 
     def _refresh_camera_mapping_ui(self) -> None:
         """Rebuild camera mapping combos based on current file list."""
-        # Clear old row widgets from the layout
-        while self.mapping_layout.count():
-            item = self.mapping_layout.takeAt(0)
+        # Clear old row widgets from the layout, but preserve lbl_no_cameras
+        while self.mapping_layout.count() > 1:  # Keep first item (lbl_no_cameras)
+            item = self.mapping_layout.takeAt(1)  # Remove from index 1 onwards
             widget = item.widget()
             if widget:
                 widget.setParent(None)
@@ -557,12 +559,7 @@ class MainWindow(QMainWindow):
         self.action_export.triggered.connect(self._show_export_dialog)
         file_menu.addAction(self.action_export)
 
-        # Export Debug Package action
-        self.action_export_debug = QAction("Export &Debug Package...", self)
-        self.action_export_debug.setObjectName("actionExportDebug")
-        self.action_export_debug.setToolTip("Export zip with logs, artifacts, and environment info for support")
-        self.action_export_debug.triggered.connect(self._export_debug_package)
-        file_menu.addAction(self.action_export_debug)
+
 
         file_menu.addSeparator()
 
@@ -586,14 +583,7 @@ class MainWindow(QMainWindow):
         self.action_toggle_theme.triggered.connect(self._toggle_theme)
         view_menu.addAction(self.action_toggle_theme)
 
-        view_menu.addSeparator()
 
-        # Open Last Run Folder action
-        self.action_open_run_folder = QAction("Open Last &Run Folder", self)
-        self.action_open_run_folder.setObjectName("actionOpenRunFolder")
-        self.action_open_run_folder.setToolTip("Open the folder containing QA artifacts from the last processing run")
-        self.action_open_run_folder.triggered.connect(self._open_last_run_folder)
-        view_menu.addAction(self.action_open_run_folder)
 
     def _toggle_theme(self) -> None:
         """Toggle between light and dark themes."""
@@ -709,7 +699,53 @@ class MainWindow(QMainWindow):
         if remaining <= 0:
             self._toast("Video limit reached (10/10). Remove some to add more.")
             return
-        added, skipped_dup, _ = self.file_list.add_files(videos, cap_remaining=remaining)
+        
+        # Show progress dialog for multiple files (3+)
+        if len(videos) >= 3:
+            self._add_files_with_progress(videos, remaining)
+        else:
+            # Quick add for 1-2 files
+            added, skipped_dup, _ = self.file_list.add_files(videos, cap_remaining=remaining)
+            self._handle_add_files_result(videos, added, skipped_dup)
+
+    def _add_files_with_progress(self, videos: List[str], remaining: int) -> None:
+        """Add files with a progress dialog for user feedback."""
+        from PyQt6.QtWidgets import QApplication
+        
+        # Check current theme for dialog styling
+        is_dark = self.settings.value("appearance/theme", "light", type=str) == "dark"
+        dialog = LoadingDialog(self, "Loading Videos", dark_mode=is_dark)
+        
+        dialog.show()
+        QApplication.processEvents()
+        
+        # Process files one by one with progress updates
+        added: List[str] = []
+        skipped_dup: List[str] = []
+        total = min(len(videos), remaining)
+        
+        for i, video_path in enumerate(videos[:remaining]):
+            if dialog.is_cancelled():
+                break
+            
+            # Update progress
+            dialog.set_progress(i + 1, total, video_path)
+            QApplication.processEvents()
+            
+            # Add file (this does the probe)
+            result = self.file_list.add_files([video_path], cap_remaining=1)
+            if result[0]:  # added
+                added.extend(result[0])
+            if result[1]:  # duplicates
+                skipped_dup.extend(result[1])
+        
+        dialog.complete()
+        dialog.close()
+        
+        self._handle_add_files_result(videos, added, skipped_dup)
+
+    def _handle_add_files_result(self, videos: List[str], added: List[str], skipped_dup: List[str]) -> None:
+        """Handle the result of adding files and show appropriate messages."""
         if skipped_dup:
             self._toast(f"Skipped {len(skipped_dup)} duplicate file(s).")
         if len(videos) > len(added) + len(skipped_dup):
@@ -1082,50 +1118,6 @@ class MainWindow(QMainWindow):
         except Exception:
             pass
 
-    def _export_debug_package(self) -> None:
-        """Export debug package zip for QA/support."""
-        last_dir = self.settings.value("last_export_dir", os.path.expanduser("~"))
-        path, _ = QFileDialog.getSaveFileName(
-            self, "Save Debug Package", os.path.join(last_dir, "multicam_debug.zip"),
-            "Zip Files (*.zip)"
-        )
-        if not path:
-            return
 
-        self.settings.setValue("last_export_dir", os.path.dirname(path))
 
-        success, message, warnings = export_debug_package(path)
-        if success:
-            warning_text = f" ({len(warnings)} warnings)" if warnings else ""
-            self._toast(f"Debug package exported{warning_text}: {os.path.basename(path)}", 5000)
-            logger.info("Debug package exported to %s, warnings: %s", path, warnings)
-        else:
-            self._toast(f"Export failed: {message}")
-            logger.error("Debug export failed: %s", message)
 
-    def _open_last_run_folder(self) -> None:
-        """Open the last QA run folder in the system file browser."""
-        from ..logic.qa_artifacts import get_last_run_folder
-
-        folder = get_last_run_folder()
-        if folder is None or not folder.exists():
-            self._toast("No QA run folder found. Process videos first.")
-            return
-
-        try:
-            import subprocess
-            import sys
-
-            folder_str = str(folder)
-            if sys.platform == "win32":
-                os.startfile(folder_str)
-            elif sys.platform == "darwin":
-                subprocess.run(["open", folder_str], check=True)
-            else:
-                subprocess.run(["xdg-open", folder_str], check=True)
-
-            self._toast(f"Opened: {folder.name}", 3000)
-            logger.info("Opened QA run folder: %s", folder.name)
-        except Exception as e:
-            logger.error("Failed to open run folder: %s", e, exc_info=True)
-            self._toast(f"Failed to open folder: {e}")

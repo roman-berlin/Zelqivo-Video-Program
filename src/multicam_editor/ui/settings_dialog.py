@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from PyQt6.QtCore import QSettings
+from PyQt6.QtCore import QSettings, QTimer, QThread, pyqtSignal, QObject
 from PyQt6.QtWidgets import (
     QCheckBox,
     QDialog,
@@ -14,11 +14,31 @@ from PyQt6.QtWidgets import (
     QComboBox,
     QVBoxLayout,
     QGroupBox,
+    QLineEdit,
+    QHBoxLayout,
 )
 
-from multicam_editor.core.project import AudioMixMode, AudioMixSettings
-from multicam_editor.logic.active_speaker import DiarizationMode
-from multicam_editor.utils.backends import check_backends
+from ..core.project import AudioMixMode, AudioMixSettings
+from ..logic.active_speaker import DiarizationMode
+from ..utils.backends import check_backends
+from ..logic.debug_export import export_debug_package
+from PyQt6.QtWidgets import QPushButton, QMessageBox, QFileDialog
+import os
+
+
+class _DiarizationStatusWorker(QObject):
+    """Background worker to check diarization backend status."""
+    finished = pyqtSignal(bool, str)  # (available, error)
+
+    def run(self) -> None:
+        """Run the status check in background thread."""
+        try:
+            from ..logic.active_speaker import PyannoteBackend
+            available, error = PyannoteBackend.check_install()
+            self.finished.emit(available, error or "")
+        except Exception as e:
+            self.finished.emit(False, str(e))
+
 
 
 class SettingsDialog(QDialog):
@@ -38,32 +58,51 @@ class SettingsDialog(QDialog):
         """Initialize the UI components."""
         layout = QVBoxLayout(self)
 
-        # Decision Engine Settings Group
-        engine_group = QGroupBox("Decision Engine")
-        engine_layout = QFormLayout()
+        # 1. Basic Settings (Always Visible)
+        
+        # Diarization Settings
+        diarization_group = QGroupBox("Diarization")
+        diarization_layout = QFormLayout()
 
-        self.spin_min_switch = QSpinBox()
-        self.spin_min_switch.setRange(100, 10000)
-        self.spin_min_switch.setSingleStep(100)
-        self.spin_min_switch.setSuffix(" ms")
-        engine_layout.addRow("Min Switch Interval:", self.spin_min_switch)
+        self.combo_diarization = QComboBox()
+        # Add items with display names and store enum values as user data
+        self.combo_diarization.addItem("Hybrid (Recommended)", DiarizationMode.HYBRID.value)
+        self.combo_diarization.addItem("Lips Only (Visual)", DiarizationMode.LIPS.value)
+        self.combo_diarization.addItem("Off (single camera)", DiarizationMode.OFF.value)
+        self.combo_diarization.setToolTip(
+            "Hybrid: Audio + Visual detection - fastest and most accurate (recommended)\n"
+            "Lips Only: Pure visual detection - slower but works without audio\n"
+            "Off: Single camera output, no switching"
+        )
+        diarization_layout.addRow("Backend:", self.combo_diarization)
 
-        self.spin_min_speech = QSpinBox()
-        self.spin_min_speech.setRange(100, 5000)
-        self.spin_min_speech.setSingleStep(50)
-        self.spin_min_speech.setSuffix(" ms")
-        engine_layout.addRow("Min Speech Duration:", self.spin_min_speech)
+        # HF Token Input
+        self.edit_token = QLineEdit()
+        self.edit_token.setEchoMode(QLineEdit.EchoMode.Password)
+        self.edit_token.setPlaceholderText("Paste HuggingFace Token (hf_...)")
+        self.edit_token.setToolTip("Token needed for Pyannote models (read access)")
+        
+        self.btn_save_token = QPushButton("Save Token")
+        self.btn_save_token.setToolTip("Login and save token to system")
+        self.btn_save_token.clicked.connect(self._on_save_token_clicked)
+        
+        token_layout = QHBoxLayout()
+        token_layout.addWidget(self.edit_token)
+        token_layout.addWidget(self.btn_save_token)
+        diarization_layout.addRow("HF Token:", token_layout)
 
-        self.spin_bg_short_remark = QSpinBox()
-        self.spin_bg_short_remark.setRange(50, 2000)
-        self.spin_bg_short_remark.setSingleStep(50)
-        self.spin_bg_short_remark.setSuffix(" ms")
-        engine_layout.addRow("Ignore Short Remarks Below:", self.spin_bg_short_remark)
+        # Status label showing if pyannote is available
+        self.label_diarization_status = QLabel("⏳ Checking...")
+        self.label_diarization_status.setStyleSheet("color: gray;")
+        diarization_layout.addRow("Status:", self.label_diarization_status)
+        
+        # Defer status check to avoid blocking dialog open
+        QTimer.singleShot(50, self._start_async_status_check)
 
-        engine_group.setLayout(engine_layout)
-        layout.addWidget(engine_group)
+        diarization_group.setLayout(diarization_layout)
+        layout.addWidget(diarization_group)
 
-        # Output Settings Group
+        # Output Settings
         output_group = QGroupBox("Output")
         output_layout = QFormLayout()
 
@@ -74,49 +113,17 @@ class SettingsDialog(QDialog):
         output_group.setLayout(output_layout)
         layout.addWidget(output_group)
 
-        # Diarization Settings Group
-        diarization_group = QGroupBox("Diarization")
-        diarization_layout = QFormLayout()
+        # 2. Advanced Settings Toggle
+        self.check_advanced = QCheckBox("Show Advanced Settings")
+        self.check_advanced.toggled.connect(self._toggle_advanced_settings)
+        layout.addWidget(self.check_advanced)
 
-        self.combo_diarization = QComboBox()
-        # Add items with display names and store enum values as user data
-        self.combo_diarization.addItem("Lips (Visual)", DiarizationMode.LIPS.value)
-        self.combo_diarization.addItem("Energy (CPU-only)", DiarizationMode.ENERGY.value)
-        self.combo_diarization.addItem("Real (pyannote.audio)", DiarizationMode.REAL.value)
-        self.combo_diarization.addItem("Stub (dev only)", DiarizationMode.STUB.value)
-        self.combo_diarization.addItem("Off (single camera)", DiarizationMode.OFF.value)
-        self.combo_diarization.setToolTip(
-            "Lips: Visual detection - picks camera with most lip movement (recommended)\n"
-            "Energy: CPU-only, picks loudest camera (requires isolated mics)\n"
-            "Real: AI-based speaker detection (requires HuggingFace setup)\n"
-            "Stub: Dev mode, alternating mock segments\n"
-            "Off: Single camera output, no switching"
-        )
-        diarization_layout.addRow("Backend:", self.combo_diarization)
-
-        # Status label showing if pyannote is available
-        self.label_diarization_status = QLabel()
-        self._update_diarization_status()
-        diarization_layout.addRow("Status:", self.label_diarization_status)
-
-        diarization_group.setLayout(diarization_layout)
-        layout.addWidget(diarization_group)
-
-        # QA Overlay Settings Group (Prompt 5)
-        qa_group = QGroupBox("QA Overlay")
-        qa_layout = QFormLayout()
-
-        self.check_qa_overlay = QCheckBox()
-        self.check_qa_overlay.setToolTip(
-            "Burn timecode, speaker ID, and camera index into exported video.\n"
-            "Useful for manual QA review. OFF by default."
-        )
-        qa_layout.addRow("Enable QA Overlay:", self.check_qa_overlay)
-
-        qa_group.setLayout(qa_layout)
-        layout.addWidget(qa_group)
-
-        # Audio Mix Settings Group
+        # 3. Advanced Settings Container
+        self.advanced_container = QGroupBox("Advanced Configuration")
+        self.advanced_container.setVisible(False)
+        advanced_layout = QVBoxLayout()
+        
+        # Audio Mix Settings
         audio_group = QGroupBox("Audio Mix (External Audio)")
         audio_layout = QFormLayout()
 
@@ -151,7 +158,65 @@ class SettingsDialog(QDialog):
         audio_layout.addRow("Ducking Amount:", self.spin_ducking_amount)
 
         audio_group.setLayout(audio_layout)
-        layout.addWidget(audio_group)
+        advanced_layout.addWidget(audio_group)
+
+        # Decision Engine Settings
+        engine_group = QGroupBox("Decision Engine Rules")
+        engine_layout = QFormLayout()
+
+        self.spin_min_switch = QSpinBox()
+        self.spin_min_switch.setRange(100, 10000)
+        self.spin_min_switch.setSingleStep(100)
+        self.spin_min_switch.setSuffix(" ms")
+        self.spin_min_switch.setToolTip("Minimum time between camera switches")
+        engine_layout.addRow("Min Switch Interval:", self.spin_min_switch)
+
+        self.spin_min_speech = QSpinBox()
+        self.spin_min_speech.setRange(100, 5000)
+        self.spin_min_speech.setSingleStep(50)
+        self.spin_min_speech.setSuffix(" ms")
+        self.spin_min_speech.setToolTip("Minimum speech segment duration to consider")
+        engine_layout.addRow("Min Speech Duration:", self.spin_min_speech)
+
+        self.spin_bg_short_remark = QSpinBox()
+        self.spin_bg_short_remark.setRange(50, 2000)
+        self.spin_bg_short_remark.setSingleStep(50)
+        self.spin_bg_short_remark.setSuffix(" ms")
+        self.spin_bg_short_remark.setToolTip("Ignore very short noises/remarks")
+        engine_layout.addRow("Ignore Short Remarks Below:", self.spin_bg_short_remark)
+
+        engine_group.setLayout(engine_layout)
+        advanced_layout.addWidget(engine_group)
+
+        # QA Overlay Settings
+        qa_group = QGroupBox("QA / Debugging")
+        qa_layout = QFormLayout()
+
+        self.check_qa_overlay = QCheckBox()
+        self.check_qa_overlay.setToolTip(
+            "Burn timecode, speaker ID, and camera index into exported video.\n"
+            "Useful for manual QA review. OFF by default."
+        )
+        qa_layout.addRow("Enable QA Overlay:", self.check_qa_overlay)
+
+        qa_group.setLayout(qa_layout)
+        advanced_layout.addWidget(qa_group)
+
+        # Maintenance / Support
+        maint_group = QGroupBox("Maintenance")
+        maint_layout = QVBoxLayout()
+        
+        self.btn_export_debug = QPushButton("Export Debug Package")
+        self.btn_export_debug.setToolTip("Create a zip file with logs and diagnostics for support")
+        self.btn_export_debug.clicked.connect(self._on_export_debug_clicked)
+        maint_layout.addWidget(self.btn_export_debug)
+
+        maint_group.setLayout(maint_layout)
+        advanced_layout.addWidget(maint_group)
+
+
+        self.advanced_container.setLayout(advanced_layout)
+        layout.addWidget(self.advanced_container)
 
         # Dialog buttons
         buttons = QDialogButtonBox(
@@ -175,22 +240,41 @@ class SettingsDialog(QDialog):
         is_mix = self.combo_audio_mode.currentText() == "Mix"
         self.spin_ducking_amount.setEnabled(is_mix and checked)
 
-    def _update_diarization_status(self) -> None:
-        """Update the diarization status label with actionable guidance."""
-        backends = check_backends()
-        pyannote_status = backends.get("pyannote")
+    def _start_async_status_check(self) -> None:
+        """Start background thread to check diarization status."""
+        self._status_thread = QThread()
+        self._status_worker = _DiarizationStatusWorker()
+        self._status_worker.moveToThread(self._status_thread)
+        self._status_thread.started.connect(self._status_worker.run)
+        self._status_worker.finished.connect(self._on_status_check_complete)
+        self._status_worker.finished.connect(self._status_thread.quit)
+        self._status_worker.finished.connect(self._status_worker.deleteLater)
+        self._status_thread.finished.connect(self._status_thread.deleteLater)
+        self._status_thread.start()
 
-        if pyannote_status and pyannote_status.available:
-            self.label_diarization_status.setText("OK pyannote.audio ready")
+    def _on_status_check_complete(self, available: bool, error: str) -> None:
+        """Handle background status check completion."""
+        if available:
+            self.label_diarization_status.setText("✓ pyannote.audio ready")
             self.label_diarization_status.setStyleSheet("color: green;")
             self.label_diarization_status.setToolTip("")
         else:
-            error = pyannote_status.error if pyannote_status else "Not loaded"
-            # Parse error and provide actionable message
             short_msg, tooltip = self._parse_diarization_error(error or "Unknown error")
             self.label_diarization_status.setText(f"[!] {short_msg}")
             self.label_diarization_status.setStyleSheet("color: orange;")
             self.label_diarization_status.setToolTip(tooltip)
+
+    def _update_diarization_status(self) -> None:
+        """Update the diarization status label (sync version for token save)."""
+        from ..logic.active_speaker import PyannoteBackend
+        available, error = PyannoteBackend.check_install()
+        self._on_status_check_complete(available, error or "")
+
+    def _toggle_advanced_settings(self, checked: bool) -> None:
+        """Toggle visibility of advanced settings."""
+        self.advanced_container.setVisible(checked)
+        # Resize dialog to fit content
+        self.adjustSize()
 
     @staticmethod
     def _parse_diarization_error(error: str) -> tuple[str, str]:
@@ -222,8 +306,32 @@ class SettingsDialog(QDialog):
                 "Model unavailable → check auth",
                 "Run 'hf auth login' and accept model at hf.co/pyannote/speaker-diarization-3.1"
             )
-        # Fallback: truncate error
         return (error[:40] + "..." if len(error) > 40 else error, error)
+
+    def _on_save_token_clicked(self) -> None:
+        """Save the HF token and attempt login."""
+        token = self.edit_token.text().strip()
+        if not token:
+            QMessageBox.warning(self, "Input Error", "Please enter a token.")
+            return
+
+        try:
+            from huggingface_hub import login
+            # write_permission=False is enough for reading models
+            login(token=token, add_to_git_credential=False)
+            
+            QMessageBox.information(
+                self, 
+                "Success", 
+                "Token saved successfully!\n\nRe-checking status..."
+            )
+            self.edit_token.clear()
+            self._update_diarization_status()
+            
+        except ImportError:
+            QMessageBox.critical(self, "Error", "huggingface_hub not installed.")
+        except Exception as e:
+            QMessageBox.critical(self, "Login Failed", f"Failed to login: {e}")
 
     def _load_settings(self) -> None:
         """Load current settings from QSettings."""
@@ -241,7 +349,7 @@ class SettingsDialog(QDialog):
         )
         # Diarization: find index by stored value
         diarization_value = self.settings.value(
-            "diarization/mode", DiarizationMode.REAL.value, type=str
+            "diarization/mode", DiarizationMode.HYBRID.value, type=str
         )
         for i in range(self.combo_diarization.count()):
             if self.combo_diarization.itemData(i) == diarization_value:
@@ -299,6 +407,45 @@ class SettingsDialog(QDialog):
         self.settings.setValue("qa_overlay/enabled", self.check_qa_overlay.isChecked())
 
         self.accept()
+
+    def _on_export_debug_clicked(self) -> None:
+        """Trigger debug package export."""
+        try:
+            last_dir = self.settings.value("last_export_dir", os.path.expanduser("~"))
+            path, _ = QFileDialog.getSaveFileName(
+                self, "Save Debug Package", os.path.join(last_dir, "multicam_debug.zip"),
+                "Zip Files (*.zip)"
+            )
+            if not path:
+                return
+
+            self.settings.setValue("last_export_dir", os.path.dirname(path))
+
+            # export_debug_package returns (success, message, warnings)
+            success, message, warnings = export_debug_package(path)
+            
+            if success:
+                warning_text = f" ({len(warnings)} warnings)" if warnings else ""
+                QMessageBox.information(
+                    self,
+                    "Export Complete",
+                    f"Debug package exported to:\n{path}\n{warning_text}"
+                )
+            else:
+                QMessageBox.critical(
+                    self,
+                    "Export Failed",
+                    f"Failed to export: {message}"
+                )
+
+        except Exception as e:
+            QMessageBox.critical(
+                self,
+                "Export Failed",
+                f"Unexpected error: {e}"
+            )
+
+
 
     def get_audio_mix_settings(self) -> AudioMixSettings:
         """Return current audio mix settings from the dialog."""

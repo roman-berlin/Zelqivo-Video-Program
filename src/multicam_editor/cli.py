@@ -21,10 +21,11 @@ import sys
 from pathlib import Path
 from typing import List, Optional
 
-from multicam_editor.logging_setup import configure_logging
-from multicam_editor.utils.signals import ProcessingSignals
-from multicam_editor.logic.processing_pipeline import ProcessingPipeline, PipelineProgress
-from multicam_editor.logic.qa_artifacts import get_last_run_folder
+from .logging_setup import configure_logging
+from .utils.signals import ProcessingSignals
+from .logic.processing_pipeline import ProcessingPipeline, PipelineProgress
+from .logic.qa_artifacts import get_last_run_folder
+
 
 logger = logging.getLogger(__name__)
 
@@ -123,7 +124,8 @@ def main(argv: Optional[List[str]] = None) -> int:
 
     # Handle --health flag
     if args.health:
-        from multicam_editor.utils.backends import print_health_check
+        from .utils.backends import print_health_check
+
         ready = print_health_check()
         return 0 if ready else 1
 

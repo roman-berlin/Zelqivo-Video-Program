@@ -10,9 +10,14 @@ import wave
 from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
-from typing import Dict, List, Optional, Protocol, runtime_checkable
+from typing import Dict, List, Optional, Protocol, runtime_checkable, Tuple
 
 logger = logging.getLogger(__name__)
+
+import warnings
+# Suppress torchcodec/torchaudio warnings on Windows
+warnings.filterwarnings("ignore", message=".*torchcodec.*")
+warnings.filterwarnings("ignore", message=".*torchaudio._backend.*")
 
 
 class DiarizationMode(Enum):
@@ -21,7 +26,8 @@ class DiarizationMode(Enum):
     STUB = "stub"        # Dev-only stub (EnergyVADBackend)
     ENERGY = "energy"    # CPU-only RMS energy-based switching (default for V1)
     REAL = "real"        # Real pyannote.audio backend
-    LIPS = "lips"        # Visual lip movement detection (most accurate)
+    LIPS = "lips"        # Visual lip movement detection
+    HYBRID = "hybrid"    # LIPS + Audio VAD (recommended)
 
 
 
@@ -843,6 +849,10 @@ class PyannoteBackend:
     Requires HuggingFace token for some models (see pyannote docs).
     """
 
+    # Embedded token for packaged app (fallback when user hasn't logged in)
+    # Replace with your own token from https://huggingface.co/settings/tokens
+    _EMBEDDED_TOKEN: Optional[str] = None  # Set your token here: "hf_xxxxxxxxxxxx"
+
     _pipeline: Optional["Pipeline"] = None  # type: ignore[name-defined]
     _load_error: Optional[str] = None
 
@@ -862,7 +872,7 @@ class PyannoteBackend:
 
             from pyannote.audio import Pipeline
             
-            # Get token from huggingface_hub (cached login or HF_TOKEN env)
+            # Get token: try cached login, env var, or embedded fallback
             token = None
             try:
                 from huggingface_hub import get_token
@@ -870,7 +880,19 @@ class PyannoteBackend:
                 if token:
                     logger.debug("Using HuggingFace token from cached login")
             except Exception as e:
-                logger.debug("Could not get HF token: %s", e)
+                logger.debug("Could not get HF token from login: %s", e)
+            
+            # Fallback to environment variable
+            if not token:
+                import os
+                token = os.environ.get("HF_TOKEN")
+                if token:
+                    logger.debug("Using HuggingFace token from HF_TOKEN env var")
+            
+            # Fallback to embedded token (for packaged exe)
+            if not token and cls._EMBEDDED_TOKEN:
+                token = cls._EMBEDDED_TOKEN
+                logger.debug("Using embedded HuggingFace token")
 
             # Use pretrained pipeline - models auto-download on first run
             # pyannote 3.x uses HuggingFace Hub token from environment or login
@@ -910,16 +932,52 @@ class PyannoteBackend:
             logger.error(cls._load_error, exc_info=True)
 
     @classmethod
+    def check_install(cls) -> Tuple[bool, Optional[str]]:
+        """
+        Fast check if pyannote is installed and configured.
+        
+        Returns:
+            (available, error_message)
+            Does NOT load the model (which is slow).
+        """
+        try:
+            import pyannote.audio
+            import torch
+        except ImportError as e:
+            return False, f"Import error: {e}"
+            
+        # Check for token
+        try:
+            from huggingface_hub import get_token
+            token = get_token()
+            if not token:
+                import os
+                if not os.environ.get("HF_TOKEN"):
+                    return False, "Missing HuggingFace token (run huggingface-cli login)"
+        except ImportError:
+             # If huggingface_hub missing, we can't authenticate easily
+             pass
+        except Exception:
+            pass
+            
+        return True, None
+
+    @classmethod
     def is_available(cls) -> bool:
         """Check if pyannote backend is usable."""
-        cls._ensure_loaded()
-        return cls._pipeline is not None
+        if cls._pipeline is not None:
+            return True
+        # Use fast check to avoid blocking UI
+        available, _ = cls.check_install()
+        return available
 
     @classmethod
     def get_error(cls) -> Optional[str]:
         """Get error message if backend failed to load."""
-        cls._ensure_loaded()
-        return cls._load_error
+        if cls._load_error:
+            return cls._load_error
+        available, error = cls.check_install()
+        return error
 
     def diarize(self, audio_path: str, num_channels: int = 2) -> List[SpeakerSegment]:
         """
@@ -1419,6 +1477,227 @@ class LipMovementBackend:
                 result.append(seg)
         
         return result
+
+
+class HybridBackend:
+    """
+    Hybrid speaker detection combining Audio VAD with visual lip movement.
+    
+    Uses Pyannote/audio analysis to detect WHEN speech occurs, then uses
+    LipMovementBackend to determine WHO is speaking during those periods.
+    
+    This is faster than pure LIPS mode (only analyzes speech regions)
+    and more accurate than audio-only (uses visual confirmation).
+    """
+    
+    def __init__(
+        self,
+        sample_interval_ms: int = 200,  # Faster sampling than pure LIPS
+        min_segment_ms: int = 500,
+        speech_threshold: float = 0.02,  # RMS threshold for speech detection
+    ):
+        self.sample_interval_ms = sample_interval_ms
+        self.min_segment_ms = min_segment_ms
+        self.speech_threshold = speech_threshold
+        self._lip_backend: Optional[LipMovementBackend] = None
+    
+    def _ensure_backends(self):
+        """Initialize sub-backends lazily."""
+        if self._lip_backend is None:
+            self._lip_backend = LipMovementBackend(
+                sample_interval_ms=self.sample_interval_ms,
+                min_segment_ms=self.min_segment_ms,
+            )
+    
+    def _detect_speech_regions(
+        self,
+        audio_path: str,
+        duration_ms: int,
+    ) -> List[tuple[int, int]]:
+        """
+        Detect regions of speech in audio using RMS energy.
+        
+        Returns list of (start_ms, end_ms) tuples where speech occurs.
+        """
+        import wave
+        
+        try:
+            with wave.open(audio_path, 'rb') as wf:
+                sample_rate = wf.getframerate()
+                n_frames = wf.getnframes()
+                n_channels = wf.getnchannels()
+                sample_width = wf.getsampwidth()
+                
+                # Read all audio data
+                raw_data = wf.readframes(n_frames)
+        except Exception as e:
+            logger.warning("Could not read audio for VAD: %s, using full duration", e)
+            return [(0, duration_ms)]
+        
+        # Convert to samples
+        import struct
+        if sample_width == 2:
+            fmt = f"<{n_frames * n_channels}h"
+            samples = list(struct.unpack(fmt, raw_data))
+        else:
+            logger.warning("Unsupported sample width %d, using full duration", sample_width)
+            return [(0, duration_ms)]
+        
+        # Normalize
+        samples = [s / 32768.0 for s in samples]
+        
+        # If stereo, use first channel only
+        if n_channels > 1:
+            samples = samples[::n_channels]
+        
+        # Analyze in windows
+        window_samples = int(sample_rate * self.sample_interval_ms / 1000)
+        speech_regions: List[tuple[int, int]] = []
+        in_speech = False
+        speech_start = 0
+        
+        for i in range(0, len(samples), window_samples):
+            window = samples[i:i + window_samples]
+            if not window:
+                break
+            
+            # Calculate RMS
+            rms = (sum(s * s for s in window) / len(window)) ** 0.5
+            time_ms = int(i * 1000 / sample_rate)
+            
+            if rms >= self.speech_threshold:
+                if not in_speech:
+                    # Start of speech
+                    speech_start = time_ms
+                    in_speech = True
+            else:
+                if in_speech:
+                    # End of speech
+                    speech_regions.append((speech_start, time_ms))
+                    in_speech = False
+        
+        # Close final region
+        if in_speech:
+            speech_regions.append((speech_start, duration_ms))
+        
+        # Merge close regions (within 500ms)
+        merged: List[tuple[int, int]] = []
+        for start, end in speech_regions:
+            if merged and start - merged[-1][1] < 500:
+                # Extend previous region
+                merged[-1] = (merged[-1][0], end)
+            else:
+                merged.append((start, end))
+        
+        logger.info("HYBRID: Found %d speech regions covering %.1f%% of audio",
+                   len(merged),
+                   100 * sum(e - s for s, e in merged) / duration_ms if duration_ms > 0 else 0)
+        
+        return merged if merged else [(0, duration_ms)]
+    
+    def detect_speakers(
+        self,
+        video_paths: List[str],
+        audio_path: str,
+        duration_ms: int,
+        cancel_callback: Optional[callable] = None,
+    ) -> List[SpeakerSegment]:
+        """
+        Detect speakers using hybrid audio+visual approach.
+        
+        Args:
+            video_paths: List of camera video file paths
+            audio_path: Path to audio file for VAD (from any camera)
+            duration_ms: Total duration in milliseconds
+            cancel_callback: Optional function returning True if cancelled
+            
+        Returns:
+            List of SpeakerSegment with speaker_id = camera_id
+        """
+        self._ensure_backends()
+        
+        num_cameras = len(video_paths)
+        if num_cameras == 0:
+            logger.warning("No video paths provided")
+            return []
+        
+        logger.info("HYBRID mode: %d cameras, %dms duration", num_cameras, duration_ms)
+        
+        # Step 1: Detect speech regions using audio VAD
+        speech_regions = self._detect_speech_regions(audio_path, duration_ms)
+        
+        # Step 2: For each speech region, use LIPS to determine speaker
+        all_segments: List[SpeakerSegment] = []
+        
+        for region_start, region_end in speech_regions:
+            # Check for cancellation
+            if cancel_callback and cancel_callback():
+                logger.info("HYBRID: Cancelled during detection")
+                return []
+            
+            # Get LIPS decision for this region
+            region_duration = region_end - region_start
+            
+            if region_duration < self.min_segment_ms:
+                # Too short, skip
+                continue
+            
+            # Sample middle of region for LIPS analysis
+            # (analyze fewer frames for speed)
+            mid_point = (region_start + region_end) // 2
+            
+            # Get frames from each camera at this time
+            import cv2
+            motions = []
+            prev_frames = [None] * num_cameras
+            
+            # Analyze a few frames around the midpoint
+            for sample_time in [mid_point - 100, mid_point, mid_point + 100]:
+                if sample_time < region_start or sample_time > region_end:
+                    continue
+                    
+                for cam_idx, video_path in enumerate(video_paths):
+                    frame = self._lip_backend._get_frame_at_ms(video_path, sample_time)
+                    motion = self._lip_backend._analyze_mouth_region(frame, prev_frames[cam_idx])
+                    
+                    if len(motions) <= cam_idx:
+                        motions.append(motion)
+                    else:
+                        motions[cam_idx] = max(motions[cam_idx], motion)
+                    
+                    prev_frames[cam_idx] = frame
+            
+            # Pick camera with most motion
+            if motions:
+                best_cam = motions.index(max(motions))
+            else:
+                best_cam = 0
+            
+            all_segments.append(SpeakerSegment(
+                start_ms=region_start,
+                end_ms=region_end,
+                speaker_id=best_cam,
+            ))
+        
+        # If no segments, return default
+        if not all_segments:
+            return [SpeakerSegment(0, duration_ms, 0)]
+        
+        # Merge adjacent segments with same camera
+        merged: List[SpeakerSegment] = [all_segments[0]]
+        for seg in all_segments[1:]:
+            if seg.speaker_id == merged[-1].speaker_id:
+                # Extend previous
+                merged[-1] = SpeakerSegment(
+                    merged[-1].start_ms,
+                    seg.end_ms,
+                    seg.speaker_id,
+                )
+            else:
+                merged.append(seg)
+        
+        logger.info("HYBRID complete: %d segments", len(merged))
+        return merged
 
 
 # Legacy API compatibility

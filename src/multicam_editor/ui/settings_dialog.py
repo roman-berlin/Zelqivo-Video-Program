@@ -14,6 +14,8 @@ from PyQt6.QtWidgets import (
     QComboBox,
     QVBoxLayout,
     QGroupBox,
+    QLineEdit,
+    QHBoxLayout,
 )
 
 from ..core.project import AudioMixMode, AudioMixSettings
@@ -61,6 +63,21 @@ class SettingsDialog(QDialog):
             "Off: Single camera output, no switching"
         )
         diarization_layout.addRow("Backend:", self.combo_diarization)
+
+        # HF Token Input
+        self.edit_token = QLineEdit()
+        self.edit_token.setEchoMode(QLineEdit.EchoMode.Password)
+        self.edit_token.setPlaceholderText("Paste HuggingFace Token (hf_...)")
+        self.edit_token.setToolTip("Token needed for Pyannote models (read access)")
+        
+        self.btn_save_token = QPushButton("Save Token")
+        self.btn_save_token.setToolTip("Login and save token to system")
+        self.btn_save_token.clicked.connect(self._on_save_token_clicked)
+        
+        token_layout = QHBoxLayout()
+        token_layout.addWidget(self.edit_token)
+        token_layout.addWidget(self.btn_save_token)
+        diarization_layout.addRow("HF Token:", token_layout)
 
         # Status label showing if pyannote is available
         self.label_diarization_status = QLabel()
@@ -262,8 +279,32 @@ class SettingsDialog(QDialog):
                 "Model unavailable → check auth",
                 "Run 'hf auth login' and accept model at hf.co/pyannote/speaker-diarization-3.1"
             )
-        # Fallback: truncate error
         return (error[:40] + "..." if len(error) > 40 else error, error)
+
+    def _on_save_token_clicked(self) -> None:
+        """Save the HF token and attempt login."""
+        token = self.edit_token.text().strip()
+        if not token:
+            QMessageBox.warning(self, "Input Error", "Please enter a token.")
+            return
+
+        try:
+            from huggingface_hub import login
+            # write_permission=False is enough for reading models
+            login(token=token, add_to_git_credential=False)
+            
+            QMessageBox.information(
+                self, 
+                "Success", 
+                "Token saved successfully!\n\nRe-checking status..."
+            )
+            self.edit_token.clear()
+            self._update_diarization_status()
+            
+        except ImportError:
+            QMessageBox.critical(self, "Error", "huggingface_hub not installed.")
+        except Exception as e:
+            QMessageBox.critical(self, "Login Failed", f"Failed to login: {e}")
 
     def _load_settings(self) -> None:
         """Load current settings from QSettings."""

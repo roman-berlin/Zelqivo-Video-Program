@@ -16,9 +16,15 @@ from PyQt6.QtWidgets import (
     QGroupBox,
 )
 
-from multicam_editor.core.project import AudioMixMode, AudioMixSettings
-from multicam_editor.logic.active_speaker import DiarizationMode
-from multicam_editor.utils.backends import check_backends
+from ..core.project import AudioMixMode, AudioMixSettings
+from ..logic.active_speaker import DiarizationMode
+from ..utils.backends import check_backends
+from ..logic.debug_export import export_debug_package
+from PyQt6.QtWidgets import QPushButton, QMessageBox, QFileDialog
+import os
+
+
+
 
 
 class SettingsDialog(QDialog):
@@ -164,6 +170,19 @@ class SettingsDialog(QDialog):
         qa_group.setLayout(qa_layout)
         advanced_layout.addWidget(qa_group)
 
+        # Maintenance / Support
+        maint_group = QGroupBox("Maintenance")
+        maint_layout = QVBoxLayout()
+        
+        self.btn_export_debug = QPushButton("Export Debug Package")
+        self.btn_export_debug.setToolTip("Create a zip file with logs and diagnostics for support")
+        self.btn_export_debug.clicked.connect(self._on_export_debug_clicked)
+        maint_layout.addWidget(self.btn_export_debug)
+
+        maint_group.setLayout(maint_layout)
+        advanced_layout.addWidget(maint_group)
+
+
         self.advanced_container.setLayout(advanced_layout)
         layout.addWidget(self.advanced_container)
 
@@ -192,7 +211,8 @@ class SettingsDialog(QDialog):
     def _update_diarization_status(self) -> None:
         """Update the diarization status label with actionable guidance."""
         # Use fast check to avoid freezing UI
-        from multicam_editor.logic.active_speaker import PyannoteBackend
+        from ..logic.active_speaker import PyannoteBackend
+
         available, error = PyannoteBackend.check_install()
 
         if available:
@@ -319,6 +339,45 @@ class SettingsDialog(QDialog):
         self.settings.setValue("qa_overlay/enabled", self.check_qa_overlay.isChecked())
 
         self.accept()
+
+    def _on_export_debug_clicked(self) -> None:
+        """Trigger debug package export."""
+        try:
+            last_dir = self.settings.value("last_export_dir", os.path.expanduser("~"))
+            path, _ = QFileDialog.getSaveFileName(
+                self, "Save Debug Package", os.path.join(last_dir, "multicam_debug.zip"),
+                "Zip Files (*.zip)"
+            )
+            if not path:
+                return
+
+            self.settings.setValue("last_export_dir", os.path.dirname(path))
+
+            # export_debug_package returns (success, message, warnings)
+            success, message, warnings = export_debug_package(path)
+            
+            if success:
+                warning_text = f" ({len(warnings)} warnings)" if warnings else ""
+                QMessageBox.information(
+                    self,
+                    "Export Complete",
+                    f"Debug package exported to:\n{path}\n{warning_text}"
+                )
+            else:
+                QMessageBox.critical(
+                    self,
+                    "Export Failed",
+                    f"Failed to export: {message}"
+                )
+
+        except Exception as e:
+            QMessageBox.critical(
+                self,
+                "Export Failed",
+                f"Unexpected error: {e}"
+            )
+
+
 
     def get_audio_mix_settings(self) -> AudioMixSettings:
         """Return current audio mix settings from the dialog."""

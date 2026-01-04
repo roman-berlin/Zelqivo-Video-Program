@@ -12,7 +12,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import List, Optional, Callable
 
-from multicam_editor.utils.ffmpeg import (
+from ..utils.ffmpeg import (
     FFmpegProcess,
     FFmpegResult,
     build_concat_args,
@@ -24,6 +24,7 @@ from multicam_editor.utils.ffmpeg import (
     has_effects,
     is_ffmpeg_available,
 )
+
 
 logger = logging.getLogger(__name__)
 

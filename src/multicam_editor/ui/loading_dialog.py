@@ -16,13 +16,13 @@ from PyQt6.QtWidgets import (
 class LoadingDialog(QDialog):
     """Modern loading dialog with progress bar for video loading.
     
-    Features a themed design matching the app's dark/light theme,
-    progress percentage, current file label, and cancel button.
+    Auto-detects light/dark theme from parent widget and applies
+    appropriate styling.
     """
     
     cancelled = pyqtSignal()
 
-    def __init__(self, parent: QWidget | None = None, title: str = "Loading Videos"):
+    def __init__(self, parent: QWidget | None = None, title: str = "Loading Videos", dark_mode: bool = False):
         super().__init__(parent)
         self.setWindowTitle(title)
         self.setModal(True)
@@ -34,33 +34,60 @@ class LoadingDialog(QDialog):
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, False)
         
         self._cancelled = False
+        self._dark_mode = dark_mode
         self._init_ui()
 
     def _init_ui(self) -> None:
-        """Initialize the UI with modern styling."""
+        """Initialize the UI with theme-aware styling."""
         layout = QVBoxLayout(self)
         layout.setContentsMargins(24, 24, 24, 24)
         layout.setSpacing(16)
 
+        # Colors based on theme
+        if self._dark_mode:
+            title_color = "#64b5f6"
+            text_color = "#9e9e9e"
+            count_color = "#757575"
+            bg_color = "#2d2d2d"
+            border_color = "#555555"
+            progress_bg = "#3c3c3c"
+            progress_text = "#e0e0e0"
+            btn_bg = "#3c3c3c"
+            btn_border = "#555555"
+            btn_text = "#e0e0e0"
+            btn_hover = "#4a4a4a"
+        else:
+            title_color = "#1976d2"
+            text_color = "#757575"
+            count_color = "#9e9e9e"
+            bg_color = "#ffffff"
+            border_color = "#e0e0e0"
+            progress_bg = "#e0e0e0"
+            progress_text = "#212121"
+            btn_bg = "#f5f5f5"
+            btn_border = "#bdbdbd"
+            btn_text = "#424242"
+            btn_hover = "#e0e0e0"
+
         # Title label
         self.label_title = QLabel("Loading Videos")
-        self.label_title.setStyleSheet("""
-            QLabel {
+        self.label_title.setStyleSheet(f"""
+            QLabel {{
                 font-size: 16px;
                 font-weight: bold;
-                color: #1976d2;
-            }
+                color: {title_color};
+            }}
         """)
         self.label_title.setAlignment(Qt.AlignmentFlag.AlignCenter)
         layout.addWidget(self.label_title)
 
         # Current file label
         self.label_current = QLabel("Preparing...")
-        self.label_current.setStyleSheet("""
-            QLabel {
+        self.label_current.setStyleSheet(f"""
+            QLabel {{
                 font-size: 12px;
-                color: #757575;
-            }
+                color: {text_color};
+            }}
         """)
         self.label_current.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.label_current.setWordWrap(True)
@@ -73,32 +100,33 @@ class LoadingDialog(QDialog):
         self.progress_bar.setTextVisible(True)
         self.progress_bar.setFormat("%p%")
         self.progress_bar.setMinimumHeight(24)
-        self.progress_bar.setStyleSheet("""
-            QProgressBar {
+        self.progress_bar.setStyleSheet(f"""
+            QProgressBar {{
                 border: none;
                 border-radius: 12px;
-                background-color: #e0e0e0;
+                background-color: {progress_bg};
                 text-align: center;
                 font-weight: bold;
-            }
-            QProgressBar::chunk {
+                color: {progress_text};
+            }}
+            QProgressBar::chunk {{
                 border-radius: 12px;
                 background: qlineargradient(
                     x1: 0, y1: 0, x2: 1, y2: 0,
                     stop: 0 #1976d2,
                     stop: 1 #42a5f5
                 );
-            }
+            }}
         """)
         layout.addWidget(self.progress_bar)
 
         # Count label (e.g., "3 of 10 files")
         self.label_count = QLabel("")
-        self.label_count.setStyleSheet("""
-            QLabel {
+        self.label_count.setStyleSheet(f"""
+            QLabel {{
                 font-size: 11px;
-                color: #9e9e9e;
-            }
+                color: {count_color};
+            }}
         """)
         self.label_count.setAlignment(Qt.AlignmentFlag.AlignCenter)
         layout.addWidget(self.label_count)
@@ -106,32 +134,32 @@ class LoadingDialog(QDialog):
         # Cancel button
         self.btn_cancel = QPushButton("Cancel")
         self.btn_cancel.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.btn_cancel.setStyleSheet("""
-            QPushButton {
-                background-color: #f5f5f5;
-                border: 1px solid #bdbdbd;
+        self.btn_cancel.setStyleSheet(f"""
+            QPushButton {{
+                background-color: {btn_bg};
+                border: 1px solid {btn_border};
                 border-radius: 6px;
                 padding: 8px 24px;
                 font-size: 12px;
-                color: #424242;
-            }
-            QPushButton:hover {
-                background-color: #e0e0e0;
-            }
-            QPushButton:pressed {
-                background-color: #bdbdbd;
-            }
+                color: {btn_text};
+            }}
+            QPushButton:hover {{
+                background-color: {btn_hover};
+            }}
+            QPushButton:pressed {{
+                background-color: {btn_border};
+            }}
         """)
         self.btn_cancel.clicked.connect(self._on_cancel)
         layout.addWidget(self.btn_cancel, alignment=Qt.AlignmentFlag.AlignCenter)
 
         # Dialog styling
-        self.setStyleSheet("""
-            QDialog {
-                background-color: #ffffff;
-                border: 1px solid #e0e0e0;
+        self.setStyleSheet(f"""
+            QDialog {{
+                background-color: {bg_color};
+                border: 1px solid {border_color};
                 border-radius: 12px;
-            }
+            }}
         """)
 
     def set_progress(self, current: int, total: int, filename: str = "") -> None:
@@ -172,78 +200,3 @@ class LoadingDialog(QDialog):
         self.progress_bar.setValue(100)
         self.label_current.setText("Complete!")
         QTimer.singleShot(300, self.accept)
-
-
-class LoadingDialogDark(LoadingDialog):
-    """Dark-themed variant of the loading dialog."""
-
-    def _init_ui(self) -> None:
-        """Initialize with dark theme styling."""
-        super()._init_ui()
-        
-        # Override styles for dark theme
-        self.label_title.setStyleSheet("""
-            QLabel {
-                font-size: 16px;
-                font-weight: bold;
-                color: #64b5f6;
-            }
-        """)
-        
-        self.label_current.setStyleSheet("""
-            QLabel {
-                font-size: 12px;
-                color: #9e9e9e;
-            }
-        """)
-        
-        self.progress_bar.setStyleSheet("""
-            QProgressBar {
-                border: none;
-                border-radius: 12px;
-                background-color: #3c3c3c;
-                text-align: center;
-                font-weight: bold;
-                color: #e0e0e0;
-            }
-            QProgressBar::chunk {
-                border-radius: 12px;
-                background: qlineargradient(
-                    x1: 0, y1: 0, x2: 1, y2: 0,
-                    stop: 0 #1976d2,
-                    stop: 1 #42a5f5
-                );
-            }
-        """)
-        
-        self.label_count.setStyleSheet("""
-            QLabel {
-                font-size: 11px;
-                color: #757575;
-            }
-        """)
-        
-        self.btn_cancel.setStyleSheet("""
-            QPushButton {
-                background-color: #3c3c3c;
-                border: 1px solid #555555;
-                border-radius: 6px;
-                padding: 8px 24px;
-                font-size: 12px;
-                color: #e0e0e0;
-            }
-            QPushButton:hover {
-                background-color: #4a4a4a;
-            }
-            QPushButton:pressed {
-                background-color: #555555;
-            }
-        """)
-        
-        self.setStyleSheet("""
-            QDialog {
-                background-color: #2d2d2d;
-                border: 1px solid #555555;
-                border-radius: 12px;
-            }
-        """)

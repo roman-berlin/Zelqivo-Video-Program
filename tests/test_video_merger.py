@@ -174,7 +174,8 @@ class TestSegmentRenderer:
         renderer = SegmentRenderer(str(tmp_path))
         cuts = [CutDefinition(str(source), 0, 1000, 0)]
 
-        result = renderer.render_segments(cuts)
+        # Explicitly enable stream copy to test fallback behavior
+        result = renderer.render_segments(cuts, try_stream_copy=True)
 
         assert result.success
         assert call_count[0] == 2  # Stream copy + re-encode

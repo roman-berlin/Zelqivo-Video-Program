@@ -419,9 +419,9 @@ class MainWindow(QMainWindow):
 
     def _refresh_camera_mapping_ui(self) -> None:
         """Rebuild camera mapping combos based on current file list."""
-        # Clear old row widgets from the layout
-        while self.mapping_layout.count():
-            item = self.mapping_layout.takeAt(0)
+        # Clear old row widgets from the layout, but preserve lbl_no_cameras
+        while self.mapping_layout.count() > 1:  # Keep first item (lbl_no_cameras)
+            item = self.mapping_layout.takeAt(1)  # Remove from index 1 onwards
             widget = item.widget()
             if widget:
                 widget.setParent(None)
@@ -713,12 +713,8 @@ class MainWindow(QMainWindow):
         from PyQt6.QtWidgets import QApplication
         
         # Check current theme for dialog styling
-        current_theme = self.settings.value("appearance/theme", "light", type=str)
-        if current_theme == "dark":
-            from .loading_dialog import LoadingDialogDark
-            dialog = LoadingDialogDark(self, "Loading Videos")
-        else:
-            dialog = LoadingDialog(self, "Loading Videos")
+        is_dark = self.settings.value("appearance/theme", "light", type=str) == "dark"
+        dialog = LoadingDialog(self, "Loading Videos", dark_mode=is_dark)
         
         dialog.show()
         QApplication.processEvents()

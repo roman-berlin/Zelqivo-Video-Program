@@ -10,7 +10,7 @@ import wave
 from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
-from typing import Dict, List, Optional, Protocol, runtime_checkable, Tuple
+from typing import Callable, Dict, List, Optional, Protocol, runtime_checkable, Tuple
 
 logger = logging.getLogger(__name__)
 
@@ -1344,6 +1344,7 @@ class LipMovementBackend:
         self,
         video_paths: List[str],
         duration_ms: int,
+        progress_callback: Optional[Callable[[int], None]] = None,
     ) -> List[SpeakerSegment]:
         """
         Analyze videos to detect active speaker at each time window.
@@ -1380,6 +1381,10 @@ class LipMovementBackend:
         for i, time_ms in enumerate(time_points):
             if i % 50 == 0:  # Log progress every 5 seconds
                 logger.debug("Lip detection progress: %d/%d time points", i, len(time_points))
+                if progress_callback:
+                    # Report progress 0-100%
+                    percent = int(i * 100 / len(time_points))
+                    progress_callback(percent)
             
             # Check motion for each camera
             motions = []
@@ -1600,7 +1605,8 @@ class HybridBackend:
         video_paths: List[str],
         audio_path: str,
         duration_ms: int,
-        cancel_callback: Optional[callable] = None,
+        cancel_callback: Optional[Callable[[], bool]] = None,
+        progress_callback: Optional[Callable[[int], None]] = None,
     ) -> List[SpeakerSegment]:
         """
         Detect speakers using hybrid audio+visual approach.
@@ -1629,7 +1635,12 @@ class HybridBackend:
         # Step 2: For each speech region, use LIPS to determine speaker
         all_segments: List[SpeakerSegment] = []
         
-        for region_start, region_end in speech_regions:
+        for i, (region_start, region_end) in enumerate(speech_regions):
+            # Update progress
+            if progress_callback and i % 5 == 0:
+                percent = int(i * 100 / len(speech_regions))
+                progress_callback(percent)
+
             # Check for cancellation
             if cancel_callback and cancel_callback():
                 logger.info("HYBRID: Cancelled during detection")

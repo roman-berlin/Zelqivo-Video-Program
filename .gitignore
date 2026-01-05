@@ -22,6 +22,7 @@ build/
 # Logs and local config
 *.log
 *.spec
+!multicam_editor.spec
 
 # Editors and IDEs
 .idea/

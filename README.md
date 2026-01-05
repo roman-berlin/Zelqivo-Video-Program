@@ -144,15 +144,49 @@ Artifacts will be placed in the `dist/` directory.
 
 #### Building Windows Executable
 
-To build a standalone Windows executable:
+Build a standalone Windows executable that runs on machines without Python installed.
+
+**Prerequisites:**
+- Python 3.10 or later
+- FFmpeg installed and on PATH (download from [ffmpeg.org](https://ffmpeg.org/download.html))
+- Development dependencies: `pip install -e ".[dev]"`
+
+**Build command:**
 
 ```bash
-pip install pyinstaller
 pyinstaller multicam_editor.spec
 ```
 
-The executable and all dependencies will be in `dist/MulticamEditor/`.
-Run `MulticamEditor.exe` to launch the application.
+**Output location:**
+```
+dist\MulticamEditor\MulticamEditor.exe
+```
+
+The `dist\MulticamEditor\` folder contains the EXE and all required DLLs/resources.
+Copy the entire folder to distribute the application.
+
+**Troubleshooting:**
+
+| Error | Solution |
+|-------|----------|
+| "Qt platform plugin 'windows' not found" | Reinstall PyQt6: `pip uninstall PyQt6 PyQt6-Qt6 -y && pip install PyQt6` |
+| "ffmpeg not found" | Install FFmpeg and add to PATH, or place ffmpeg.exe in the app folder |
+| Missing VC++ Runtime | Install [VC++ Redistributable](https://aka.ms/vs/17/release/vc_redist.x64.exe) |
+| ImportError on launch | Rebuild with `pyinstaller --clean multicam_editor.spec` |
+
+#### Smoke Test Checklist
+
+After building, verify the EXE works correctly (2 minutes):
+
+1. [ ] Launch `dist\MulticamEditor\MulticamEditor.exe`
+2. [ ] Verify no console window appears (windowed mode)
+3. [ ] No "missing plugin" error dialogs
+4. [ ] Add 2+ video files via "Add Files" button
+5. [ ] Play preview – video displays correctly
+6. [ ] Confirm audio plays during preview
+7. [ ] Seek on the timeline works
+8. [ ] Click "Create Video" and export to a folder
+9. [ ] Verify output MP4 plays in Windows Media Player or VLC
 
 ### Real Speaker Diarization (pyannote.audio) – Windows Setup
 

@@ -70,10 +70,12 @@ class SettingsDialog(QDialog):
         output_group.setLayout(output_layout)
         layout.addWidget(output_group)
 
-        # 3. Advanced Settings Toggle
-        self.check_advanced = QCheckBox("Show Advanced Settings")
-        self.check_advanced.toggled.connect(self._toggle_advanced_settings)
-        layout.addWidget(self.check_advanced)
+        # 3. Advanced Settings Toggle Button
+        self.btn_advanced = QPushButton("⚙️ Show Advanced Settings")
+        self.btn_advanced.setCheckable(True)
+        self.btn_advanced.setObjectName("btnAdvanced")
+        self.btn_advanced.toggled.connect(self._toggle_advanced_settings)
+        layout.addWidget(self.btn_advanced)
 
         # 4. Advanced Settings Container
         self.advanced_container = QGroupBox("Advanced Configuration")
@@ -218,6 +220,10 @@ class SettingsDialog(QDialog):
     def _toggle_advanced_settings(self, checked: bool) -> None:
         """Toggle visibility of advanced settings."""
         self.advanced_container.setVisible(checked)
+        if checked:
+            self.btn_advanced.setText("⚙️ Hide Advanced Settings")
+        else:
+            self.btn_advanced.setText("⚙️ Show Advanced Settings")
         self.adjustSize()
 
     def _load_settings(self) -> None:

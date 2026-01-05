@@ -52,6 +52,19 @@ QPushButton#btnThemeToggle:checked {
     color: white;
     border-color: #0d47a1;
 }
+QPushButton#btnAdvanced {
+    background-color: #f5f5f5;
+    border: 1px solid #bdbdbd;
+    text-align: left;
+    padding-left: 12px;
+}
+QPushButton#btnAdvanced:hover {
+    background-color: #eeeeee;
+}
+QPushButton#btnAdvanced:checked {
+    background-color: #e0e0e0;
+    border-color: #9e9e9e;
+}
 QToolBar {
     background-color: #fafafa;
     border-bottom: 1px solid #e0e0e0;
@@ -176,6 +189,19 @@ QPushButton#btnThemeToggle:checked {
     background-color: #1565c0;
     color: white;
     border-color: #0d47a1;
+}
+QPushButton#btnAdvanced {
+    background-color: #3c3c3c;
+    border: 1px solid #555555;
+    text-align: left;
+    padding-left: 12px;
+}
+QPushButton#btnAdvanced:hover {
+    background-color: #4a4a4a;
+}
+QPushButton#btnAdvanced:checked {
+    background-color: #555555;
+    border-color: #666666;
 }
 QToolBar {
     background-color: #252525;

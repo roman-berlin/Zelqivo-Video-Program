@@ -1,0 +1,116 @@
+============================= test session starts =============================
+platform win32 -- Python 3.13.2, pytest-8.4.1, pluggy-1.6.0
+rootdir: C:\Python Projects\Video_Program
+configfile: pyproject.toml
+plugins: allure-pytest-2.15.0, anyio-4.9.0, Faker-37.5.3, cov-7.0.0, xdist-3.8.0
+collected 1 item
+
+tests\test_video_merger.py F                                             [100%]
+
+================================== FAILURES ===================================
+_________________ TestRenderSinglePass.test_successful_render _________________
+
+args = (<test_video_merger.TestRenderSinglePass object at 0x000001805AF436F0>,)
+keywargs = {'tmp_path': WindowsPath('C:/Users/RomanB.MOVEMENT/AppData/Local/Temp/pytest-of-RomanB/pytest-30/test_successful_render0')}
+
+    @wraps(func)
+    def patched(*args, **keywargs):
+>       with self.decoration_helper(patched,
+                                    args,
+                                    keywargs) as (newargs, newkeywargs):
+
+C:\Users\RomanB.MOVEMENT\AppData\Local\Programs\Python\Python313\Lib\unittest\mock.py:1421: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+C:\Users\RomanB.MOVEMENT\AppData\Local\Programs\Python\Python313\Lib\contextlib.py:141: in __enter__
+    return next(self.gen)
+           ^^^^^^^^^^^^^^
+C:\Users\RomanB.MOVEMENT\AppData\Local\Programs\Python\Python313\Lib\unittest\mock.py:1403: in decoration_helper
+    arg = exit_stack.enter_context(patching)
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+C:\Users\RomanB.MOVEMENT\AppData\Local\Programs\Python\Python313\Lib\contextlib.py:530: in enter_context
+    result = _enter(cm)
+             ^^^^^^^^^^
+C:\Users\RomanB.MOVEMENT\AppData\Local\Programs\Python\Python313\Lib\unittest\mock.py:1495: in __enter__
+    original, local = self.get_original()
+                      ^^^^^^^^^^^^^^^^^^^
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = <unittest.mock._patch object at 0x000001805AFD95A0>
+
+    def get_original(self):
+        target = self.getter()
+        name = self.attribute
+    
+        original = DEFAULT
+        local = False
+    
+        try:
+            original = target.__dict__[name]
+        except (AttributeError, KeyError):
+            original = getattr(target, name, DEFAULT)
+        else:
+            local = True
+    
+        if name in _builtins and isinstance(target, ModuleType):
+            self.create = True
+    
+        if not self.create and original is DEFAULT:
+>           raise AttributeError(
+                "%s does not have the attribute %r" % (target, name)
+            )
+E           AttributeError: <module 'multicam_editor.logic.video_merger' from 'C:\\Python Projects\\Video_Program\\src\\multicam_editor\\logic\\video_merger.py'> does not have the attribute 'build_single_pass_filter_complex_args'
+
+C:\Users\RomanB.MOVEMENT\AppData\Local\Programs\Python\Python313\Lib\unittest\mock.py:1465: AttributeError
+=============================== tests coverage ================================
+_______________ coverage: platform win32, python 3.13.2-final-0 _______________
+
+Name                                               Stmts   Miss  Cover   Missing
+--------------------------------------------------------------------------------
+src\multicam_editor\__init__.py                        0      0   100%
+src\multicam_editor\__main__.py                        3      3     0%   8-12
+src\multicam_editor\cli.py                            84     84     0%   16-207
+src\multicam_editor\core\__init__.py                   0      0   100%
+src\multicam_editor\core\project.py                  145    145     0%   16-336
+src\multicam_editor\logging_setup.py                  10     10     0%   22-54
+src\multicam_editor\logic\__init__.py                  1      0   100%
+src\multicam_editor\logic\active_speaker.py          850    746    12%   42-47, 63-64, 76-77, 86-105, 155-164, 168-169, 180-254, 263-279, 291-299, 316-386, 391-427, 432-435, 444-490, 513-607, 630-732, 759-841, 860-861, 866-932, 943-963, 968-972, 977-980, 988-1073, 1078-1098, 1115-1136, 1143, 1147, 1151, 1159-1161, 1166-1172, 1208-1213, 1217-1240, 1251-1291, 1301-1321, 1325-1341, 1361-1452, 1459-1479, 1499-1502, 1506-1507, 1522-1596, 1617-1700, 1710-1712
+src\multicam_editor\logic\audio_sync.py              222    222     0%   3-436
+src\multicam_editor\logic\checkpoint.py              104     75    28%   45-50, 55, 67-84, 96-112, 121-147, 159-167, 179-199
+src\multicam_editor\logic\commands.py                214    214     0%   9-499
+src\multicam_editor\logic\debug_export.py             87     87     0%   11-160
+src\multicam_editor\logic\decision_engine.py          65     49    25%   22-27, 48-51, 69-114, 118-132
+src\multicam_editor\logic\pipeline_config.py          44     30    32%   39-78, 85, 92, 100-104
+src\multicam_editor\logic\preflight.py                53     53     0%   5-113
+src\multicam_editor\logic\processing_pipeline.py     642    577    10%   108-159, 167-173, 180-193, 197-200, 204-208, 216-265, 280-306, 311-342, 346-352, 370-459, 463-481, 489-539, 551-673, 681-732, 742-829, 851-890, 898-969, 977-1047, 1055-1142, 1152-1224, 1239-1282, 1297-1329
+src\multicam_editor\logic\processing_worker.py        75     75     0%   3-184
+src\multicam_editor\logic\qa_artifacts.py             97     62    36%   39-44, 49-54, 59-63, 68, 76-87, 95-114, 131-145, 152-158, 162-163, 167, 176, 184, 195, 210, 223, 227-248
+src\multicam_editor\logic\video_merger.py            201    159    21%   91-94, 112-192, 213-263, 267, 274-278, 282-289, 293, 311-312, 338-381, 402-465, 491-560
+src\multicam_editor\logic\video_utils.py             144    144     0%   10-275
+src\multicam_editor\main.py                           35     35     0%   2-75
+src\multicam_editor\ui\__init__.py                     1      1     0%   6
+src\multicam_editor\ui\export_dialog.py              188    188     0%   3-331
+src\multicam_editor\ui\file_list_widget.py           233    233     0%   2-355
+src\multicam_editor\ui\loading_dialog.py              91     91     0%   3-202
+src\multicam_editor\ui\main_window.py                704    704     0%   2-1174
+src\multicam_editor\ui\progress_dialog.py            165    165     0%   3-327
+src\multicam_editor\ui\settings_dialog.py            266    266     0%   3-494
+src\multicam_editor\ui\theme.py                        9      9     0%   4-154
+src\multicam_editor\ui\timeline\__init__.py            0      0   100%
+src\multicam_editor\ui\timeline\adapter.py           159    159     0%   2-248
+src\multicam_editor\ui\timeline\timeline.py          281    281     0%   2-429
+src\multicam_editor\ui\trim_panel.py                 238    238     0%   14-352
+src\multicam_editor\ui\utils\__init__.py               0      0   100%
+src\multicam_editor\ui\utils\gui.py                   31     31     0%   2-50
+src\multicam_editor\ui\video_preview.py              277    277     0%   2-402
+src\multicam_editor\utils\__init__.py                  2      0   100%
+src\multicam_editor\utils\backends.py                129    129     0%   7-271
+src\multicam_editor\utils\ffmpeg.py                  266    229    14%   26-66, 71, 76, 82-83, 118-122, 133-168, 172-182, 186-191, 209-210, 224-227, 249-281, 303-333, 364-439, 449, 471, 489-493, 517-522, 560-628, 658-759
+src\multicam_editor\utils\ffprobe.py                 196    149    24%   48-50, 54-56, 72-111, 116-125, 131-144, 152-174, 182-210, 225-298, 313-316, 321, 333-336, 341-342, 348-349
+src\multicam_editor\utils\file_utils.py               34     21    38%   12, 16, 26-35, 39, 43-46, 50-53
+src\multicam_editor\utils\settings.py                 26     26     0%   7-81
+src\multicam_editor\utils\signals.py                   6      0   100%
+--------------------------------------------------------------------------------
+TOTAL                                               6378   5967     6%
+=========================== short test summary info ===========================
+FAILED tests/test_video_merger.py::TestRenderSinglePass::test_successful_render
+============================== 1 failed in 1.27s ==============================

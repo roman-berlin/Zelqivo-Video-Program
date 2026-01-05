@@ -29,7 +29,7 @@ from .active_speaker import (
 from .decision_engine import DecisionEngine, CutSegment
 from .pipeline_config import PipelineConfig
 from .qa_artifacts import QAArtifactExporter
-from .video_merger import SegmentRenderer, CutDefinition, concatenate_segments
+from .video_merger import SegmentRenderer, CutDefinition, concatenate_segments, render_single_pass
 from .checkpoint import PipelineCheckpoint, save_checkpoint, delete_checkpoint
 
 logger = logging.getLogger(__name__)
@@ -1047,7 +1047,11 @@ class ProcessingPipeline:
         return result.output_path
 
     def _stage_render(self) -> Optional[List[str]]:
-        """Render cut segments to temp files."""
+        """Render cut segments using single-pass filter_complex approach.
+        
+        Uses single FFmpeg invocation with filter_complex to eliminate black frames
+        at segment boundaries. This replaces the previous per-segment rendering.
+        """
         self._advance_stage(PipelineStage.RENDER)
 
         if not self._cut_plan:
@@ -1055,7 +1059,7 @@ class ProcessingPipeline:
             self._emit_progress(100, "No cuts to render")
             return []
 
-        # Check disk space before starting render (Fix #3: disk space validation)
+        # Check disk space before starting render
         try:
             self._check_disk_space(num_segments=len(self._cut_plan))
         except RuntimeError as e:
@@ -1063,11 +1067,14 @@ class ProcessingPipeline:
             self.signals.error.emit(str(e))
             return None
 
-        # Load QA overlay setting
+        # Load QA overlay setting - NOTE: QA overlay not supported in single-pass mode
         settings = QSettings("MultiCamEditor", "MultiCamEditor")
         qa_overlay_enabled = settings.value("qa_overlay/enabled", False, type=bool)
         if qa_overlay_enabled:
-            logger.info("QA overlay enabled - will burn timecode/speaker info into video")
+            logger.warning("QA overlay not yet supported in single-pass mode, will be ignored")
+
+        # Get resolution setting
+        resolution = getattr(self, '_resolution', '1080p')
 
         # Convert CutSegments to CutDefinitions with camera offset applied
         cuts: List[CutDefinition] = []
@@ -1101,49 +1108,60 @@ class ProcessingPipeline:
                 start_ms=adjusted_start,
                 end_ms=adjusted_end,
                 cut_index=i,
-                qa_overlay=qa_overlay_enabled,
-                speaker_id=cut.camera_id,  # ENERGY mode: camera_id == speaker_id
+                camera_index=camera_idx,
+                qa_overlay=False,  # Not supported in single-pass mode
+                speaker_id=cut.camera_id,
             ))
 
-        # Create renderer with temp output directory
-        output_dir = tempfile.mkdtemp(prefix="multicam_render_")
-        self._temp_files.append(output_dir)  # Track for cleanup
+        # Generate temp output path for single-pass render
+        temp_video_path = tempfile.mktemp(prefix="multicam_singlepass_", suffix=".mp4")
+        self._temp_files.append(temp_video_path)
 
-        self._segment_renderer = SegmentRenderer(output_dir)
+        self._emit_progress(10, f"Single-pass render: {len(cuts)} segments...")
 
-        def on_render_progress(rendered: int, total: int) -> None:
-            if total > 0:
-                percent = int(rendered * 100 / total)
-                self._emit_progress(percent, f"Rendering segment {rendered}/{total}")
-
-        result = self._segment_renderer.render_segments(cuts, on_progress=on_render_progress)
-        self._segment_renderer = None
+        # Use single-pass rendering
+        logger.info("Starting single-pass render with %d cuts", len(cuts))
+        result = render_single_pass(
+            cuts=cuts,
+            output_path=temp_video_path,
+            resolution=resolution,
+            fps=30.0,
+        )
 
         if result.cancelled:
             logger.info("Render cancelled")
             return None
 
         if not result.success:
-            logger.error("Render failed: %s", result.error)
+            logger.error("Single-pass render failed: %s", result.error)
             self.signals.error.emit(f"Render failed: {result.error}")
             return None
 
-        # Track segment paths for cleanup
-        self._temp_files.extend(result.segment_paths)
-
-        self._emit_progress(100, f"Rendered {len(result.segment_paths)} segments")
-        logger.info("Render complete: %d segments", len(result.segment_paths))
-        return result.segment_paths
+        self._emit_progress(100, "Single-pass render complete")
+        logger.info("Render complete: %s", temp_video_path)
+        return [temp_video_path]  # Single output file
 
     def _stage_concat(
         self, segment_paths: List[str], output_path: Optional[str]
     ) -> Optional[str]:
-        """Concatenate rendered segments into final output, optionally replacing audio."""
+        """Finalize video output by adding audio track.
+        
+        With single-pass rendering, segment_paths contains a single pre-rendered video.
+        This stage adds external audio if available, or adds audio from primary camera.
+        """
         self._advance_stage(PipelineStage.CONCAT)
 
         if not segment_paths:
-            logger.warning("No segments to concatenate")
-            self._emit_progress(100, "No segments to concatenate")
+            logger.warning("No video to finalize")
+            self._emit_progress(100, "No video to finalize")
+            return None
+
+        # With single-pass render, we have exactly one video file
+        input_video = segment_paths[0]
+        
+        if not os.path.isfile(input_video):
+            logger.error("Rendered video not found: %s", input_video)
+            self.signals.error.emit("Rendered video not found")
             return None
 
         # Generate output path if not provided
@@ -1152,55 +1170,115 @@ class ProcessingPipeline:
             timestamp = time.strftime("%Y%m%d_%H%M%S")
             output_path = os.path.join(output_dir, f"multicam_output_{timestamp}.mp4")
 
-        self._emit_progress(30, f"Concatenating {len(segment_paths)} segments...")
+        self._emit_progress(30, "Finalizing video...")
 
-        # If we have synced external audio, concat to temp first then replace audio
+        # Check for synced external audio
         synced_audio = getattr(self, "_synced_audio_path", None)
+        
         if synced_audio and os.path.isfile(synced_audio):
-            # Concat to temp file first
-            temp_concat_path = output_path.replace(".mp4", "_temp_video.mp4")
-            result_path = concatenate_segments(segment_paths, temp_concat_path)
-            if not result_path:
-                logger.error("Concatenation failed")
-                self.signals.error.emit("Failed to concatenate segments")
-                return None
-
-            self._temp_files.append(temp_concat_path)
-            self._emit_progress(70, "Replacing audio with external audio...")
-
-            # Replace audio track with synced external audio
-            final_path = self._replace_audio_track(temp_concat_path, synced_audio, output_path)
+            # Add external audio to video
+            self._emit_progress(50, "Adding external audio...")
+            logger.info("Adding synced audio: %s", os.path.basename(synced_audio))
+            
+            final_path = self._replace_audio_track(input_video, synced_audio, output_path)
             if final_path:
-                self._emit_progress(100, "Audio replaced successfully")
-                logger.info("Concat + audio replace complete: %s", final_path)
+                self._emit_progress(100, "Audio added successfully")
+                logger.info("Final output with external audio: %s", final_path)
                 self._cleanup()
                 return final_path
             else:
-                # Fallback: use video without external audio
-                logger.warning("Audio replace failed, using original audio")
-                self._emit_progress(100, "Using original audio (replace failed)")
+                # Fallback: use video without audio
+                logger.warning("Audio add failed, using video without audio")
+                self._emit_progress(100, "Output ready (no external audio)")
                 import shutil
                 try:
-                    shutil.move(temp_concat_path, output_path)
+                    shutil.copy2(input_video, output_path)
                     self._cleanup()
                     return output_path
                 except Exception as e:
-                    logger.error("Failed to move temp file: %s", e)
+                    logger.error("Failed to copy video: %s", e)
                     self._cleanup()
                     return None
         else:
-            # No external audio - just concatenate normally
-            self._emit_progress(50, f"Concatenating {len(segment_paths)} segments...")
-            result_path = concatenate_segments(segment_paths, output_path)
-
-            if result_path:
-                self._emit_progress(100, "Concatenation complete")
-                logger.info("Concat complete: %s", result_path)
+            # No external audio - add audio from primary camera
+            self._emit_progress(50, "Adding audio from primary camera...")
+            primary_video = self.input_files[0]
+            
+            final_path = self._add_audio_from_video(input_video, primary_video, output_path)
+            if final_path:
+                self._emit_progress(100, "Output finalized")
+                logger.info("Final output with primary audio: %s", final_path)
                 self._cleanup()
-                return result_path
+                return final_path
+            else:
+                # Fallback: use video without audio
+                logger.warning("Audio add failed, using video without audio")
+                import shutil
+                try:
+                    shutil.copy2(input_video, output_path)
+                    self._cleanup()
+                    return output_path
+                except Exception as e:
+                    logger.error("Failed to copy video: %s", e)
+                    self._cleanup()
+                    return None
 
-            logger.error("Concatenation failed")
-            self.signals.error.emit("Failed to concatenate segments")
+    def _add_audio_from_video(
+        self, video_path: str, audio_source_video: str, output_path: str
+    ) -> Optional[str]:
+        """Add audio track from source video to rendered video.
+
+        Args:
+            video_path: Path to rendered video (no audio)
+            audio_source_video: Path to source video with audio to use
+            output_path: Where to write final output
+
+        Returns:
+            output_path on success, None on failure
+        """
+        from ..utils.ffmpeg import FFmpegProcess, is_ffmpeg_available
+
+        if not is_ffmpeg_available():
+            logger.error("ffmpeg not available for audio muxing")
+            return None
+
+        try:
+            # Get duration of video to trim audio
+            video_duration = 0
+            if self._probe_results:
+                # Use the actual rendered video duration if possible
+                from ..utils.ffprobe import probe as ffprobe
+                probe_result = ffprobe(video_path)
+                if probe_result and probe_result.duration_ms:
+                    video_duration = probe_result.duration_ms / 1000.0
+
+            args = [
+                "ffmpeg", "-y",
+                "-i", video_path,          # Video input (no audio)
+                "-i", audio_source_video,  # Audio source
+                "-c:v", "copy",            # Copy video stream
+                "-c:a", "aac",             # Encode audio to AAC
+                "-map", "0:v:0",           # Take video from first input
+                "-map", "1:a:0",           # Take audio from second input
+                "-shortest",               # Match shorter duration
+                output_path,
+            ]
+
+            logger.info("Adding audio from %s to %s", 
+                       os.path.basename(audio_source_video), 
+                       os.path.basename(output_path))
+            proc = FFmpegProcess(args, output_path)
+            result = proc.run()
+
+            if result.success:
+                logger.info("Audio muxing successful: %s", output_path)
+                return output_path
+
+            logger.error("Audio muxing failed: %s", result.error)
+            return None
+
+        except Exception as e:
+            logger.error("Audio muxing error: %s", e, exc_info=True)
             return None
 
     def _replace_audio_track(

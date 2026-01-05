@@ -463,3 +463,103 @@ def concatenate_segments(
                 os.remove(concat_list_path)
             except Exception:
                 pass
+
+
+def render_single_pass(
+    cuts: List[CutDefinition],
+    output_path: str,
+    resolution: str = "1080p",
+    fps: float = 30.0,
+) -> RenderResult:
+    """Render all cuts in a single FFmpeg pass using filter_complex.
+
+    This eliminates black frames at segment boundaries by:
+    - Decoding each source file continuously (no seeking per segment)
+    - Using trim filter for frame-accurate extraction
+    - Using concat filter for seamless joining
+    - Single CFR encode output
+
+    Args:
+        cuts: List of CutDefinition objects to render
+        output_path: Where to write the final video (no audio)
+        resolution: Target resolution ("1080p" or "720p")
+        fps: Target frame rate
+
+    Returns:
+        RenderResult with success status and output path
+    """
+    from ..utils.ffmpeg import build_single_pass_filter_complex_args
+
+    if not cuts:
+        logger.warning("render_single_pass: no cuts provided")
+        return RenderResult(success=True, segment_paths=[], total_count=0)
+
+    if not is_ffmpeg_available():
+        return RenderResult(
+            success=False,
+            error="ffmpeg not found. Please install ffmpeg.",
+            total_count=len(cuts),
+        )
+
+    # Validate all source files exist
+    for i, cut in enumerate(cuts):
+        if not os.path.isfile(cut.source_path):
+            logger.error("Source file not found for cut %d: %s", i, cut.source_path)
+            return RenderResult(
+                success=False,
+                error=f"Source file not found: {cut.source_path}",
+                total_count=len(cuts),
+            )
+
+    # Log segment summary
+    logger.info("Single-pass render starting: %d segments to %s", len(cuts), output_path)
+    for i, cut in enumerate(cuts):
+        logger.info(
+            "  Cut %d: %s [%d-%d ms] (camera %d)",
+            i, os.path.basename(cut.source_path), cut.start_ms, cut.end_ms,
+            getattr(cut, 'camera_index', 0)
+        )
+
+    # Build FFmpeg args
+    args = build_single_pass_filter_complex_args(
+        cuts=cuts,
+        output_path=output_path,
+        resolution=resolution,
+        fps=fps,
+    )
+
+    if not args:
+        return RenderResult(
+            success=False,
+            error="Failed to build filter_complex arguments",
+            total_count=len(cuts),
+        )
+
+    # Run FFmpeg
+    proc = FFmpegProcess(args, output_path)
+    result = proc.run()
+
+    if result.cancelled:
+        logger.info("Single-pass render cancelled")
+        return RenderResult(
+            success=False,
+            cancelled=True,
+            error="Cancelled by user",
+            total_count=len(cuts),
+        )
+
+    if not result.success:
+        logger.error("Single-pass render failed: %s", result.error)
+        return RenderResult(
+            success=False,
+            error=f"Single-pass render failed: {result.error}",
+            total_count=len(cuts),
+        )
+
+    logger.info("Single-pass render complete: %s", output_path)
+    return RenderResult(
+        success=True,
+        segment_paths=[output_path],  # Single output file
+        rendered_count=len(cuts),
+        total_count=len(cuts),
+    )

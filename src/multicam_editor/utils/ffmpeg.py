@@ -313,8 +313,21 @@ def build_trim_args(
 
     if copy_codec:
         args.extend(["-c", "copy"])
+        # For stream copy, avoid negative timestamps
+        args.extend(["-avoid_negative_ts", "make_zero"])
     else:
-        args.extend(["-c:v", "libx264", "-c:a", "aac"])
+        # Re-encode with proper timestamp handling to avoid black frames
+        args.extend([
+            "-c:v", "libx264",
+            "-preset", "fast",
+            "-c:a", "aac",
+            # Reset timestamps to start at 0 - critical for seamless concat
+            "-avoid_negative_ts", "make_zero",
+            # Force constant frame rate to avoid VFR issues
+            "-fps_mode", "cfr",
+            # Consistent timebase for all segments
+            "-video_track_timescale", "90000",
+        ])
 
     args.append(output_path)
     return args
@@ -409,8 +422,18 @@ def build_segment_with_effects_args(
     if afilters:
         args.extend(["-af", ",".join(afilters)])
 
-    # Re-encode (required for filters)
-    args.extend(["-c:v", "libx264", "-preset", "fast", "-c:a", "aac"])
+    # Re-encode with proper timestamp handling to avoid black frames
+    args.extend([
+        "-c:v", "libx264",
+        "-preset", "fast",
+        "-c:a", "aac",
+        # Reset timestamps to start at 0 - critical for seamless concat
+        "-avoid_negative_ts", "make_zero",
+        # Force constant frame rate to avoid VFR issues
+        "-fps_mode", "cfr",
+        # Consistent timebase for all segments
+        "-video_track_timescale", "90000",
+    ])
     args.append(output_path)
 
     return args
@@ -588,7 +611,149 @@ def build_segment_with_qa_overlay_args(
     if afilters:
         args.extend(["-af", ",".join(afilters)])
 
-    args.extend(["-c:v", "libx264", "-preset", "fast", "-c:a", "aac"])
+    # Re-encode with proper timestamp handling to avoid black frames
+    args.extend([
+        "-c:v", "libx264",
+        "-preset", "fast",
+        "-c:a", "aac",
+        # Reset timestamps to start at 0 - critical for seamless concat
+        "-avoid_negative_ts", "make_zero",
+        # Force constant frame rate to avoid VFR issues
+        "-fps_mode", "cfr",
+        # Consistent timebase for all segments
+        "-video_track_timescale", "90000",
+    ])
     args.append(output_path)
+
+    return args
+
+
+def build_single_pass_filter_complex_args(
+    cuts: list,
+    output_path: str,
+    resolution: str = "1080p",
+    fps: float = 30.0,
+) -> list[str]:
+    """Build FFmpeg args for single-pass multi-segment render using filter_complex.
+
+    This approach eliminates black frames at segment boundaries by:
+    1. Opening each unique source file once (continuous decoding)
+    2. Using trim filter for frame-accurate segment extraction
+    3. Using concat filter to join segments seamlessly
+    4. Single CFR encode output
+
+    Args:
+        cuts: List of cut definitions with fields:
+            - source_path: str - path to source video
+            - start_ms: int - start time in milliseconds
+            - end_ms: int - end time in milliseconds
+            - camera_index: int (optional) - for logging
+        output_path: Destination path for output video
+        resolution: Target resolution ("1080p" or "720p")
+        fps: Target frame rate (default 30.0)
+
+    Returns:
+        List of ffmpeg arguments ready for FFmpegProcess
+    """
+    if not cuts:
+        logger.warning("build_single_pass_filter_complex_args: no cuts provided")
+        return []
+
+    # Determine output dimensions based on resolution
+    if resolution == "720p":
+        out_width, out_height = 1280, 720
+    else:  # Default to 1080p
+        out_width, out_height = 1920, 1080
+
+    # Build unique input list - map source paths to input indices
+    unique_sources: dict[str, int] = {}
+    for cut in cuts:
+        source_path = cut.source_path if hasattr(cut, 'source_path') else cut.get('source_path', '')
+        if source_path and source_path not in unique_sources:
+            unique_sources[source_path] = len(unique_sources)
+
+    if not unique_sources:
+        logger.error("No valid source paths in cuts")
+        return []
+
+    # Build input arguments
+    args = ["ffmpeg", "-y"]
+    for source_path in unique_sources.keys():
+        args.extend(["-i", source_path])
+
+    # Build filter_complex
+    filter_parts = []
+    segment_labels = []
+
+    for i, cut in enumerate(cuts):
+        # Get cut attributes (support both dataclass and dict)
+        if hasattr(cut, 'source_path'):
+            source_path = cut.source_path
+            start_ms = cut.start_ms
+            end_ms = cut.end_ms
+            camera_idx = getattr(cut, 'camera_index', 0)
+        else:
+            source_path = cut.get('source_path', '')
+            start_ms = cut.get('start_ms', 0)
+            end_ms = cut.get('end_ms', 0)
+            camera_idx = cut.get('camera_index', 0)
+
+        input_idx = unique_sources.get(source_path, 0)
+        start_sec = start_ms / 1000.0
+        end_sec = end_ms / 1000.0
+        duration_sec = end_sec - start_sec
+
+        # Log segment details for debugging
+        logger.info(
+            "Single-pass segment %d: camera=%d, source=%s, start=%.3fs, end=%.3fs (duration=%.3fs)",
+            i, camera_idx, Path(source_path).name, start_sec, end_sec, duration_sec
+        )
+
+        # Build filter chain for this segment:
+        # 1. trim: extract time range
+        # 2. setpts: reset timestamps to 0
+        # 3. scale: resize to target resolution with aspect ratio preservation
+        # 4. pad: add letterbox/pillarbox if needed
+        # 5. setsar: force square pixels
+        # 6. fps: ensure constant frame rate
+        segment_label = f"v{i}"
+        filter_chain = (
+            f"[{input_idx}:v]"
+            f"trim=start={start_sec:.3f}:end={end_sec:.3f},"
+            f"setpts=PTS-STARTPTS,"
+            f"scale={out_width}:{out_height}:force_original_aspect_ratio=decrease,"
+            f"pad={out_width}:{out_height}:(ow-iw)/2:(oh-ih)/2:black,"
+            f"setsar=1,"
+            f"fps={fps}"
+            f"[{segment_label}]"
+        )
+        filter_parts.append(filter_chain)
+        segment_labels.append(f"[{segment_label}]")
+
+    # Build concat filter
+    concat_inputs = "".join(segment_labels)
+    concat_filter = f"{concat_inputs}concat=n={len(cuts)}:v=1:a=0[outv]"
+    filter_parts.append(concat_filter)
+
+    # Join all filter parts
+    filter_complex = ";".join(filter_parts)
+
+    # Build output arguments
+    args.extend([
+        "-filter_complex", filter_complex,
+        "-map", "[outv]",
+        "-c:v", "libx264",
+        "-preset", "fast",
+        "-crf", "18",  # High quality
+        "-pix_fmt", "yuv420p",
+        "-fps_mode", "cfr",
+        "-an",  # No audio (added separately)
+        output_path,
+    ])
+
+    logger.info(
+        "Single-pass render: %d segments from %d unique sources, output=%s",
+        len(cuts), len(unique_sources), Path(output_path).name
+    )
 
     return args

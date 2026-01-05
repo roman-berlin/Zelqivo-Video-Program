@@ -362,9 +362,10 @@ class MainWindow(QMainWindow):
 
         # Don't persist output folder between sessions - always start fresh
         self._output_folder: str | None = None
-        self.lbl_output_folder = QLabel("Downloads")
+        self.lbl_output_folder = QLabel("Please choose the output folder")
         self.lbl_output_folder.setObjectName("lblOutputFolderPath")
-        self.lbl_output_folder.setToolTip("Output will be saved to Downloads folder")
+        self.lbl_output_folder.setStyleSheet("color: #e67e22; font-style: italic;")
+        self.lbl_output_folder.setToolTip("Select an output folder before creating video")
         layout.addWidget(self.lbl_output_folder, row, 1)
 
         self.btn_choose_output_folder = QPushButton("Choose…")
@@ -373,8 +374,30 @@ class MainWindow(QMainWindow):
         self.btn_choose_output_folder.setFixedWidth(80)
         self.btn_choose_output_folder.clicked.connect(self._on_choose_output_folder)
         layout.addWidget(self.btn_choose_output_folder, row, 2)
+        row += 1
 
         parent_layout.addWidget(group)
+        
+        # 4) Generated Video section - hidden until render completes
+        self.result_group = QGroupBox("Generated Video")
+        self.result_group.setObjectName("groupResult")
+        self.result_group.setVisible(False)
+        result_layout = QHBoxLayout(self.result_group)
+        result_layout.setContentsMargins(10, 8, 10, 8)
+        
+        self.lbl_result_file = QLabel("")
+        self.lbl_result_file.setObjectName("lblResultFile")
+        self.lbl_result_file.setStyleSheet("font-weight: bold;")
+        result_layout.addWidget(self.lbl_result_file, 1)
+        
+        self.btn_play_result = QPushButton("▶ Play Video")
+        self.btn_play_result.setObjectName("btnPlayResult")
+        self.btn_play_result.setToolTip("Open the generated video in your default player")
+        self.btn_play_result.setFixedWidth(110)
+        self.btn_play_result.clicked.connect(self._on_play_result)
+        result_layout.addWidget(self.btn_play_result)
+        
+        parent_layout.addWidget(self.result_group)
 
     def _on_external_audio_toggled(self, checked: bool) -> None:
         """Save external audio setting and update UI state."""
@@ -417,10 +440,13 @@ class MainWindow(QMainWindow):
         if not folder:
             return
         self._output_folder = folder
-        self.settings.setValue("output/folder", folder)
+        # Don't persist to settings - fresh start each session
         self.lbl_output_folder.setText(os.path.basename(folder))
+        self.lbl_output_folder.setStyleSheet("")  # Remove warning style
         self.lbl_output_folder.setToolTip(folder)
         logger.info("Output folder selected: %s", folder)
+        # Refresh button state since output folder is now set
+        self._refresh_counter()
 
     def _refresh_camera_mapping_ui(self) -> None:
         """Rebuild camera mapping combos based on current file list."""
@@ -571,22 +597,6 @@ class MainWindow(QMainWindow):
         settings_action = QAction("&Settings...", self)
         settings_action.triggered.connect(self._show_settings_dialog)
         file_menu.addAction(settings_action)
-
-        # View menu
-        view_menu = menubar.addMenu("&View")
-
-        # Theme toggle action
-        self.action_toggle_theme = QAction("&Dark Mode", self)
-        self.action_toggle_theme.setObjectName("actionToggleDarkMode")
-        self.action_toggle_theme.setCheckable(True)
-        self.action_toggle_theme.setShortcut(QKeySequence("Ctrl+D"))
-
-        # Load theme setting and set checkbox
-        current_theme = self.settings.value("appearance/theme", "light", type=str)
-        self.action_toggle_theme.setChecked(current_theme == "dark")
-
-        self.action_toggle_theme.triggered.connect(self._toggle_theme)
-        view_menu.addAction(self.action_toggle_theme)
 
 
 
@@ -940,7 +950,12 @@ class MainWindow(QMainWindow):
         count = self.file_list.video_count()
         self.lbl_counter.setText(f"Videos: {count}/{VIDEO_CAP}")
         self.btn_add.setEnabled(count < VIDEO_CAP)
-        self.btn_process.setEnabled(count >= MIN_VIDEOS_FOR_PROCESS)
+        
+        # Create Video requires: 2+ videos AND output folder selected
+        has_enough_videos = count >= MIN_VIDEOS_FOR_PROCESS
+        has_output_folder = self._output_folder is not None
+        self.btn_process.setEnabled(has_enough_videos and has_output_folder)
+        
         self.btn_remove_all.setEnabled(count > 0)
         # Show/hide inline hint based on video count
         self.lbl_process_hint.setVisible(count < MIN_VIDEOS_FOR_PROCESS)
@@ -1087,6 +1102,12 @@ class MainWindow(QMainWindow):
         self._result_path = output_path
         self.btn_toggle_ab.setEnabled(True)
         self.action_export.setEnabled(True)
+        
+        # Show result section with Play button
+        if hasattr(self, "result_group") and hasattr(self, "lbl_result_file"):
+            self.lbl_result_file.setText(os.path.basename(output_path))
+            self.lbl_result_file.setToolTip(output_path)
+            self.result_group.setVisible(True)
 
     def _on_processing_error(self, error_msg: str) -> None:
         """Handle processing error."""
@@ -1106,6 +1127,25 @@ class MainWindow(QMainWindow):
     def _on_thread_finished(self) -> None:
         """Cleanup after thread finishes."""
         self._processing_thread = None
+
+    def _on_play_result(self) -> None:
+        """Open the generated video in the system's default player."""
+        if not hasattr(self, "_result_path") or not self._result_path:
+            self._toast("No video available to play")
+            return
+        if not os.path.exists(self._result_path):
+            self._toast("Video file not found")
+            return
+        
+        from PyQt6.QtCore import QUrl
+        from PyQt6.QtGui import QDesktopServices
+        
+        url = QUrl.fromLocalFile(self._result_path)
+        if QDesktopServices.openUrl(url):
+            logger.info("Opened video: %s", self._result_path)
+        else:
+            self._toast("Failed to open video player")
+            logger.warning("Failed to open video: %s", self._result_path)
 
     def _toast(self, message: str, timeout_ms: int = 4000) -> None:
         self.statusBar().showMessage(message, timeout_ms)

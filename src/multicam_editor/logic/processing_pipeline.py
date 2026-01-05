@@ -25,6 +25,8 @@ from .active_speaker import (
     RealEnergyVADBackend,
     SpeakerSegment,
     create_backend,
+    HybridBackend,
+    LipMovementBackend,
 )
 from .decision_engine import DecisionEngine, CutSegment
 from .pipeline_config import PipelineConfig
@@ -801,26 +803,48 @@ class ProcessingPipeline:
             
             self._emit_progress(30, f"Analyzing speech regions ({duration_ms//1000}s video)...")
             
-            # Create hybrid backend
-            hybrid_detector = HybridBackend(
-                sample_interval_ms=200,
-                min_segment_ms=500,
-            )
+            # Determine diarization mode
+            settings = QSettings("MultiCamEditor", "MultiCamEditor")
+            mode_str = settings.value("diarization/mode", DiarizationMode.HYBRID.value, type=str)
+            try:
+                diarization_mode = DiarizationMode(mode_str)
+            except ValueError:
+                diarization_mode = DiarizationMode.HYBRID
             
-            # Run detection
-            self._emit_progress(50, "Detecting speakers (audio + visual)...")
-            self._speaker_segments = hybrid_detector.detect_speakers(
-                video_paths=self.input_files,
-                audio_path=audio_path,
-                duration_ms=duration_ms,
-                cancel_callback=lambda: self._cancelled,
-            )
+            logger.info("Using diarization mode: %s", diarization_mode.value)
+            
+            if diarization_mode == DiarizationMode.LIPS:
+                # Lips Only (Strict Visual)
+                self._emit_progress(50, "Detecting speakers (Visual Only)...")
+                lip_detector = LipMovementBackend(
+                    sample_interval_ms=200,
+                    min_segment_ms=500,
+                )
+                self._speaker_segments = lip_detector.detect_speakers(
+                    video_paths=self.input_files,
+                    duration_ms=duration_ms,
+                )
+                logger.info("LIPS mode complete: %d segments", len(self._speaker_segments))
+                
+            else:
+                # Hybrid (Audio + Visual) - Default
+                self._emit_progress(50, "Detecting speakers (Hybrid: Audio + Visual)...")
+                hybrid_detector = HybridBackend(
+                    sample_interval_ms=200,
+                    min_segment_ms=500,
+                )
+                self._speaker_segments = hybrid_detector.detect_speakers(
+                    video_paths=self.input_files,
+                    audio_path=audio_path,
+                    duration_ms=duration_ms,
+                    cancel_callback=lambda: self._cancelled,
+                )
+                logger.info("HYBRID mode complete: %d segments", len(self._speaker_segments))
             
             # Record for QA artifacts
             self._qa_exporter.set_diarization(self._speaker_segments)
             
-            self._emit_progress(100, f"Hybrid detection found {len(self._speaker_segments)} segments")
-            logger.info("HYBRID mode complete: %d segments", len(self._speaker_segments))
+            self._emit_progress(100, f"Detection complete: {len(self._speaker_segments)} segments")
             return True
             
         except Exception as e:

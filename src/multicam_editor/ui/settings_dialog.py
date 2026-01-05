@@ -70,6 +70,22 @@ class SettingsDialog(QDialog):
         output_group.setLayout(output_layout)
         layout.addWidget(output_group)
 
+        # 3. Diarization Settings
+        diarization_group = QGroupBox("Diarization (Who is speaking?)")
+        diarization_layout = QFormLayout()
+
+        self.combo_diarization_mode = QComboBox()
+        self.combo_diarization_mode.addItem("Hybrid (Audio VAD + Visual) - Recommended", DiarizationMode.HYBRID.value)
+        self.combo_diarization_mode.addItem("Lips Only (Strict Visual) - Experimental", DiarizationMode.LIPS.value)
+        self.combo_diarization_mode.setToolTip(
+            "Hybrid: Uses audio to detect speech timing, Lips to identify speaker.\n"
+            "Lips Only: Uses visual movement for both timing and identification (no audio)."
+        )
+        diarization_layout.addRow("Detection Mode:", self.combo_diarization_mode)
+        
+        diarization_group.setLayout(diarization_layout)
+        layout.addWidget(diarization_group)
+
         # 3. Advanced Settings Toggle Button
         self.btn_advanced = QPushButton("⚙️ Show Advanced Settings")
         self.btn_advanced.setCheckable(True)
@@ -242,6 +258,12 @@ class SettingsDialog(QDialog):
             self.settings.value("output/quality", "1080p", type=str)
         )
         
+        # Diarization
+        mode_str = self.settings.value("diarization/mode", DiarizationMode.HYBRID.value, type=str)
+        index = self.combo_diarization_mode.findData(mode_str)
+        if index >= 0:
+            self.combo_diarization_mode.setCurrentIndex(index)
+        
         # Decision engine
         self.spin_min_switch.setValue(
             self.settings.value("decision_engine/min_switch_interval_ms", 1500, type=int)
@@ -281,6 +303,9 @@ class SettingsDialog(QDialog):
         """Save settings to QSettings and accept dialog."""
         # Output
         self.settings.setValue("output/quality", self.combo_quality.currentText())
+        
+        # Diarization
+        self.settings.setValue("diarization/mode", self.combo_diarization_mode.currentData())
         
         # Decision engine
         self.settings.setValue(
@@ -368,11 +393,13 @@ def get_audio_mix_settings() -> AudioMixSettings:
 
 
 def get_diarization_mode() -> DiarizationMode:
-    """Always return LIPS mode - diarization backend is fixed.
-    
-    User configuration has been removed; LIPS is the only supported mode.
-    """
-    return DiarizationMode.LIPS
+    """Load diarization mode from QSettings (standalone helper)."""
+    settings = QSettings("MultiCamEditor", "MultiCamEditor")
+    mode_str = settings.value("diarization/mode", DiarizationMode.HYBRID.value, type=str)
+    try:
+        return DiarizationMode(mode_str)
+    except ValueError:
+        return DiarizationMode.HYBRID
 
 
 def get_qa_overlay_enabled() -> bool:

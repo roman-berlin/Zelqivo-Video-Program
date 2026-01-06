@@ -20,6 +20,17 @@ _ffmpeg_path: Optional[str] = None
 _ffmpeg_checked: bool = False
 
 
+def _get_app_dir() -> Path:
+    """Get the application directory (frozen or source)."""
+    import sys
+    if getattr(sys, 'frozen', False):
+        # Running as PyInstaller bundle
+        return Path(sys._MEIPASS)
+    else:
+        # Running from source - project root
+        return Path(__file__).resolve().parent.parent.parent.parent
+
+
 def _find_ffmpeg() -> Optional[str]:
     """Locate ffmpeg executable. Returns path or None if not found."""
     global _ffmpeg_path, _ffmpeg_checked
@@ -27,7 +38,14 @@ def _find_ffmpeg() -> Optional[str]:
         return _ffmpeg_path
     _ffmpeg_checked = True
 
-    # Check if ffmpeg is in PATH
+    # 1. Check bundled location first (for frozen builds)
+    bundled_path = _get_app_dir() / "tools" / "ffmpeg" / "ffmpeg.exe"
+    if bundled_path.is_file():
+        _ffmpeg_path = str(bundled_path)
+        logger.info("Using bundled ffmpeg: %s", _ffmpeg_path)
+        return _ffmpeg_path
+
+    # 2. Check if ffmpeg is in PATH
     try:
         result = subprocess.run(
             ["ffmpeg", "-version"],
@@ -41,7 +59,7 @@ def _find_ffmpeg() -> Optional[str]:
     except Exception:
         pass
 
-    # Common Windows locations
+    # 3. Common Windows locations
     if os.name == "nt":
         common_paths = [
             r"C:\ffmpeg\bin\ffmpeg.exe",

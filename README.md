@@ -146,9 +146,10 @@ Artifacts will be placed in the `dist/` directory.
 
 Build a standalone Windows executable that runs on machines without Python installed.
 
+> **Note:** FFmpeg is bundled with the distribution. No separate FFmpeg install required.
+
 **Prerequisites:**
 - Python 3.10 or later
-- FFmpeg installed and on PATH (download from [ffmpeg.org](https://ffmpeg.org/download.html))
 - Development dependencies: `pip install -e ".[dev]"`
 
 **Build command:**

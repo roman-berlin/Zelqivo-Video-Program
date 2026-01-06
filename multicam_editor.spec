@@ -42,11 +42,17 @@ hiddenimports = [
 # Add all cv2 submodules
 hiddenimports += collect_submodules('cv2')
 
+# FFmpeg binaries to bundle
+ffmpeg_binaries = [
+    (r'C:\ffmpeg-7.1.1-full_build\bin\ffmpeg.exe', 'tools/ffmpeg'),
+    (r'C:\ffmpeg-7.1.1-full_build\bin\ffprobe.exe', 'tools/ffmpeg'),
+]
+
 a = Analysis(
     ['src/multicam_editor/main.py'],
     pathex=[],
     binaries=[],
-    datas=[],
+    datas=ffmpeg_binaries,
     hiddenimports=hiddenimports,
     hookspath=[],
     hooksconfig={},

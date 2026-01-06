@@ -33,19 +33,25 @@ It imports the main window from within the package and exposes a
 
 try:
     # Normal package-relative imports when executed via ``python -m multicam_editor``
+    # or when running as a PyInstaller frozen executable
     from .logging_setup import configure_logging  # type: ignore
     from .ui.main_window import MainWindow  # type: ignore
 except ImportError:
     # Fallback for running this file directly (``python src/multicam_editor/main.py``)
     # When executed as a script, __package__ is ``None`` and relative imports fail.
-    # Add the current file's directory to sys.path so absolute imports work.
-    import pathlib as _pathlib
-    _current_dir = _pathlib.Path(__file__).resolve().parent
-    if str(_current_dir) not in sys.path:
-        sys.path.insert(0, str(_current_dir))
-    # Attempt to import using absolute module names
-    from logging_setup import configure_logging  # type: ignore
-    from ui.main_window import MainWindow  # type: ignore
+    if getattr(sys, 'frozen', False):
+        # Running as PyInstaller bundle - use absolute imports from the package
+        from multicam_editor.logging_setup import configure_logging  # type: ignore
+        from multicam_editor.ui.main_window import MainWindow  # type: ignore
+    else:
+        # Running as script - add current directory to path
+        import pathlib as _pathlib
+        _current_dir = _pathlib.Path(__file__).resolve().parent
+        if str(_current_dir) not in sys.path:
+            sys.path.insert(0, str(_current_dir))
+        # Attempt to import using absolute module names
+        from logging_setup import configure_logging  # type: ignore
+        from ui.main_window import MainWindow  # type: ignore
 
 
 def main() -> int:

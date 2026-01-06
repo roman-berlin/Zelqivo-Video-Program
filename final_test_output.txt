@@ -1,0 +1,124 @@
+============================= test session starts =============================
+platform win32 -- Python 3.13.2, pytest-8.4.1, pluggy-1.6.0
+rootdir: C:\Python Projects\Video_Program
+configfile: pyproject.toml
+testpaths: tests
+plugins: allure-pytest-2.15.0, anyio-4.9.0, Faker-37.5.3, cov-7.0.0, xdist-3.8.0
+collected 292 items
+
+tests\test_active_speaker.py ........................................... [ 14%]
+......................ss........                                         [ 25%]
+tests\test_audio_mix.py ..........                                       [ 29%]
+tests\test_audio_sync.py ............                                    [ 33%]
+tests\test_debug_export.py .....                                         [ 34%]
+tests\test_decision_engine.py ......................                     [ 42%]
+tests\test_ffprobe_ffmpeg.py ....................................        [ 54%]
+tests\test_file_utils.py ...........................                     [ 64%]
+tests\test_import.py .                                                   [ 64%]
+tests\test_logging.py .                                                  [ 64%]
+tests\test_pipeline_config.py ....................                       [ 71%]
+tests\test_preflight.py .............                                    [ 76%]
+tests\test_processing_pipeline.py ..............                         [ 80%]
+tests\test_project.py ........................                           [ 89%]
+tests\test_video_merger.py ................................              [100%]
+
+============================== warnings summary ===============================
+tests/test_active_speaker.py::TestCreateBackend::test_real_mode_fallback_on_error
+  C:\Users\RomanB.MOVEMENT\PycharmProjects\QA_Automation_Movement\.venv\Lib\site-packages\pyannote\audio\core\io.py:47: UserWarning: 
+  torchcodec is not installed correctly so built-in audio decoding will fail. Solutions are:
+  * use audio preloaded in-memory as a {'waveform': (channel, time) torch.Tensor, 'sample_rate': int} dictionary;
+  * fix torchcodec installation. Error message was:
+  
+  Could not load libtorchcodec. Likely causes:
+            1. FFmpeg is not properly installed in your environment. We support
+               versions 4, 5, 6 and 7.
+            2. The PyTorch version (2.8.0+cpu) is not compatible with
+               this version of TorchCodec. Refer to the version compatibility
+               table:
+               https://github.com/pytorch/torchcodec?tab=readme-ov-file#installing-torchcodec.
+            3. Another runtime dependency; see exceptions below.
+          The following exceptions were raised as we tried to load libtorchcodec:
+          
+  [start of libtorchcodec loading traceback]
+  FFmpeg version 7: Could not find module 'C:\Users\RomanB.MOVEMENT\PycharmProjects\QA_Automation_Movement\.venv\Lib\site-packages\torchcodec\libtorchcodec_core7.dll' (or one of its dependencies). Try using the full path with constructor syntax.
+  FFmpeg version 6: Could not find module 'C:\Users\RomanB.MOVEMENT\PycharmProjects\QA_Automation_Movement\.venv\Lib\site-packages\torchcodec\libtorchcodec_core6.dll' (or one of its dependencies). Try using the full path with constructor syntax.
+  FFmpeg version 5: Could not find module 'C:\Users\RomanB.MOVEMENT\PycharmProjects\QA_Automation_Movement\.venv\Lib\site-packages\torchcodec\libtorchcodec_core5.dll' (or one of its dependencies). Try using the full path with constructor syntax.
+  FFmpeg version 4: Could not find module 'C:\Users\RomanB.MOVEMENT\PycharmProjects\QA_Automation_Movement\.venv\Lib\site-packages\torchcodec\libtorchcodec_core4.dll' (or one of its dependencies). Try using the full path with constructor syntax.
+  [end of libtorchcodec loading traceback].
+    warnings.warn(
+
+tests/test_active_speaker.py::TestCreateBackend::test_real_mode_fallback_on_error
+  C:\Users\RomanB.MOVEMENT\PycharmProjects\QA_Automation_Movement\.venv\Lib\site-packages\speechbrain\utils\torch_audio_backend.py:57: UserWarning: torchaudio._backend.list_audio_backends has been deprecated. This deprecation is part of a large refactoring effort to transition TorchAudio into a maintenance phase. The decoding and encoding capabilities of PyTorch for both audio and video are being consolidated into TorchCodec. Please see https://github.com/pytorch/audio/issues/3902 for more information. It will be removed from the 2.9 release. 
+    available_backends = torchaudio.list_audio_backends()
+
+tests/test_active_speaker.py::TestCreateBackend::test_real_mode_fallback_on_error
+  <frozen importlib._bootstrap>:488: DeprecationWarning: builtin type SwigPyPacked has no __module__ attribute
+
+tests/test_active_speaker.py::TestCreateBackend::test_real_mode_fallback_on_error
+  <frozen importlib._bootstrap>:488: DeprecationWarning: builtin type SwigPyObject has no __module__ attribute
+
+tests/test_active_speaker.py::TestCreateBackend::test_real_mode_fallback_on_error
+  C:\Users\RomanB.MOVEMENT\AppData\Local\Programs\Python\Python313\Lib\inspect.py:1020: UserWarning: Module 'speechbrain.pretrained' was deprecated, redirecting to 'speechbrain.inference'. Please update your script. This is a change from SpeechBrain 1.0. See: https://github.com/speechbrain/speechbrain/releases/tag/v1.0.0
+    if ismodule(module) and hasattr(module, '__file__'):
+
+tests/test_audio_sync.py::TestSyncExternalAudio::test_sync_creates_output_file
+  C:\Users\RomanB.MOVEMENT\PycharmProjects\QA_Automation_Movement\.venv\Lib\site-packages\audioread\rawread.py:16: DeprecationWarning: aifc was removed in Python 3.13. Please be aware that you are currently NOT using standard 'aifc', but instead a separately installed 'standard-aifc'.
+    import aifc
+
+tests/test_audio_sync.py::TestSyncExternalAudio::test_sync_creates_output_file
+  C:\Users\RomanB.MOVEMENT\PycharmProjects\QA_Automation_Movement\.venv\Lib\site-packages\audioread\rawread.py:19: DeprecationWarning: sunau was removed in Python 3.13. Please be aware that you are currently NOT using standard 'sunau', but instead a separately installed 'standard-sunau'.
+    import sunau
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=============================== tests coverage ================================
+_______________ coverage: platform win32, python 3.13.2-final-0 _______________
+
+Name                                               Stmts   Miss  Cover   Missing
+--------------------------------------------------------------------------------
+src\multicam_editor\__init__.py                        0      0   100%
+src\multicam_editor\__main__.py                        3      3     0%   8-12
+src\multicam_editor\cli.py                            84     84     0%   16-207
+src\multicam_editor\core\__init__.py                   0      0   100%
+src\multicam_editor\core\project.py                  145     12    92%   92-95, 113, 150, 163, 185, 202, 237, 277-279, 318
+src\multicam_editor\logging_setup.py                  10      0   100%
+src\multicam_editor\logic\__init__.py                  1      0   100%
+src\multicam_editor\logic\active_speaker.py          856    541    37%   184-254, 391-427, 463-473, 513-607, 630-732, 759-841, 882-883, 887-890, 894-895, 911, 914-916, 919, 927-932, 946-947, 954-961, 978, 988-1073, 1078-1098, 1128-1136, 1218, 1232-1233, 1238-1240, 1251-1291, 1301-1321, 1325-1341, 1369-1457, 1504-1507, 1511-1512, 1527-1601, 1623-1711
+src\multicam_editor\logic\audio_sync.py              222    109    51%   28, 35-40, 49-53, 176-177, 213-214, 218, 225-227, 243, 247-249, 268-436
+src\multicam_editor\logic\checkpoint.py              104     75    28%   45-50, 55, 67-84, 96-112, 121-147, 159-167, 179-199
+src\multicam_editor\logic\commands.py                214    160    25%   59, 69, 79, 96, 132, 138, 152, 183-199, 203-257, 261-303, 307-316, 334-341, 345-363, 367-377, 395-401, 405-422, 426-442, 462-466, 470, 474, 482-499
+src\multicam_editor\logic\debug_export.py             87     14    84%   36-37, 45-46, 112-113, 119, 137-138, 152-156
+src\multicam_editor\logic\decision_engine.py          65      1    98%   81
+src\multicam_editor\logic\pipeline_config.py          44      1    98%   85
+src\multicam_editor\logic\preflight.py                53      2    96%   82-83
+src\multicam_editor\logic\processing_pipeline.py     601    468    22%   118, 123-124, 169-175, 202, 206-210, 218-267, 282-308, 329, 349-350, 384-461, 482-483, 491-541, 550-722, 744-783, 791-862, 870-940, 948-1035, 1045-1117, 1132-1175, 1190-1222
+src\multicam_editor\logic\processing_worker.py        75     75     0%   3-184
+src\multicam_editor\logic\qa_artifacts.py             97     42    57%   41, 59-63, 68, 76-87, 95-114, 131-145, 167, 176, 184, 195, 210, 223, 227-248
+src\multicam_editor\logic\video_merger.py            201     28    86%   177-179, 222-226, 240, 287-288, 293, 357-358, 367-369, 378-379, 412-414, 456-457, 464-465, 532, 543-544, 552-553
+src\multicam_editor\logic\video_utils.py             144    144     0%   10-275
+src\multicam_editor\main.py                           38     38     0%   2-81
+src\multicam_editor\ui\__init__.py                     1      1     0%   6
+src\multicam_editor\ui\export_dialog.py              188    188     0%   3-331
+src\multicam_editor\ui\file_list_widget.py           233    233     0%   2-355
+src\multicam_editor\ui\loading_dialog.py              91     91     0%   3-202
+src\multicam_editor\ui\main_window.py                734    734     0%   2-1214
+src\multicam_editor\ui\progress_dialog.py            165    165     0%   3-327
+src\multicam_editor\ui\settings_dialog.py            223    223     0%   3-412
+src\multicam_editor\ui\theme.py                        9      9     0%   4-322
+src\multicam_editor\ui\timeline\__init__.py            0      0   100%
+src\multicam_editor\ui\timeline\adapter.py           159    159     0%   2-248
+src\multicam_editor\ui\timeline\timeline.py          281    281     0%   2-429
+src\multicam_editor\ui\trim_panel.py                 238    238     0%   14-352
+src\multicam_editor\ui\utils\__init__.py               0      0   100%
+src\multicam_editor\ui\utils\gui.py                   31     31     0%   2-50
+src\multicam_editor\ui\video_preview.py              277    277     0%   2-402
+src\multicam_editor\utils\__init__.py                  2      0   100%
+src\multicam_editor\utils\backends.py                129    129     0%   7-271
+src\multicam_editor\utils\ffmpeg.py                  276    100    64%   28, 44-46, 72-79, 82-83, 94, 153, 169-170, 178-184, 192-199, 205-209, 267-299, 400-401, 535-540, 578-646, 694-695, 714-717
+src\multicam_editor\utils\ffprobe.py                 207     39    81%   75, 91-93, 118-125, 128-129, 142-144, 151-154, 159-162, 182-184, 189, 253-254, 312, 315-317, 340, 352-355
+src\multicam_editor\utils\file_utils.py               34      3    91%   30, 52-53
+src\multicam_editor\utils\settings.py                 26     26     0%   7-81
+src\multicam_editor\utils\signals.py                   6      0   100%
+--------------------------------------------------------------------------------
+TOTAL                                               6354   4724    26%
+================= 290 passed, 2 skipped, 7 warnings in 37.41s =================
+<sys>:0: DeprecationWarning: builtin type swigvarlink has no __module__ attribute

@@ -95,7 +95,7 @@ src\multicam_editor\logic\processing_worker.py        75     75     0%   3-184
 src\multicam_editor\logic\qa_artifacts.py             97     42    57%   41, 59-63, 68, 76-87, 95-114, 131-145, 167, 176, 184, 195, 210, 223, 227-248
 src\multicam_editor\logic\video_merger.py            201     28    86%   177-179, 222-226, 240, 287-288, 293, 357-358, 367-369, 378-379, 412-414, 456-457, 464-465, 532, 543-544, 552-553
 src\multicam_editor\logic\video_utils.py             144    144     0%   10-275
-src\multicam_editor\main.py                           35     35     0%   2-75
+src\multicam_editor\main.py                           38     38     0%   2-81
 src\multicam_editor\ui\__init__.py                     1      1     0%   6
 src\multicam_editor\ui\export_dialog.py              188    188     0%   3-331
 src\multicam_editor\ui\file_list_widget.py           233    233     0%   2-355
@@ -119,6 +119,6 @@ src\multicam_editor\utils\file_utils.py               34      3    91%   30, 52-
 src\multicam_editor\utils\settings.py                 26     26     0%   7-81
 src\multicam_editor\utils\signals.py                   6      0   100%
 --------------------------------------------------------------------------------
-TOTAL                                               6351   4721    26%
-================= 290 passed, 2 skipped, 7 warnings in 56.62s =================
+TOTAL                                               6354   4724    26%
+================= 290 passed, 2 skipped, 7 warnings in 37.41s =================
 <sys>:0: DeprecationWarning: builtin type swigvarlink has no __module__ attribute

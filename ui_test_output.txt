@@ -1,0 +1,72 @@
+============================= test session starts =============================
+platform win32 -- Python 3.13.2, pytest-8.4.1, pluggy-1.6.0
+PyQt6 6.10.1 -- Qt runtime 6.10.1 -- Qt compiled 6.10.0
+rootdir: C:\Python Projects\Video_Program
+configfile: pyproject.toml
+plugins: allure-pytest-2.15.0, anyio-4.9.0, Faker-37.5.3, cov-7.0.0, qt-4.5.0, xdist-3.8.0
+collected 12 items
+
+tests\test_ui.py ....F.......                                            [100%]
+
+================================== FAILURES ===================================
+____________ TestThemeToggle.test_theme_toggle_changes_stylesheet _____________
+tests\test_ui.py:79: in test_theme_toggle_changes_stylesheet
+    main_window._toggle_theme()
+src\multicam_editor\ui\main_window.py:605: in _toggle_theme
+    is_dark = self.action_toggle_theme.isChecked()
+              ^^^^^^^^^^^^^^^^^^^^^^^^
+E   AttributeError: 'MainWindow' object has no attribute 'action_toggle_theme'
+=============================== tests coverage ================================
+_______________ coverage: platform win32, python 3.13.2-final-0 _______________
+
+Name                                               Stmts   Miss  Cover   Missing
+--------------------------------------------------------------------------------
+src\multicam_editor\__init__.py                        0      0   100%
+src\multicam_editor\__main__.py                        3      3     0%   8-12
+src\multicam_editor\cli.py                            84     84     0%   16-207
+src\multicam_editor\core\__init__.py                   0      0   100%
+src\multicam_editor\core\project.py                  145     99    32%   51, 92-95, 110, 113, 129-135, 147-150, 161-171, 183-189, 200-211, 231-264, 269-299, 304-336
+src\multicam_editor\logging_setup.py                  10     10     0%   22-54
+src\multicam_editor\logic\__init__.py                  1      0   100%
+src\multicam_editor\logic\active_speaker.py          856    752    12%   42-47, 63-64, 76-77, 86-105, 155-164, 168-169, 180-254, 263-279, 291-299, 316-386, 391-427, 432-435, 444-490, 513-607, 630-732, 759-841, 860-861, 866-932, 943-963, 968-972, 977-980, 988-1073, 1078-1098, 1115-1136, 1143, 1147, 1151, 1159-1161, 1166-1172, 1208-1213, 1217-1240, 1251-1291, 1301-1321, 1325-1341, 1362-1457, 1464-1484, 1504-1507, 1511-1512, 1527-1601, 1623-1711, 1721-1723
+src\multicam_editor\logic\audio_sync.py              222    222     0%   3-436
+src\multicam_editor\logic\checkpoint.py              104     75    28%   45-50, 55, 67-84, 96-112, 121-147, 159-167, 179-199
+src\multicam_editor\logic\commands.py                214    181    15%   48-49, 59, 69, 79, 96, 119-126, 130-132, 136-138, 143, 151-161, 183-199, 203-257, 261-303, 307-316, 334-341, 345-363, 367-377, 395-401, 405-422, 426-442, 462-466, 470, 474, 482-499
+src\multicam_editor\logic\debug_export.py             87     68    22%   33-37, 42-46, 51, 73-138, 146-160
+src\multicam_editor\logic\decision_engine.py          65     49    25%   22-27, 48-51, 69-114, 118-132
+src\multicam_editor\logic\pipeline_config.py          44     30    32%   39-78, 85, 92, 100-104
+src\multicam_editor\logic\preflight.py                53     38    28%   37-85, 97-113
+src\multicam_editor\logic\processing_pipeline.py     601    538    10%   110-161, 169-175, 182-195, 199-202, 206-210, 218-267, 282-308, 313-344, 348-354, 372-461, 465-483, 491-541, 550-722, 744-783, 791-862, 870-940, 948-1035, 1045-1117, 1132-1175, 1190-1222
+src\multicam_editor\logic\processing_worker.py        75     50    33%   51-58, 62-64, 68-69, 78-120, 151-158, 162-163, 167-184
+src\multicam_editor\logic\qa_artifacts.py             97     62    36%   39-44, 49-54, 59-63, 68, 76-87, 95-114, 131-145, 152-158, 162-163, 167, 176, 184, 195, 210, 223, 227-248
+src\multicam_editor\logic\video_merger.py            201    159    21%   91-94, 112-192, 213-263, 267, 274-278, 282-289, 293, 311-312, 338-381, 402-465, 491-560
+src\multicam_editor\logic\video_utils.py             144    130    10%   24-37, 42-46, 57-58, 68-79, 105-116, 125-200, 209-275
+src\multicam_editor\main.py                           38     38     0%   2-81
+src\multicam_editor\ui\__init__.py                     1      0   100%
+src\multicam_editor\ui\export_dialog.py              188    161    14%   42-48, 52-77, 81-83, 87-111, 118-130, 134-214, 218-240, 244-275, 279-289, 293, 297-307, 311-320, 324-327, 331
+src\multicam_editor\ui\file_list_widget.py           233    181    22%   64-90, 96-103, 109-120, 127-132, 135-139, 143-151, 163-183, 188-191, 194-197, 200-209, 213-247, 251-258, 261-265, 270-275, 285-306, 314, 322-342, 346-355
+src\multicam_editor\ui\loading_dialog.py              91     29    68%   48-58, 173-185, 189, 193-196, 200-202
+src\multicam_editor\ui\main_window.py                734    354    52%   404-406, 416-431, 435-449, 454-510, 514-516, 520-527, 535-551, 555, 606-619, 631-632, 636-644, 657-658, 668-669, 675-676, 682-683, 689-690, 713-728, 732-764, 768-774, 778-791, 798-816, 823-836, 840-854, 863-871, 875-880, 884-890, 894-909, 914-924, 934-947, 971-990, 994-1081, 1085-1086, 1090-1093, 1097-1110, 1114-1120, 1124-1125, 1129, 1133-1148, 1151, 1155-1185, 1189-1205, 1213-1214
+src\multicam_editor\ui\progress_dialog.py            165    143    13%   41-57, 60-210, 220-224, 228, 232-233, 244-264, 268, 272-288, 292-298, 302-319, 323-327
+src\multicam_editor\ui\settings_dialog.py            223     49    78%   215, 233-234, 238-243, 254, 305-331, 335-362, 370-372, 383-386, 397-402, 411-412
+src\multicam_editor\ui\theme.py                        9      1    89%   316
+src\multicam_editor\ui\timeline\__init__.py            0      0   100%
+src\multicam_editor\ui\timeline\adapter.py           159    133    16%   37, 40, 50-64, 78-82, 93-152, 156-180, 183-200, 204-219, 224-242, 247-248
+src\multicam_editor\ui\timeline\timeline.py          281    214    24%   15-26, 29-37, 40-44, 48-51, 56-61, 65-91, 105-121, 124-127, 146-148, 152-157, 160-165, 168-179, 208-214, 218, 221-232, 236-241, 254-266, 271-281, 285-290, 299-321, 324-331, 334-337, 340-341, 344, 348-352, 355-358, 361-364, 388-394, 397-402, 405-410, 413-429
+src\multicam_editor\ui\trim_panel.py                 238    162    32%   131-144, 148-154, 157-167, 170-180, 183-272, 276-278, 283-286, 289-296, 299-307, 311-315, 319-326, 331-352
+src\multicam_editor\ui\utils\__init__.py               0      0   100%
+src\multicam_editor\ui\utils\gui.py                   31     21    32%   12-15, 18-24, 28-40, 48-50
+src\multicam_editor\ui\video_preview.py              277    181    35%   91-105, 109-127, 130, 143-156, 161, 164, 167, 171-181, 184-188, 195-196, 203-208, 212, 215-218, 221, 224, 227-228, 231-237, 243-251, 254-260, 264-273, 276-277, 280-295, 300-302, 312-324, 328-335, 344-352, 356-378, 383-402
+src\multicam_editor\ui\widgets\range_slider.py       160    129    19%   38-44, 47-53, 56, 60-63, 66-67, 70-73, 76-94, 98-165, 169-187, 190-196, 199-200, 204-213
+src\multicam_editor\utils\__init__.py                  2      0   100%
+src\multicam_editor\utils\backends.py                129    129     0%   7-271
+src\multicam_editor\utils\ffmpeg.py                  276    238    14%   25-31, 37-84, 89, 94, 100-101, 136-140, 151-186, 190-200, 204-209, 227-228, 242-245, 267-299, 321-351, 382-457, 467, 489, 507-511, 535-540, 578-646, 676-777
+src\multicam_editor\utils\ffprobe.py                 207    158    24%   49-51, 55-57, 72-78, 84-130, 135-144, 150-163, 171-193, 201-229, 244-317, 332-335, 340, 352-355, 360-361, 367-368
+src\multicam_editor\utils\file_utils.py               34     20    41%   12, 16, 26-35, 43-46, 50-53
+src\multicam_editor\utils\settings.py                 26     26     0%   7-81
+src\multicam_editor\utils\signals.py                   6      0   100%
+--------------------------------------------------------------------------------
+TOTAL                                               6514   4917    25%
+=========================== short test summary info ===========================
+FAILED tests/test_ui.py::TestThemeToggle::test_theme_toggle_changes_stylesheet
+======================== 1 failed, 11 passed in 7.06s =========================

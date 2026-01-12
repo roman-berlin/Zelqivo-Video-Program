@@ -11,6 +11,7 @@ import logging
 import os
 import subprocess
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Optional, Dict, Tuple, List
 
 logger = logging.getLogger(__name__)
@@ -66,6 +67,17 @@ _ffprobe_path: Optional[str] = None
 _ffprobe_checked: bool = False
 
 
+def _get_app_dir() -> Path:
+    """Get the application directory (frozen or source)."""
+    import sys
+    if getattr(sys, 'frozen', False):
+        # Running as PyInstaller bundle
+        return Path(sys._MEIPASS)
+    else:
+        # Running from source - project root
+        return Path(__file__).resolve().parent.parent.parent.parent
+
+
 def _find_ffprobe() -> Optional[str]:
     """Locate ffprobe executable. Returns path or None if not found."""
     global _ffprobe_path, _ffprobe_checked
@@ -73,7 +85,14 @@ def _find_ffprobe() -> Optional[str]:
         return _ffprobe_path
     _ffprobe_checked = True
 
-    # Check if ffprobe is in PATH
+    # 1. Check bundled location first (for frozen builds)
+    bundled_path = _get_app_dir() / "tools" / "ffmpeg" / "ffprobe.exe"
+    if bundled_path.is_file():
+        _ffprobe_path = str(bundled_path)
+        logger.info("Using bundled ffprobe: %s", _ffprobe_path)
+        return _ffprobe_path
+
+    # 2. Check if ffprobe is in PATH
     try:
         result = subprocess.run(
             ["ffprobe", "-version"],
@@ -86,7 +105,7 @@ def _find_ffprobe() -> Optional[str]:
             return _ffprobe_path
     except Exception:
         pass
-    # Common Windows locations
+    # 3. Common Windows locations
     if os.name == "nt":
         common_paths = [
             r"C:\ffmpeg\bin\ffprobe.exe",

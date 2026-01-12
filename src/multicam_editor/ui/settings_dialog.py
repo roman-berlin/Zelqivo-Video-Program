@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from PyQt6.QtCore import QSettings
+from PyQt6.QtCore import QSettings, Qt
 from PyQt6.QtWidgets import (
     QCheckBox,
     QDialog,
@@ -16,6 +16,8 @@ from PyQt6.QtWidgets import (
     QPushButton,
     QMessageBox,
     QFileDialog,
+    QScrollArea,
+    QWidget,
 )
 
 from ..core.project import AudioMixMode, AudioMixSettings
@@ -31,7 +33,9 @@ class SettingsDialog(QDialog):
         super().__init__(parent)
         self.setWindowTitle("Settings")
         self.setModal(True)
-        self.resize(400, 320)
+        self.resize(420, 550)  # Taller to show more content
+        self.setMinimumHeight(400)
+        self.setMaximumHeight(800)
         self.settings = QSettings("MultiCamEditor", "MultiCamEditor")
 
         self._init_ui()
@@ -39,8 +43,21 @@ class SettingsDialog(QDialog):
 
     def _init_ui(self) -> None:
         """Initialize the UI components."""
-        layout = QVBoxLayout(self)
+        main_layout = QVBoxLayout(self)
+        main_layout.setSpacing(8)
+
+        # Create scroll area for all settings content
+        scroll_area = QScrollArea()
+        scroll_area.setWidgetResizable(True)
+        scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        scroll_area.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        scroll_area.setFrameShape(QScrollArea.Shape.NoFrame)
+
+        # Container widget for scroll area content
+        scroll_content = QWidget()
+        layout = QVBoxLayout(scroll_content)
         layout.setSpacing(12)
+        layout.setContentsMargins(4, 4, 4, 4)
 
         # 1. Appearance Settings
         appearance_group = QGroupBox("Appearance")
@@ -195,13 +212,21 @@ class SettingsDialog(QDialog):
         self.advanced_container.setLayout(advanced_layout)
         layout.addWidget(self.advanced_container)
 
-        # Dialog buttons
+        # Add stretch to push content up when there's extra space
+        layout.addStretch(1)
+
+        # Finalize scroll area
+        scroll_area.setWidget(scroll_content)
+        main_layout.addWidget(scroll_area, 1)  # Give scroll area stretch priority
+
+        # Dialog buttons (outside scroll area so always visible)
         buttons = QDialogButtonBox(
             QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel
         )
         buttons.accepted.connect(self._save_and_accept)
         buttons.rejected.connect(self.reject)
-        layout.addWidget(buttons)
+        main_layout.addWidget(buttons)
+
 
     def _on_dark_mode_toggled(self, checked: bool) -> None:
         """Apply dark mode immediately when toggled."""
@@ -240,7 +265,7 @@ class SettingsDialog(QDialog):
             self.btn_advanced.setText("⚙️ Hide Advanced Settings")
         else:
             self.btn_advanced.setText("⚙️ Show Advanced Settings")
-        self.adjustSize()
+        # Note: No adjustSize() - dialog has fixed size with scroll area
 
     def _load_settings(self) -> None:
         """Load current settings from QSettings."""

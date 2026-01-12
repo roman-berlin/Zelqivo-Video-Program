@@ -520,8 +520,8 @@ def render_single_pass(
             getattr(cut, 'camera_index', 0)
         )
 
-    # Build FFmpeg args
-    args = build_single_pass_filter_complex_args(
+    # Build FFmpeg args (returns tuple with filter script path for cleanup)
+    args, filter_script_path = build_single_pass_filter_complex_args(
         cuts=cuts,
         output_path=output_path,
         resolution=resolution,
@@ -535,31 +535,41 @@ def render_single_pass(
             total_count=len(cuts),
         )
 
-    # Run FFmpeg
-    proc = FFmpegProcess(args, output_path)
-    result = proc.run()
+    try:
+        # Run FFmpeg
+        proc = FFmpegProcess(args, output_path)
+        result = proc.run()
 
-    if result.cancelled:
-        logger.info("Single-pass render cancelled")
+        if result.cancelled:
+            logger.info("Single-pass render cancelled")
+            return RenderResult(
+                success=False,
+                cancelled=True,
+                error="Cancelled by user",
+                total_count=len(cuts),
+            )
+
+        if not result.success:
+            logger.error("Single-pass render failed: %s", result.error)
+            return RenderResult(
+                success=False,
+                error=f"Single-pass render failed: {result.error}",
+                total_count=len(cuts),
+            )
+
+        logger.info("Single-pass render complete: %s", output_path)
         return RenderResult(
-            success=False,
-            cancelled=True,
-            error="Cancelled by user",
+            success=True,
+            segment_paths=[output_path],  # Single output file
+            rendered_count=len(cuts),
             total_count=len(cuts),
         )
+    finally:
+        # Clean up the filter script temp file
+        if filter_script_path and os.path.isfile(filter_script_path):
+            try:
+                os.remove(filter_script_path)
+                logger.debug("Cleaned up filter script: %s", filter_script_path)
+            except Exception as e:
+                logger.debug("Failed to cleanup filter script %s: %s", filter_script_path, e)
 
-    if not result.success:
-        logger.error("Single-pass render failed: %s", result.error)
-        return RenderResult(
-            success=False,
-            error=f"Single-pass render failed: {result.error}",
-            total_count=len(cuts),
-        )
-
-    logger.info("Single-pass render complete: %s", output_path)
-    return RenderResult(
-        success=True,
-        segment_paths=[output_path],  # Single output file
-        rendered_count=len(cuts),
-        total_count=len(cuts),
-    )

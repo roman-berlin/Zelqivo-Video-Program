@@ -20,6 +20,17 @@ _ffmpeg_path: Optional[str] = None
 _ffmpeg_checked: bool = False
 
 
+def _get_app_dir() -> Path:
+    """Get the application directory (frozen or source)."""
+    import sys
+    if getattr(sys, 'frozen', False):
+        # Running as PyInstaller bundle
+        return Path(sys._MEIPASS)
+    else:
+        # Running from source - project root
+        return Path(__file__).resolve().parent.parent.parent.parent
+
+
 def _find_ffmpeg() -> Optional[str]:
     """Locate ffmpeg executable. Returns path or None if not found."""
     global _ffmpeg_path, _ffmpeg_checked
@@ -27,7 +38,14 @@ def _find_ffmpeg() -> Optional[str]:
         return _ffmpeg_path
     _ffmpeg_checked = True
 
-    # Check if ffmpeg is in PATH
+    # 1. Check bundled location first (for frozen builds)
+    bundled_path = _get_app_dir() / "tools" / "ffmpeg" / "ffmpeg.exe"
+    if bundled_path.is_file():
+        _ffmpeg_path = str(bundled_path)
+        logger.info("Using bundled ffmpeg: %s", _ffmpeg_path)
+        return _ffmpeg_path
+
+    # 2. Check if ffmpeg is in PATH
     try:
         result = subprocess.run(
             ["ffmpeg", "-version"],
@@ -41,7 +59,7 @@ def _find_ffmpeg() -> Optional[str]:
     except Exception:
         pass
 
-    # Common Windows locations
+    # 3. Common Windows locations
     if os.name == "nt":
         common_paths = [
             r"C:\ffmpeg\bin\ffmpeg.exe",
@@ -633,7 +651,7 @@ def build_single_pass_filter_complex_args(
     output_path: str,
     resolution: str = "1080p",
     fps: float = 30.0,
-) -> list[str]:
+) -> tuple[list[str], Optional[str]]:
     """Build FFmpeg args for single-pass multi-segment render using filter_complex.
 
     This approach eliminates black frames at segment boundaries by:
@@ -641,6 +659,9 @@ def build_single_pass_filter_complex_args(
     2. Using trim filter for frame-accurate segment extraction
     3. Using concat filter to join segments seamlessly
     4. Single CFR encode output
+
+    To avoid Windows command-line length limits (WinError 206), the filter_complex
+    is written to a temp file and passed via -filter_complex_script.
 
     Args:
         cuts: List of cut definitions with fields:
@@ -653,11 +674,13 @@ def build_single_pass_filter_complex_args(
         fps: Target frame rate (default 30.0)
 
     Returns:
-        List of ffmpeg arguments ready for FFmpegProcess
+        Tuple of (ffmpeg args list, filter_script_path) where filter_script_path
+        is the path to the temp filter script file that should be cleaned up
+        after FFmpeg completes. Returns ([], None) on error.
     """
     if not cuts:
         logger.warning("build_single_pass_filter_complex_args: no cuts provided")
-        return []
+        return [], None
 
     # Determine output dimensions based on resolution
     if resolution == "720p":
@@ -674,7 +697,7 @@ def build_single_pass_filter_complex_args(
 
     if not unique_sources:
         logger.error("No valid source paths in cuts")
-        return []
+        return [], None
 
     # Build input arguments
     args = ["ffmpeg", "-y"]
@@ -738,9 +761,20 @@ def build_single_pass_filter_complex_args(
     # Join all filter parts
     filter_complex = ";".join(filter_parts)
 
-    # Build output arguments
+    # Write filter_complex to a temp file to avoid Windows command-line length limits
+    # This prevents WinError 206: "The filename or extension is too long"
+    filter_script_path = get_temp_output_path(suffix=".txt")
+    try:
+        with open(filter_script_path, "w", encoding="utf-8") as f:
+            f.write(filter_complex)
+        logger.debug("Filter script written to: %s (%d chars)", filter_script_path, len(filter_complex))
+    except Exception as e:
+        logger.error("Failed to write filter script: %s", e)
+        return [], None
+
+    # Build output arguments using -filter_complex_script instead of -filter_complex
     args.extend([
-        "-filter_complex", filter_complex,
+        "-filter_complex_script", filter_script_path,
         "-map", "[outv]",
         "-c:v", "libx264",
         "-preset", "fast",
@@ -756,4 +790,4 @@ def build_single_pass_filter_complex_args(
         len(cuts), len(unique_sources), Path(output_path).name
     )
 
-    return args
+    return args, filter_script_path

@@ -27,3 +27,7 @@ build/
 # Editors and IDEs
 .idea/
 .vscode/
+Installer/build_installer/Zelqivo_Setup_1.0.1.zip
+Installer/build_installer/Zelqivo_Setup_1.0.1.exe
+Installer/assets/icons/Zelqivo.ico
+.agent/workflows/build-exe.md

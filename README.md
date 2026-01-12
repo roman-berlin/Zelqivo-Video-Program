@@ -146,19 +146,34 @@ Artifacts will be placed in the `dist/` directory.
 
 Build a standalone Windows executable that runs on machines without Python installed.
 
-> **Note:** FFmpeg is bundled with the distribution. No separate FFmpeg install required.
+> **Note:** FFmpeg is bundled with the distribution. No separate FFmpeg install required on target machines.
 
 **Prerequisites:**
 - Python 3.10 or later
+- FFmpeg binaries at `C:\ffmpeg-7.1.1-full_build\bin\` (for bundling)
 - Development dependencies: `pip install -e ".[dev]"`
 
-**Build command:**
+**Quick Build (Recommended):**
 
-```bash
-pyinstaller multicam_editor.spec
+```powershell
+# Run from repo root - handles venv, deps, tests, and build
+.\build_exe.ps1
 ```
 
-**Output location:**
+**Manual Build:**
+
+```powershell
+# 1. Activate venv
+.\.venv\Scripts\Activate.ps1
+
+# 2. Install deps
+pip install -e ".[dev]"
+
+# 3. Build
+pyinstaller multicam_editor.spec --clean --noconfirm
+```
+
+**Output:**
 ```
 dist\MulticamEditor\MulticamEditor.exe
 ```
@@ -166,28 +181,39 @@ dist\MulticamEditor\MulticamEditor.exe
 The `dist\MulticamEditor\` folder contains the EXE and all required DLLs/resources.
 Copy the entire folder to distribute the application.
 
+**Log Files:**
+
+Logs are automatically written to:
+- Windows: `%LOCALAPPDATA%\Zelqivo\logs\zelqivo.log`
+- Logs rotate automatically (5 files × 1MB max)
+
 **Troubleshooting:**
 
 | Error | Solution |
 |-------|----------|
 | "Qt platform plugin 'windows' not found" | Reinstall PyQt6: `pip uninstall PyQt6 PyQt6-Qt6 -y && pip install PyQt6` |
-| "ffmpeg not found" | Install FFmpeg and add to PATH, or place ffmpeg.exe in the app folder |
+| "ffmpeg not found" | FFmpeg should be bundled. Check `dist\MulticamEditor\tools\ffmpeg\` exists |
 | Missing VC++ Runtime | Install [VC++ Redistributable](https://aka.ms/vs/17/release/vc_redist.x64.exe) |
-| ImportError on launch | Rebuild with `pyinstaller --clean multicam_editor.spec` |
+| ImportError on launch | Rebuild with `--clean` flag |
+| No logs created | Check folder permissions for `%LOCALAPPDATA%\Zelqivo\` |
+| Black screen / no video | Ensure Qt Multimedia plugins are in `_internal\PyQt6\Qt6\plugins\multimedia\` |
 
 #### Smoke Test Checklist
 
-After building, verify the EXE works correctly (2 minutes):
+After building, verify the EXE works correctly (~2 minutes):
 
 1. [ ] Launch `dist\MulticamEditor\MulticamEditor.exe`
 2. [ ] Verify no console window appears (windowed mode)
 3. [ ] No "missing plugin" error dialogs
-4. [ ] Add 2+ video files via "Add Files" button
-5. [ ] Play preview – video displays correctly
-6. [ ] Confirm audio plays during preview
-7. [ ] Seek on the timeline works
-8. [ ] Click "Create Video" and export to a folder
-9. [ ] Verify output MP4 plays in Windows Media Player or VLC
+4. [ ] Import 2+ video files via "Add Files" button
+5. [ ] (Optional) Add external audio file
+6. [ ] Play preview – video displays correctly
+7. [ ] Confirm audio plays during preview
+8. [ ] Seek on the timeline works
+9. [ ] Click "Create Video" (Process) and export
+10. [ ] Verify output MP4 plays in VLC or Windows Media Player
+11. [ ] Check logs exist at `%LOCALAPPDATA%\Zelqivo\logs\`
+
 
 ### Real Speaker Diarization (pyannote.audio) – Windows Setup
 

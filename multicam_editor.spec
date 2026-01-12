@@ -1,14 +1,20 @@
 # -*- mode: python ; coding: utf-8 -*-
 """
-PyInstaller spec file for MulticamEditor.
+PyInstaller spec file for MulticamEditor (Zelqivo).
 
 Build command:
-    pyinstaller multicam_editor.spec
+    pyinstaller multicam_editor.spec --clean
 
 Output:
     dist/MulticamEditor/MulticamEditor.exe
+
+Bundled:
+    - FFmpeg binaries (tools/ffmpeg/)
+    - Qt Multimedia plugins
+    - All required Python packages
 """
 
+import os
 from PyInstaller.utils.hooks import collect_data_files, collect_submodules
 
 block_cipher = None
@@ -36,36 +42,68 @@ hiddenimports = [
     'ffmpeg',
     'moviepy',
     'moviepy.editor',
+    'moviepy.video',
+    'moviepy.video.io',
+    'moviepy.video.io.ffmpeg_reader',
+    'moviepy.video.io.ffmpeg_writer',
+    'moviepy.audio',
+    'moviepy.audio.io',
+    'moviepy.audio.io.readers',
     'tqdm',
+    # imageio for moviepy compatibility
+    'imageio',
+    'imageio_ffmpeg',
+    'imageio_ffmpeg.binaries',
 ]
 
 # Add all cv2 submodules
 hiddenimports += collect_submodules('cv2')
 
-# FFmpeg binaries to bundle
-ffmpeg_binaries = [
-    (r'C:\ffmpeg-7.1.1-full_build\bin\ffmpeg.exe', 'tools/ffmpeg'),
-    (r'C:\ffmpeg-7.1.1-full_build\bin\ffprobe.exe', 'tools/ffmpeg'),
-]
+# Add moviepy submodules
+hiddenimports += collect_submodules('moviepy')
+
+# Collect data files for imageio_ffmpeg (contains bundled ffmpeg as fallback)
+datas = []
+try:
+    datas += collect_data_files('imageio_ffmpeg')
+except Exception:
+    pass  # imageio_ffmpeg not installed or no data files
+
+# FFmpeg binaries to bundle - check if they exist
+ffmpeg_path = r'C:\ffmpeg-7.1.1-full_build\bin\ffmpeg.exe'
+ffprobe_path = r'C:\ffmpeg-7.1.1-full_build\bin\ffprobe.exe'
+
+if os.path.exists(ffmpeg_path) and os.path.exists(ffprobe_path):
+    datas += [
+        (ffmpeg_path, 'tools/ffmpeg'),
+        (ffprobe_path, 'tools/ffmpeg'),
+    ]
+else:
+    print("WARNING: FFmpeg binaries not found at expected paths.")
+    print(f"  Expected: {ffmpeg_path}")
+    print("  The EXE may not work without FFmpeg in PATH.")
 
 a = Analysis(
     ['src/multicam_editor/main.py'],
     pathex=[],
     binaries=[],
-    datas=ffmpeg_binaries,
+    datas=datas,
     hiddenimports=hiddenimports,
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],
     excludes=[
-        # Exclude unused large packages
+        # Exclude unused large packages to reduce size
         'tkinter',
         'matplotlib',
-        'scipy',
-        'pandas',
         'IPython',
         'notebook',
         'jupyter',
+        # AI packages (optional, not bundled in core build)
+        'torch',
+        'librosa',
+        'pyannote',
+        'speechbrain',
     ],
     win_no_prefer_redirects=False,
     win_private_assemblies=False,
@@ -91,7 +129,7 @@ exe = EXE(
     target_arch=None,
     codesign_identity=None,
     entitlements_file=None,
-    # icon='assets/icon.ico',  # Uncomment if icon is added later
+    # icon='assets/icon.ico',  # Uncomment when icon is added
 )
 
 coll = COLLECT(
@@ -104,3 +142,4 @@ coll = COLLECT(
     upx_exclude=[],
     name='MulticamEditor',
 )
+

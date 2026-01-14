@@ -807,11 +807,18 @@ class ProcessingPipeline:
         min_switch_interval_ms = settings.value("decision_engine/min_switch_interval_ms", 1500, type=int)
         min_speech_ms = settings.value("decision_engine/min_speech_ms", 600, type=int)
         bg_short_remark_ms = settings.value("decision_engine/bg_short_remark_ms", 500, type=int)
+        # Smoothing parameters
+        confidence_stability_window_ms = settings.value("decision_engine/confidence_stability_window_ms", 400, type=int)
+        min_clip_length_ms = settings.value("decision_engine/min_clip_length_ms", 1000, type=int)
+        soft_boundary_search_ms = settings.value("decision_engine/soft_boundary_search_ms", 150, type=int)
 
         engine = DecisionEngine(
             min_switch_interval_ms=min_switch_interval_ms,
             min_speech_ms=min_speech_ms,
             bg_short_remark_ms=bg_short_remark_ms,
+            confidence_stability_window_ms=confidence_stability_window_ms,
+            min_clip_length_ms=min_clip_length_ms,
+            soft_boundary_search_ms=soft_boundary_search_ms,
         )
         self._cut_plan = engine.generate_cut_plan(
             self._speaker_segments,
@@ -826,6 +833,9 @@ class ProcessingPipeline:
             min_switch_interval_ms=min_switch_interval_ms,
             min_speech_ms=min_speech_ms,
             bg_short_remark_ms=bg_short_remark_ms,
+            confidence_stability_window_ms=confidence_stability_window_ms,
+            min_clip_length_ms=min_clip_length_ms,
+            soft_boundary_search_ms=soft_boundary_search_ms,
         )
         self._qa_exporter.set_total_duration(total_duration_ms)
 

@@ -3,6 +3,15 @@
 
 Provides helpers for encoding, trimming, concatenation with proper
 subprocess management, cancellation support, and temp file cleanup.
+
+NOTE ON WINDOWS COMMAND-LINE LIMITS:
+    The build_single_pass_filter_complex_args function writes the filter_complex
+    graph to a temp file and uses -filter_complex_script instead of inline
+    -filter_complex. This avoids Windows WinError 206 ("The filename or extension
+    is too long") which occurs when command lines exceed ~8191 characters.
+    
+    Lifecycle: The temp filter script is created by build_single_pass_filter_complex_args
+    and should be deleted by the caller (render_single_pass) in a finally block.
 """
 from __future__ import annotations
 

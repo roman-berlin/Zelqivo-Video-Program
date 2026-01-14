@@ -472,31 +472,41 @@ class TestMergeVideos:
 
 
 class TestBuildSinglePassFilterComplexArgs:
-    """Tests for build_single_pass_filter_complex_args function."""
+    """Tests for build_single_pass_filter_complex_args function.
+    
+    Note: The function returns (args, filter_script_path) tuple and writes
+    the filter_complex to a temp file to avoid Windows command-line limits.
+    """
 
     def test_empty_cuts_returns_empty(self):
         """Empty cuts list should return empty args."""
-        args = build_single_pass_filter_complex_args([], "/output.mp4")
+        args, filter_path = build_single_pass_filter_complex_args([], "/output.mp4")
         assert args == []
+        assert filter_path is None
 
     def test_single_cut_produces_valid_filter(self, tmp_path):
-        """Single cut should produce valid filter_complex."""
+        """Single cut should produce valid filter_complex in script file."""
         source = tmp_path / "video.mp4"
         source.write_text("fake")
         
         cuts = [CutDefinition(str(source), 0, 5000, 0, camera_index=0)]
-        args = build_single_pass_filter_complex_args(cuts, "/output.mp4", resolution="1080p")
+        args, filter_path = build_single_pass_filter_complex_args(cuts, "/output.mp4", resolution="1080p")
         
-        assert args[0] == "ffmpeg"
-        assert "-filter_complex" in args
-        
-        # Find filter_complex value
-        fc_idx = args.index("-filter_complex")
-        fc_value = args[fc_idx + 1]
-        
-        assert "trim=start=0.000:end=5.000" in fc_value
-        assert "setpts=PTS-STARTPTS" in fc_value
-        assert "concat=n=1:v=1:a=0" in fc_value
+        try:
+            assert args[0] == "ffmpeg"
+            assert "-filter_complex_script" in args
+            
+            # Read filter content from script file
+            assert filter_path is not None
+            with open(filter_path, "r") as f:
+                fc_value = f.read()
+            
+            assert "trim=start=0.000:end=5.000" in fc_value
+            assert "setpts=PTS-STARTPTS" in fc_value
+            assert "concat=n=1:v=1:a=0" in fc_value
+        finally:
+            if filter_path and os.path.exists(filter_path):
+                os.remove(filter_path)
 
     def test_three_cuts_two_cameras(self, tmp_path):
         """Three cuts across two cameras should produce correct filter."""
@@ -511,27 +521,32 @@ class TestBuildSinglePassFilterComplexArgs:
             CutDefinition(str(cam0), 12200, 15000, 2, camera_index=0),
         ]
         
-        args = build_single_pass_filter_complex_args(cuts, "/output.mp4")
+        args, filter_path = build_single_pass_filter_complex_args(cuts, "/output.mp4")
         
-        # Should have two inputs
-        input_count = args.count("-i")
-        assert input_count == 2
-        
-        # Find filter_complex
-        fc_idx = args.index("-filter_complex")
-        fc_value = args[fc_idx + 1]
-        
-        # Should have trim for each segment
-        assert "trim=start=0.000:end=4.600" in fc_value
-        assert "trim=start=4.600:end=12.200" in fc_value
-        assert "trim=start=12.200:end=15.000" in fc_value
-        
-        # Should have concat with n=3
-        assert "concat=n=3:v=1:a=0" in fc_value
-        
-        # Should have correct input references (both [0:v] and [1:v])
-        assert "[0:v]" in fc_value
-        assert "[1:v]" in fc_value
+        try:
+            # Should have two inputs
+            input_count = args.count("-i")
+            assert input_count == 2
+            
+            # Read filter content from script file
+            assert filter_path is not None
+            with open(filter_path, "r") as f:
+                fc_value = f.read()
+            
+            # Should have trim for each segment
+            assert "trim=start=0.000:end=4.600" in fc_value
+            assert "trim=start=4.600:end=12.200" in fc_value
+            assert "trim=start=12.200:end=15.000" in fc_value
+            
+            # Should have concat with n=3
+            assert "concat=n=3:v=1:a=0" in fc_value
+            
+            # Should have correct input references (both [0:v] and [1:v])
+            assert "[0:v]" in fc_value
+            assert "[1:v]" in fc_value
+        finally:
+            if filter_path and os.path.exists(filter_path):
+                os.remove(filter_path)
 
     def test_resolution_720p(self, tmp_path):
         """720p resolution should use correct dimensions."""
@@ -539,13 +554,18 @@ class TestBuildSinglePassFilterComplexArgs:
         source.write_text("fake")
         
         cuts = [CutDefinition(str(source), 0, 1000, 0)]
-        args = build_single_pass_filter_complex_args(cuts, "/output.mp4", resolution="720p")
+        args, filter_path = build_single_pass_filter_complex_args(cuts, "/output.mp4", resolution="720p")
         
-        fc_idx = args.index("-filter_complex")
-        fc_value = args[fc_idx + 1]
-        
-        assert "scale=1280:720" in fc_value
-        assert "pad=1280:720" in fc_value
+        try:
+            assert filter_path is not None
+            with open(filter_path, "r") as f:
+                fc_value = f.read()
+            
+            assert "scale=1280:720" in fc_value
+            assert "pad=1280:720" in fc_value
+        finally:
+            if filter_path and os.path.exists(filter_path):
+                os.remove(filter_path)
 
     def test_resolution_1080p_default(self, tmp_path):
         """Default 1080p resolution should use correct dimensions."""
@@ -553,13 +573,18 @@ class TestBuildSinglePassFilterComplexArgs:
         source.write_text("fake")
         
         cuts = [CutDefinition(str(source), 0, 1000, 0)]
-        args = build_single_pass_filter_complex_args(cuts, "/output.mp4")
+        args, filter_path = build_single_pass_filter_complex_args(cuts, "/output.mp4")
         
-        fc_idx = args.index("-filter_complex")
-        fc_value = args[fc_idx + 1]
-        
-        assert "scale=1920:1080" in fc_value
-        assert "pad=1920:1080" in fc_value
+        try:
+            assert filter_path is not None
+            with open(filter_path, "r") as f:
+                fc_value = f.read()
+            
+            assert "scale=1920:1080" in fc_value
+            assert "pad=1920:1080" in fc_value
+        finally:
+            if filter_path and os.path.exists(filter_path):
+                os.remove(filter_path)
 
     def test_output_has_cfr_mode(self, tmp_path):
         """Output should use CFR mode to prevent VFR issues."""
@@ -567,11 +592,15 @@ class TestBuildSinglePassFilterComplexArgs:
         source.write_text("fake")
         
         cuts = [CutDefinition(str(source), 0, 1000, 0)]
-        args = build_single_pass_filter_complex_args(cuts, "/output.mp4")
+        args, filter_path = build_single_pass_filter_complex_args(cuts, "/output.mp4")
         
-        assert "-fps_mode" in args
-        fps_mode_idx = args.index("-fps_mode")
-        assert args[fps_mode_idx + 1] == "cfr"
+        try:
+            assert "-fps_mode" in args
+            fps_mode_idx = args.index("-fps_mode")
+            assert args[fps_mode_idx + 1] == "cfr"
+        finally:
+            if filter_path and os.path.exists(filter_path):
+                os.remove(filter_path)
 
 
 class TestRenderSinglePass:
@@ -628,11 +657,53 @@ class TestRenderSinglePass:
         assert result.segment_paths == [str(output)]
         assert result.rendered_count == 1
 
+    @patch("multicam_editor.logic.video_merger.is_ffmpeg_available")
+    @patch("multicam_editor.logic.video_merger.FFmpegProcess")
+    def test_filter_script_cleanup_after_render(self, mock_proc, mock_ffmpeg, tmp_path):
+        """Filter script temp file should be cleaned up after render completes.
+        
+        The filter_complex is written to a temp file to avoid Windows WinError 206
+        (command line too long). This temp file must be deleted after FFmpeg runs.
+        """
+        mock_ffmpeg.return_value = True
+        
+        source = tmp_path / "video.mp4"
+        source.write_text("fake")
+        output = tmp_path / "output.mp4"
+        
+        # Track what files exist before and after
+        filter_script_paths = []
+        
+        def mock_run():
+            # Find the filter script path from the args
+            args = mock_proc.call_args[0][0]
+            if "-filter_complex_script" in args:
+                idx = args.index("-filter_complex_script")
+                filter_script_path = args[idx + 1]
+                filter_script_paths.append(filter_script_path)
+                # Verify file exists during render
+                assert os.path.isfile(filter_script_path), "Filter script should exist during render"
+            return FFmpegResult(success=True, output_path=str(output))
+        
+        mock_proc_instance = MagicMock()
+        mock_proc_instance.run = mock_run
+        mock_proc.return_value = mock_proc_instance
+        
+        cuts = [CutDefinition(str(source), 0, 1000, 0)]
+        result = render_single_pass(cuts, str(output))
+        
+        assert result.success
+        # Verify filter script was used
+        assert len(filter_script_paths) == 1
+        # Verify filter script was cleaned up after render
+        assert not os.path.exists(filter_script_paths[0]), \
+            "Filter script should be cleaned up after render"
+
 
 class TestBlackFramesPrevention:
     """Integration tests to verify no black frames at cut boundaries.
     
-    These tests use generated test videos and verify frames at boundaries.
+    These tests verify filter_complex structure for seamless concatenation.
     """
 
     @pytest.fixture
@@ -657,20 +728,26 @@ class TestBlackFramesPrevention:
             CutDefinition(str(cam0), 2000, 3000, 2, camera_index=0),
         ]
         
-        args = build_single_pass_filter_complex_args(cuts, str(tmp_path / "out.mp4"))
-        fc_idx = args.index("-filter_complex")
-        fc_value = args[fc_idx + 1]
+        args, filter_path = build_single_pass_filter_complex_args(cuts, str(tmp_path / "out.mp4"))
         
-        # Each segment must have setpts=PTS-STARTPTS to reset timestamps
-        # This prevents gaps that cause black frames
-        setpts_count = fc_value.count("setpts=PTS-STARTPTS")
-        assert setpts_count == 3, f"Expected 3 setpts, got {setpts_count}"
-        
-        # Must use concat filter (not concat demuxer) for seamless joining
-        assert "concat=n=3:v=1:a=0" in fc_value
-        
-        # Must have fps filter to ensure CFR
-        assert "fps=" in fc_value
+        try:
+            assert filter_path is not None
+            with open(filter_path, "r") as f:
+                fc_value = f.read()
+            
+            # Each segment must have setpts=PTS-STARTPTS to reset timestamps
+            # This prevents gaps that cause black frames
+            setpts_count = fc_value.count("setpts=PTS-STARTPTS")
+            assert setpts_count == 3, f"Expected 3 setpts, got {setpts_count}"
+            
+            # Must use concat filter (not concat demuxer) for seamless joining
+            assert "concat=n=3:v=1:a=0" in fc_value
+            
+            # Must have fps filter to ensure CFR
+            assert "fps=" in fc_value
+        finally:
+            if filter_path and os.path.exists(filter_path):
+                os.remove(filter_path)
 
     def test_no_seeking_per_segment(self, tmp_path):
         """Verify we don't use -ss which causes keyframe seeking issues."""
@@ -682,13 +759,18 @@ class TestBlackFramesPrevention:
             CutDefinition(str(source), 1000, 2000, 1),
         ]
         
-        args = build_single_pass_filter_complex_args(cuts, str(tmp_path / "out.mp4"))
+        args, filter_path = build_single_pass_filter_complex_args(cuts, str(tmp_path / "out.mp4"))
         
-        # Should NOT use -ss (input seeking) - the source of black frames
-        # We use trim filter instead which is frame-accurate
-        assert "-ss" not in args
-        
-        # trim filter should be used instead
-        fc_idx = args.index("-filter_complex")
-        fc_value = args[fc_idx + 1]
-        assert "trim=start=" in fc_value
+        try:
+            # Should NOT use -ss (input seeking) - the source of black frames
+            # We use trim filter instead which is frame-accurate
+            assert "-ss" not in args
+            
+            # trim filter should be used instead
+            assert filter_path is not None
+            with open(filter_path, "r") as f:
+                fc_value = f.read()
+            assert "trim=start=" in fc_value
+        finally:
+            if filter_path and os.path.exists(filter_path):
+                os.remove(filter_path)

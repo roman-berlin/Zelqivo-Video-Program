@@ -171,12 +171,19 @@ class QAArtifactExporter:
         min_switch_interval_ms: int,
         min_speech_ms: int,
         bg_short_remark_ms: int,
+        # Smoothing parameters
+        confidence_stability_window_ms: int = 400,
+        min_clip_length_ms: int = 1000,
+        soft_boundary_search_ms: int = 150,
     ) -> None:
-        """Store decision engine thresholds."""
+        """Store decision engine thresholds and smoothing parameters."""
         self._thresholds = {
             "min_switch_interval_ms": min_switch_interval_ms,
             "min_speech_ms": min_speech_ms,
             "bg_short_remark_ms": bg_short_remark_ms,
+            "confidence_stability_window_ms": confidence_stability_window_ms,
+            "min_clip_length_ms": min_clip_length_ms,
+            "soft_boundary_search_ms": soft_boundary_search_ms,
         }
 
     def set_total_duration(self, duration_ms: int) -> None:

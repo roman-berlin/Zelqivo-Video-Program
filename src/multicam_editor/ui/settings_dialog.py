@@ -22,8 +22,12 @@ from PyQt6.QtWidgets import (
 
 from ..core.project import AudioMixMode, AudioMixSettings
 from ..logic.active_speaker import DiarizationMode
+from ..logic.switching_strategy import SwitchingStrategy, DEFAULT_STRATEGY
 from ..logic.debug_export import export_debug_package
+import logging
 import os
+
+logger = logging.getLogger(__name__)
 
 
 class SettingsDialog(QDialog):
@@ -99,6 +103,18 @@ class SettingsDialog(QDialog):
             "Lips Only: Uses visual movement for both timing and identification (no audio)."
         )
         diarization_layout.addRow("Detection Mode:", self.combo_diarization_mode)
+        
+        # Switching Quality dropdown
+        self.combo_switching_quality = QComboBox()
+        self.combo_switching_quality.addItem("⚡ Fast (CPU) - Recommended", SwitchingStrategy.FAST_RULES.value)
+        self.combo_switching_quality.addItem("⚖️ Balanced - Hybrid", SwitchingStrategy.BALANCED_LIPS_ENERGY.value)
+        self.combo_switching_quality.addItem("🎯 Best - Visual Only", SwitchingStrategy.BEST_LIPS.value)
+        self.combo_switching_quality.setToolTip(
+            "Fast: Energy + Rules, recommended for most users.\n"
+            "Balanced: Hybrid audio + visual detection.\n"
+            "Best: Visual-only (may be slow without GPU)."
+        )
+        diarization_layout.addRow("Switching Quality:", self.combo_switching_quality)
         
         diarization_group.setLayout(diarization_layout)
         layout.addWidget(diarization_group)
@@ -289,6 +305,14 @@ class SettingsDialog(QDialog):
         if index >= 0:
             self.combo_diarization_mode.setCurrentIndex(index)
         
+        # Switching Quality (default to Balanced for backward compatibility)
+        strategy_str = self.settings.value(
+            "switching/strategy", SwitchingStrategy.BALANCED_LIPS_ENERGY.value, type=str
+        )
+        strategy_index = self.combo_switching_quality.findData(strategy_str)
+        if strategy_index >= 0:
+            self.combo_switching_quality.setCurrentIndex(strategy_index)
+        
         # Decision engine
         self.spin_min_switch.setValue(
             self.settings.value("decision_engine/min_switch_interval_ms", 1500, type=int)
@@ -331,6 +355,11 @@ class SettingsDialog(QDialog):
         
         # Diarization
         self.settings.setValue("diarization/mode", self.combo_diarization_mode.currentData())
+        
+        # Switching Quality
+        selected_strategy = self.combo_switching_quality.currentData()
+        self.settings.setValue("switching/strategy", selected_strategy)
+        logger.info("Switching strategy saved: %s", selected_strategy)
         
         # Decision engine
         self.settings.setValue(
@@ -435,3 +464,26 @@ def get_qa_overlay_enabled() -> bool:
     """
     settings = QSettings("MultiCamEditor", "MultiCamEditor")
     return settings.value("qa_overlay/enabled", False, type=bool)
+
+
+def get_switching_strategy() -> SwitchingStrategy:
+    """Load switching strategy from QSettings (standalone helper).
+    
+    Returns:
+        SwitchingStrategy enum value. Defaults to BALANCED_LIPS_ENERGY for
+        backward compatibility with existing installations.
+    """
+    settings = QSettings("MultiCamEditor", "MultiCamEditor")
+    strategy_str = settings.value(
+        "switching/strategy", SwitchingStrategy.BALANCED_LIPS_ENERGY.value, type=str
+    )
+    try:
+        strategy = SwitchingStrategy(strategy_str)
+        logger.info("Loaded switching strategy from settings: %s", strategy.value)
+        return strategy
+    except ValueError:
+        logger.warning(
+            "Unknown switching strategy '%s', using default: %s",
+            strategy_str, DEFAULT_STRATEGY.value
+        )
+        return DEFAULT_STRATEGY

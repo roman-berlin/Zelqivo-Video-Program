@@ -21,7 +21,7 @@ from PyQt6.QtWidgets import (
 )
 
 from ..core.project import AudioMixMode, AudioMixSettings
-from ..logic.active_speaker import DiarizationMode
+# DiarizationMode import removed - Switching Quality now controls backend
 from ..logic.switching_strategy import SwitchingStrategy, DEFAULT_STRATEGY
 from ..logic.debug_export import export_debug_package
 import logging
@@ -95,14 +95,7 @@ class SettingsDialog(QDialog):
         diarization_group = QGroupBox("Diarization (Who is speaking?)")
         diarization_layout = QFormLayout()
 
-        self.combo_diarization_mode = QComboBox()
-        self.combo_diarization_mode.addItem("Hybrid (Audio VAD + Visual) - Recommended", DiarizationMode.HYBRID.value)
-        self.combo_diarization_mode.addItem("Lips Only (Strict Visual) - Experimental", DiarizationMode.LIPS.value)
-        self.combo_diarization_mode.setToolTip(
-            "Hybrid: Uses audio to detect speech timing, Lips to identify speaker.\n"
-            "Lips Only: Uses visual movement for both timing and identification (no audio)."
-        )
-        diarization_layout.addRow("Detection Mode:", self.combo_diarization_mode)
+        # Detection Mode dropdown removed - Switching Quality now controls backend
         
         # Switching Quality dropdown
         self.combo_switching_quality = QComboBox()
@@ -299,11 +292,7 @@ class SettingsDialog(QDialog):
             self.settings.value("output/quality", "1080p", type=str)
         )
         
-        # Diarization
-        mode_str = self.settings.value("diarization/mode", DiarizationMode.HYBRID.value, type=str)
-        index = self.combo_diarization_mode.findData(mode_str)
-        if index >= 0:
-            self.combo_diarization_mode.setCurrentIndex(index)
+        # Diarization mode loading removed - Switching Quality is the single control now
         
         # Switching Quality (default to Balanced for backward compatibility)
         strategy_str = self.settings.value(
@@ -353,8 +342,7 @@ class SettingsDialog(QDialog):
         # Output
         self.settings.setValue("output/quality", self.combo_quality.currentText())
         
-        # Diarization
-        self.settings.setValue("diarization/mode", self.combo_diarization_mode.currentData())
+        # Diarization mode save removed - Switching Quality is the single control now
         
         # Switching Quality
         selected_strategy = self.combo_switching_quality.currentData()

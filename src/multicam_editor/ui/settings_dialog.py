@@ -18,11 +18,13 @@ from PyQt6.QtWidgets import (
     QFileDialog,
     QScrollArea,
     QWidget,
+    QLabel,
 )
 
 from ..core.project import AudioMixMode, AudioMixSettings
 # DiarizationMode import removed - Switching Quality now controls backend
 from ..logic.switching_strategy import SwitchingStrategy, DEFAULT_STRATEGY
+from ..logic.eta_estimation import get_strategy_helper_text
 from ..logic.debug_export import export_debug_package
 import logging
 import os
@@ -108,6 +110,15 @@ class SettingsDialog(QDialog):
             "Best: Visual-only (may be slow without GPU)."
         )
         diarization_layout.addRow("Switching Quality:", self.combo_switching_quality)
+
+        # Helper text for strategy
+        self.lbl_strategy_help = QLabel("")
+        self.lbl_strategy_help.setWordWrap(True)
+        self.lbl_strategy_help.setStyleSheet("color: gray; font-size: 9pt; font-style: italic;")
+        diarization_layout.addRow("", self.lbl_strategy_help)
+
+        self.combo_switching_quality.currentIndexChanged.connect(self._update_strategy_help)
+        self._update_strategy_help()
         
         diarization_group.setLayout(diarization_layout)
         layout.addWidget(diarization_group)
@@ -337,6 +348,17 @@ class SettingsDialog(QDialog):
         # Apply initial UI state
         self._on_audio_mode_changed(audio_mode)
 
+    def _update_strategy_help(self) -> None:
+        """Update helper text based on selected strategy."""
+        data = self.combo_switching_quality.currentData()
+        if data:
+            try:
+                strategy = SwitchingStrategy(data)
+                text = get_strategy_helper_text(strategy)
+                self.lbl_strategy_help.setText(text)
+            except ValueError:
+                self.lbl_strategy_help.setText("")
+
     def _save_and_accept(self) -> None:
         """Save settings to QSettings and accept dialog."""
         # Output
@@ -475,3 +497,4 @@ def get_switching_strategy() -> SwitchingStrategy:
             strategy_str, DEFAULT_STRATEGY.value
         )
         return DEFAULT_STRATEGY
+

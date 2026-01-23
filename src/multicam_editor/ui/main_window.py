@@ -42,6 +42,7 @@ from .timeline.adapter import TimelineAdapter
 from ..core.project import Project
 # Import undo/redo commands
 from ..logic.processing_worker import ProcessingThread
+from ..logic.commands import AddClipsCommand
 from ..logic.preflight import check_preflight_warnings, format_warnings_for_display
 from ..logic.preflight import (
     run_gpu_preflight_check, 
@@ -1007,8 +1008,10 @@ class MainWindow(QMainWindow):
         # We can detect once or just rely on eta_estimation (which calls detect_gpu if needed)
         # eta_estimation.detect_gpu caches? No.
         # But detect_gpu handles import error gracefully.
+        from ..logic.preflight import detect_gpu
+        gpu_available = detect_gpu()
         
-        eta_text = get_eta_display_text(total_seconds, strategy)
+        eta_text = get_eta_display_text(total_seconds, strategy, gpu_available)
         self.lbl_eta.setText(f"Est. Time: {eta_text}")
         
         # Color coding: optional
@@ -1074,11 +1077,6 @@ class MainWindow(QMainWindow):
             strategy = status.final_strategy
             # Update UI if valid
             self._update_eta_label()
-            
-        
-        if status.result == GpuPreflightResult.CANCELLED:
-             logger.info("Processing cancelled by user during GPU preflight.")
-             return
 
         # --- 2. Long Project Warning (CPU) ---
         # Re-check GPU status or use preflight result
@@ -1183,88 +1181,6 @@ class MainWindow(QMainWindow):
         self._processing_thread.error.connect(self._on_processing_error)
         self._processing_thread.finished.connect(self._on_thread_finished)
         
-        self._progress_dialog.cancelRequested.connect(self._on_cancel_processing)
-
-        # Start processing
-        self._processing_thread.start()
-        self._progress_dialog.show()
-
-        # Speaker switching is always enabled (core feature of this app)
-        speaker_switching_enabled = True
-        use_external_audio = self.chk_external_audio.isChecked()
-
-        # Get external audio path if enabled - validate it was actually selected
-        external_audio: str | None = None
-        if use_external_audio:
-            if not self._external_audio_path:
-                # User checked the box but never selected an audio file
-                from PyQt6.QtWidgets import QMessageBox
-                QMessageBox.warning(
-                    self,
-                    "External Audio Required",
-                    "You checked 'Use external audio' but no audio file was selected.\n\n"
-                    "Please either:\n"
-                    "• Click 'Choose Audio...' to select an audio file, or\n"
-                    "• Uncheck 'Use external audio' to proceed without it."
-                )
-                return
-            elif os.path.isfile(self._external_audio_path):
-                external_audio = self._external_audio_path
-            else:
-                # File was selected but no longer exists
-                from PyQt6.QtWidgets import QMessageBox
-                QMessageBox.warning(
-                    self,
-                    "External Audio Not Found",
-                    f"The selected external audio file was not found:\n\n"
-                    f"{self._external_audio_path}\n\n"
-                    "Please select a different audio file or uncheck 'Use external audio'."
-                )
-                return
-
-        # Get camera-to-speaker mapping
-        camera_mapping = self.get_camera_speaker_mapping()
-
-        # Read output quality from settings
-        quality = self.settings.value("output/quality", "1080p", type=str)
-
-        # Generate deterministic output path
-        output_path = self._generate_output_path(paths)
-
-        # Log processing configuration
-        logger.info(
-            "Processing: speaker_switching=%s, external_audio=%s, cameras=%d, quality=%s, output=%s",
-            speaker_switching_enabled, external_audio is not None, len(paths), quality, output_path
-        )
-
-        # Run preflight checks and display warnings (non-blocking)
-        preflight_warnings = check_preflight_warnings(paths)
-        if preflight_warnings:
-            warning_msg = format_warnings_for_display(preflight_warnings)
-            self._toast(warning_msg, 6000)  # Show longer for user to read
-            logger.warning("Preflight warnings: %s", warning_msg)
-
-        # Create and show progress dialog
-        self._progress_dialog = ProcessingProgressDialog(self)
-        self._progress_dialog.set_output_path(output_path)
-
-        # Create processing thread with all options
-        self._processing_thread = ProcessingThread(
-            input_files=paths,
-            external_audio=external_audio,
-            resolution=quality,
-            output_path=output_path,
-            speaker_switching_enabled=speaker_switching_enabled,
-            camera_speaker_mapping=camera_mapping,
-            parent=self,
-        )
-
-        # Connect signals
-        self._processing_thread.progress.connect(self._on_processing_progress)
-        self._processing_thread.stage.connect(self._on_processing_stage)
-        self._processing_thread.finished_with_path.connect(self._on_processing_finished)
-        self._processing_thread.error.connect(self._on_processing_error)
-        self._processing_thread.finished.connect(self._on_thread_finished)
         self._progress_dialog.cancelRequested.connect(self._on_cancel_processing)
 
         # Start processing

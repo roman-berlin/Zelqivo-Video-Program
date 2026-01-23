@@ -246,7 +246,7 @@ def get_eta_display_text(
     eta_range = compute_eta_range(total_audio_seconds, strategy, gpu_available)
     
     if eta_range is None:
-        return "Estimated processing time: -"
+        return "Calculating..."
     
     min_s, max_s = eta_range
     formatted = format_eta_range(min_s, max_s)

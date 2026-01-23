@@ -567,8 +567,12 @@ class ProcessingPipeline:
                 logger.info("BEST_LIPS: Starting lip movement detection")
                 self._emit_progress(50, "Initializing visual detection...")
                 
+                # Calculate duration from probe results
+                duration_ms = max(r.duration_ms for r in self._probe_results)
+                
                 self._speaker_segments = engine.detect_speakers(
                     video_paths=self.input_files,
+                    duration_ms=duration_ms,
                     progress_callback=on_diarization_progress,
                 )
                 logger.info("LIPS mode complete: %d segments", len(self._speaker_segments))
@@ -624,9 +628,13 @@ class ProcessingPipeline:
                     audio_path = audio_result.output_path
                     self._temp_files.append(audio_path)
                     
+                    # Calculate duration from probe results
+                    duration_ms = max(r.duration_ms for r in self._probe_results)
+                    
                     self._speaker_segments = engine.detect_speakers(
                         video_paths=self.input_files,
                         audio_path=audio_path,
+                        duration_ms=duration_ms,
                         progress_callback=on_diarization_progress,
                         cancel_callback=lambda: self._cancelled
                     )

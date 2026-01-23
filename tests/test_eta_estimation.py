@@ -212,9 +212,10 @@ class TestGetETADisplayText:
     def test_zero_duration_shows_placeholder(self) -> None:
         """Zero duration shows placeholder."""
         text = get_eta_display_text(0.0, SwitchingStrategy.FAST_RULES, False)
-        assert text == "Estimated processing time: -"
+        assert text == "Calculating..."
     
     def test_negative_duration_shows_placeholder(self) -> None:
         """Negative duration shows placeholder."""
         text = get_eta_display_text(-100.0, SwitchingStrategy.FAST_RULES, False)
-        assert text == "Estimated processing time: -"
+        assert text == "Calculating..."
+

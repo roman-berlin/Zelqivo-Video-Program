@@ -41,12 +41,25 @@ from .timeline.adapter import TimelineAdapter
 # Use the core project implementation for clip management and splitting.
 from ..core.project import Project
 # Import undo/redo commands
-from ..logic.commands import AddClipsCommand, RemoveClipsCommand, ReorderClipsCommand, TrimCommand
 from ..logic.processing_worker import ProcessingThread
+from ..logic.commands import AddClipsCommand
 from ..logic.preflight import check_preflight_warnings, format_warnings_for_display
-from ..logic.preflight import check_preflight_warnings, format_warnings_for_display
+from ..logic.preflight import (
+    run_gpu_preflight_check, 
+    GpuPreflightResult, 
+    GpuPreflightStatus
+)
+from ..logic.switching_strategy import SwitchingStrategy
+from ..logic.eta_estimation import (
+    get_eta_display_text, 
+    compute_eta_range, 
+    should_warn_long_project,
+    get_rtf_range
+)
 from .progress_dialog import ProcessingProgressDialog
 from .loading_dialog import LoadingDialog
+from .gpu_warning_dialog import show_gpu_warning_dialog
+from PyQt6.QtWidgets import QMessageBox
 
 
 
@@ -112,6 +125,14 @@ class MainWindow(QMainWindow):
         self.lbl_counter.setObjectName("lblCounter")
         ctrl_lay.addWidget(self.btn_add)
         ctrl_lay.addWidget(self.btn_process)
+        
+        # ETA Label
+        self.lbl_eta = QLabel("")
+        self.lbl_eta.setObjectName("lblEta")
+        self.lbl_eta.setStyleSheet("color: #2980b9; font-weight: bold; margin-left: 10px;")
+        self.lbl_eta.setToolTip("Estimated time to process on your hardware")
+        ctrl_lay.addWidget(self.lbl_eta)
+        
         ctrl_lay.addWidget(self.btn_remove_all)
         ctrl_lay.addStretch(1)
         ctrl_lay.addWidget(self.lbl_counter)
@@ -959,6 +980,43 @@ class MainWindow(QMainWindow):
         self.btn_remove_all.setEnabled(count > 0)
         # Show/hide inline hint based on video count
         self.lbl_process_hint.setVisible(count < MIN_VIDEOS_FOR_PROCESS)
+        
+        # Update ETA whenever counter refreshes (files added/removed)
+        self._update_eta_label()
+
+    def _update_eta_label(self) -> None:
+        """Update ETA label based on current file duration and selected strategy."""
+        clips = self.project.clips()
+        if not clips:
+            self.lbl_eta.setText("")
+            return
+            
+        # Sum duration of all clips (assuming all are used? Pipeline usually uses all)
+        # However, pipeline probe might update durations.
+        # Project.clips() have duration if probed.
+        total_seconds = sum(c.duration_ms for c in clips) / 1000.0
+        
+        # Get strategy from settings
+        # Note: We need to load it same way as pipeline or settings dialog
+        strategy_str = self.settings.value("switching/strategy", "balanced", type=str)
+        try:
+            strategy = SwitchingStrategy(strategy_str)
+        except ValueError:
+            strategy = SwitchingStrategy.BALANCED_LIPS_ENERGY
+            
+        # Check GPU availability (maybe cache this? detect_gpu is fastish but uses torch import)
+        # We can detect once or just rely on eta_estimation (which calls detect_gpu if needed)
+        # eta_estimation.detect_gpu caches? No.
+        # But detect_gpu handles import error gracefully.
+        from ..logic.preflight import detect_gpu
+        gpu_available = detect_gpu()
+        
+        eta_text = get_eta_display_text(total_seconds, strategy, gpu_available)
+        self.lbl_eta.setText(f"Est. Time: {eta_text}")
+        
+        # Color coding: optional
+        # If very long, maybe make it orange?
+        pass
 
     # --- Processing ---
     def _generate_output_path(self, input_paths: List[str]) -> str:
@@ -990,7 +1048,7 @@ class MainWindow(QMainWindow):
         return output_path
 
     def on_process_videos(self) -> None:
-        """Start the video processing pipeline."""
+        """Start the video processing pipeline with preflight checks."""
         clips = self.project.clips()
         paths = [clip.path for clip in clips]
 
@@ -998,6 +1056,62 @@ class MainWindow(QMainWindow):
             self._toast(f"Need at least {MIN_VIDEOS_FOR_PROCESS} videos to process.")
             return
 
+        # --- 1. GPU Preflight Check ---
+        # Load current strategy
+        strategy_str = self.settings.value("switching/strategy", "balanced", type=str)
+        try:
+            strategy = SwitchingStrategy(strategy_str)
+        except ValueError:
+            strategy = SwitchingStrategy.BALANCED_LIPS_ENERGY
+
+        # Run check
+        status = run_gpu_preflight_check(
+            strategy,
+            show_dialog_callback=lambda s, m: show_gpu_warning_dialog(s, m, self)
+        )
+        
+        # Apply any strategy change from dialog (e.g. user chose "Switch to Fast")
+        if status.final_strategy != strategy:
+            logger.info("Strategy changed by preflight check: %s -> %s", strategy, status.final_strategy)
+            self.settings.setValue("switching/strategy", status.final_strategy.value)
+            strategy = status.final_strategy
+            # Update UI if valid
+            self._update_eta_label()
+
+        # --- 2. Long Project Warning (CPU) ---
+        # Re-check GPU status or use preflight result
+        has_gpu = status.gpu_available
+        total_seconds = sum(c.duration_ms for c in clips) / 1000.0
+        
+        if should_warn_long_project(total_seconds, strategy, has_gpu):
+            reply = QMessageBox.question(
+                self, 
+                "Project Duration Warning",
+                f"This project is {total_seconds/60:.0f} minutes long.\n"
+                f"Processing with '{strategy.value}' on CPU may take a very long time.\n\n"
+                "Do you want to continue?",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                QMessageBox.StandardButton.No
+            )
+            if reply == QMessageBox.StandardButton.No:
+                return
+
+        # --- 3. Existing preflight for files ---
+        warnings = check_preflight_warnings(paths)
+        if warnings:
+            msg = format_warnings_for_display(warnings)
+            reply = QMessageBox.warning(
+                self,
+                "Preflight Warnings",
+                msg + "\n\nDo you want to continue?",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                QMessageBox.StandardButton.No
+            )
+            if reply == QMessageBox.StandardButton.No:
+                return
+
+        # --- 4. Start Processing ---
+        
         # Speaker switching is always enabled (core feature of this app)
         speaker_switching_enabled = True
         use_external_audio = self.chk_external_audio.isChecked()
@@ -1007,7 +1121,6 @@ class MainWindow(QMainWindow):
         if use_external_audio:
             if not self._external_audio_path:
                 # User checked the box but never selected an audio file
-                from PyQt6.QtWidgets import QMessageBox
                 QMessageBox.warning(
                     self,
                     "External Audio Required",
@@ -1021,7 +1134,6 @@ class MainWindow(QMainWindow):
                 external_audio = self._external_audio_path
             else:
                 # File was selected but no longer exists
-                from PyQt6.QtWidgets import QMessageBox
                 QMessageBox.warning(
                     self,
                     "External Audio Not Found",
@@ -1042,16 +1154,9 @@ class MainWindow(QMainWindow):
 
         # Log processing configuration
         logger.info(
-            "Processing: speaker_switching=%s, external_audio=%s, cameras=%d, quality=%s, output=%s",
-            speaker_switching_enabled, external_audio is not None, len(paths), quality, output_path
+            "Processing: strategy=%s, external_audio=%s, cameras=%d, quality=%s, output=%s",
+            strategy.value, external_audio is not None, len(paths), quality, output_path
         )
-
-        # Run preflight checks and display warnings (non-blocking)
-        preflight_warnings = check_preflight_warnings(paths)
-        if preflight_warnings:
-            warning_msg = format_warnings_for_display(preflight_warnings)
-            self._toast(warning_msg, 6000)  # Show longer for user to read
-            logger.warning("Preflight warnings: %s", warning_msg)
 
         # Create and show progress dialog
         self._progress_dialog = ProcessingProgressDialog(self)
@@ -1068,12 +1173,14 @@ class MainWindow(QMainWindow):
             parent=self,
         )
 
-        # Connect signals
+        # Wire up signals
+        # Use intermediate handlers to update progress dialog properly
         self._processing_thread.progress.connect(self._on_processing_progress)
         self._processing_thread.stage.connect(self._on_processing_stage)
         self._processing_thread.finished_with_path.connect(self._on_processing_finished)
         self._processing_thread.error.connect(self._on_processing_error)
         self._processing_thread.finished.connect(self._on_thread_finished)
+        
         self._progress_dialog.cancelRequested.connect(self._on_cancel_processing)
 
         # Start processing

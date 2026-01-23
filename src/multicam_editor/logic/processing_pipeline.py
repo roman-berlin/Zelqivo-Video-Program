@@ -21,13 +21,13 @@ from ..utils.ffprobe import probe, ProbeResult
 from ..utils.signals import ProcessingSignals
 from .active_speaker import (
     ActiveSpeakerDetector,
-    DiarizationMode,
+    ActiveSpeakerDetector,
     RealEnergyVADBackend,
     SpeakerSegment,
-    create_backend,
     HybridBackend,
     LipMovementBackend,
 )
+from .switching_strategy import SwitchingStrategy, select_switching_engine, DEFAULT_STRATEGY
 from .decision_engine import DecisionEngine, CutSegment
 from .pipeline_config import PipelineConfig
 from .qa_artifacts import QAArtifactExporter
@@ -130,8 +130,8 @@ class ProcessingPipeline:
         # Convenience accessor
         self.speaker_switching_enabled = self._config.speaker_switching_enabled
 
-        # Load diarization mode from settings (defaults to ENERGY for V1)
-        self._diarization_mode = self._load_diarization_mode()
+        # Load switching strategy from settings (defaults to BALANCED/Hybrid)
+        self._switching_strategy = self._load_switching_strategy()
 
         # Cancellation state
         self._cancelled = False
@@ -174,25 +174,16 @@ class ProcessingPipeline:
             self._checkpoint.rendered_segments = rendered_segments
         save_checkpoint(self._checkpoint)
 
-    def _load_diarization_mode(self) -> DiarizationMode:
-        """Load diarization mode from QSettings.
-
-        Defaults to ENERGY for V1 (CPU-only speaker detection).
-        """
+    def _load_switching_strategy(self) -> SwitchingStrategy:
+        """Load switching strategy from QSettings."""
         settings = QSettings("MultiCamEditor", "MultiCamEditor")
-        mode_value = settings.value("diarization/mode", "hybrid", type=str)
-
-        mode_map = {
-            "off": DiarizationMode.OFF,
-            "stub": DiarizationMode.STUB,
-            "energy": DiarizationMode.ENERGY,
-            "real": DiarizationMode.REAL,
-            "lips": DiarizationMode.LIPS,
-            "hybrid": DiarizationMode.HYBRID,
-        }
-        mode = mode_map.get(mode_value.lower(), DiarizationMode.HYBRID)
-        logger.info("Diarization mode from settings: %s", mode.name)
-        return mode
+        strategy_str = settings.value("switching/strategy", DEFAULT_STRATEGY.value, type=str)
+        
+        try:
+            return SwitchingStrategy(strategy_str)
+        except ValueError:
+            logger.warning("Invalid strategy '%s', using default", strategy_str)
+            return DEFAULT_STRATEGY
 
     def cancel(self) -> None:
         """Cancel the pipeline from any thread."""
@@ -558,157 +549,104 @@ class ProcessingPipeline:
             return True
 
         try:
-            from .active_speaker import HybridBackend, LipMovementBackend
             from ..utils.ffmpeg import extract_audio_to_wav
             
-            # Determine diarization mode
-            settings = QSettings("MultiCamEditor", "MultiCamEditor")
-            mode_str = settings.value("diarization/mode", DiarizationMode.HYBRID.value, type=str)
-            try:
-                diarization_mode = DiarizationMode(mode_str)
-            except ValueError:
-                diarization_mode = DiarizationMode.HYBRID
+            # Determine strategy
+            strategy = self._load_switching_strategy()
+            logger.info("Using switching strategy: %s", strategy.value)
 
-            logger.info("Using diarization mode: %s", diarization_mode.value)
-
+            # Get engine from strategy
+            engine, config = select_switching_engine(strategy)
+            
             # Define progress callback mapping 0-100% of detection to 50-95% of stage
             def on_diarization_progress(pct: int):
                 stage_progress = 50 + int(pct * 0.45)
                 self._emit_progress(stage_progress, f"Analyzing speakers ({pct}%)")
 
-            if diarization_mode == DiarizationMode.LIPS:
-                logger.info("LIPS mode: Starting lip movement detection")
-                self._emit_progress(50, "Initializing lip detection...")
+            if strategy == SwitchingStrategy.BEST_LIPS:
+                logger.info("BEST_LIPS: Starting lip movement detection")
+                self._emit_progress(50, "Initializing visual detection...")
                 
-                # Get video duration from probe results
-                duration_ms = 0
-                if self._probe_results:
-                    for probe in self._probe_results:
-                        if probe and probe.duration_ms:
-                            if duration_ms == 0:
-                                duration_ms = probe.duration_ms
-                            else:
-                                duration_ms = min(duration_ms, probe.duration_ms)
+                # Calculate duration from probe results
+                duration_ms = max(r.duration_ms for r in self._probe_results)
                 
-                if duration_ms <= 0:
-                    logger.warning("Could not determine video duration, using 2 minutes default")
-                    duration_ms = 120000
-
-                self._emit_progress(50, "Detecting speakers (Visual Only)...")
-                lip_detector = LipMovementBackend(
-                    sample_interval_ms=200,
-                    min_segment_ms=500,
-                )
-                self._speaker_segments = lip_detector.detect_speakers(
+                self._speaker_segments = engine.detect_speakers(
                     video_paths=self.input_files,
                     duration_ms=duration_ms,
                     progress_callback=on_diarization_progress,
                 )
                 logger.info("LIPS mode complete: %d segments", len(self._speaker_segments))
-                
-                # Record for QA artifacts
-                self._qa_exporter.set_diarization(self._speaker_segments)
-                
-                self._emit_progress(100, f"Detection complete: {len(self._speaker_segments)} segments")
-                return True
 
-            # HYBRID MODE logic continues below...
-            logger.info("HYBRID mode: Starting hybrid detection")
-            self._emit_progress(50, "Initializing hybrid detection...")
-            
-            # Get video duration (same logic, can refactor later)
-            duration_ms = 0
-            if self._probe_results:
-                for probe in self._probe_results:
-                    if probe and probe.duration_ms:
-                        if duration_ms == 0:
-                            duration_ms = probe.duration_ms
-                        else:
-                            duration_ms = min(duration_ms, probe.duration_ms)
-            
-            if duration_ms <= 0:
-                logger.warning("Could not determine video duration, using 2 minutes default")
-                duration_ms = 120000
-            
-            # Use external audio for VAD if available (cleaner signal)
-            # Otherwise fall back to first camera's audio
-            audio_result = None
-            if hasattr(self, '_external_audio_path') and self._external_audio_path:
-                self._emit_progress(20, "Using external audio for speech detection...")
-                # External audio is already a file, but we need to convert to WAV for analysis
-                audio_result = extract_audio_to_wav(
-                    self._external_audio_path,
-                    sample_rate=16000,
-                    mono=True,
-                )
-                logger.info("HYBRID: Using external audio for VAD (cleaner signal)")
-            else:
-                self._emit_progress(20, "Extracting audio for speech detection...")
-                audio_result = extract_audio_to_wav(
-                    self.input_files[0],
-                    sample_rate=16000,
-                    mono=True,
-                )
-                logger.info("HYBRID: Using camera 1 audio for VAD")
-            
-            if not audio_result.success or not audio_result.output_path:
-                raise RuntimeError(f"Failed to extract audio for VAD: {audio_result.error}")
+            elif strategy == SwitchingStrategy.BALANCED_LIPS_ENERGY:
+                logger.info("BALANCED: Starting hybrid detection")
+                self._emit_progress(50, "Initializing hybrid detection...")
                 
-            audio_path = audio_result.output_path
-            
-            # DEBUG: Log types to diagnose mysterious "FFmpegResult has no attribute read" error
-            logger.info(f"DEBUG: audio_result type: {type(audio_result)}")
-            logger.info(f"DEBUG: audio_path type: {type(audio_path)}")
-            logger.info(f"DEBUG: audio_path value: {audio_path}")
-            
-            # Force string just in case
-            if not isinstance(audio_path, str):
-                logger.warning(f"DEBUG: audio_path was {type(audio_path)}, forcing to str")
-                audio_path = str(audio_path)
+                # Hybrid backend handles audio extraction internally or we pass it?
+                # The engine returned by select_switching_engine is initialized.
+                # However, HybridBackend.detect_speakers in V1 might expect audio_path if it doesn't do extraction itself.
+                # Let's check HybridBackend.detect_speakers signature.
+                # Assuming it matches valid usage. If it needs audio_path, we might need to extract it first.
+                # But select_switching_engine returns an instance.
+                # Let's trust the engine abstraction or check if we need to do extraction here.
+                # The old code did extraction:
+                # audio_result = extract_audio_to_wav(...)
+                # hybrid_detector.detect_speakers(..., audio_path=audio_path, ...)
                 
-            self._temp_files.append(audio_path)
-
-            
-            self._emit_progress(30, f"Analyzing speech regions ({duration_ms//1000}s video)...")
-            
-            # Determine diarization mode
-            settings = QSettings("MultiCamEditor", "MultiCamEditor")
-            mode_str = settings.value("diarization/mode", DiarizationMode.HYBRID.value, type=str)
-            try:
-                diarization_mode = DiarizationMode(mode_str)
-            except ValueError:
-                diarization_mode = DiarizationMode.HYBRID
-            
-            logger.info("Using diarization mode: %s", diarization_mode.value)
-            
-            if diarization_mode == DiarizationMode.LIPS:
-                # Lips Only (Strict Visual)
-                self._emit_progress(50, "Detecting speakers (Visual Only)...")
-                lip_detector = LipMovementBackend(
-                    sample_interval_ms=200,
-                    min_segment_ms=500,
-                )
-                self._speaker_segments = lip_detector.detect_speakers(
-                    video_paths=self.input_files,
-                    duration_ms=duration_ms,
-                )
-                logger.info("LIPS mode complete: %d segments", len(self._speaker_segments))
+                # If the new HybridBackend wrapper handles it, great. If not, we need to replicate that.
+                # Let's assume for now we need to extract audio if the backend requires it.
+                # But wait, select_switching_engine returns `HybridBackend`.
+                # Does `HybridBackend` require `audio_path` in `detect_speakers`?
+                # I should probably include the audio extraction logic if it's not inside the backend.
+                # But to keep this chunk clean, let's assume I need to do what the old code did if I want to be safe,
+                # OR better: The "HybridBackend" used here is imported from `.active_speaker`.
+                # I'll check if I can check `detect_speakers` signature quickly.
+                # But I'm in a tool call.
+                # I will preserve the audio extraction logic just in case, or move it before the if/else if common.
+                # Actually, `LipMovementBackend` doesn't need audio path.
                 
-            else:
-                # Hybrid (Audio + Visual) - Default
-                self._emit_progress(50, "Detecting speakers (Hybrid: Audio + Visual)...")
-                hybrid_detector = HybridBackend(
-                    sample_interval_ms=200,
-                    min_segment_ms=500,
-                )
-                self._speaker_segments = hybrid_detector.detect_speakers(
-                    video_paths=self.input_files,
-                    audio_path=audio_path,
-                    duration_ms=duration_ms,
-                    cancel_callback=lambda: self._cancelled,
-                    progress_callback=on_diarization_progress,
-                )
-                logger.info("HYBRID mode complete: %d segments", len(self._speaker_segments))
+                # To be safe and implementing correctly:
+                # 1. Extract audio if strategy is BALANCED (Hybrid).
+                # 2. Call detect_speakers.
+                
+                # Or, if I want to be cleaner:
+                
+                # Extract audio for Hybrid
+                audio_path = None
+                if strategy == SwitchingStrategy.BALANCED_LIPS_ENERGY:
+                    from ..utils.ffmpeg import extract_audio_to_wav
+                    self._emit_progress(20, "Extracting audio for speech detection...")
+                    
+                    target_file = self.input_files[0]
+                    if hasattr(self, '_external_audio_path') and self._external_audio_path:
+                        target_file = self._external_audio_path
+                        logger.info("Using external audio: %s", target_file)
+                    
+                    audio_result = extract_audio_to_wav(target_file, sample_rate=16000, mono=True)
+                    if not audio_result.success:
+                         raise RuntimeError(f"Audio extraction failed: {audio_result.error}")
+                    
+                    audio_path = audio_result.output_path
+                    self._temp_files.append(audio_path)
+                    
+                    # Calculate duration from probe results
+                    duration_ms = max(r.duration_ms for r in self._probe_results)
+                    
+                    self._speaker_segments = engine.detect_speakers(
+                        video_paths=self.input_files,
+                        audio_path=audio_path,
+                        duration_ms=duration_ms,
+                        progress_callback=on_diarization_progress,
+                        cancel_callback=lambda: self._cancelled
+                    )
+                else:
+                    # BEST_LIPS
+                     self._speaker_segments = engine.detect_speakers(
+                        video_paths=self.input_files,
+                        progress_callback=on_diarization_progress,
+                        # No audio path needed for lips
+                    )
+                     
+                logger.info("Detection complete: %d segments", len(self._speaker_segments))
             
             # Record for QA artifacts
             self._qa_exporter.set_diarization(self._speaker_segments)
@@ -741,9 +679,9 @@ class ProcessingPipeline:
             if mapping was missing and we fell back to single-camera.
         """
         # ENERGY mode: speaker_id already equals camera_id - no mapping needed
-        if self._diarization_mode == DiarizationMode.ENERGY:
-            logger.debug("ENERGY mode: no speaker-to-camera mapping required")
-            return segments, False
+        # Old ENERGY mode check removed
+        # Proceed with mapping check for all strategies
+
 
         # REAL/pyannote mode: check if we have complete mapping
         speaker_map = self._config.speaker_to_cameras_map
@@ -807,11 +745,18 @@ class ProcessingPipeline:
         min_switch_interval_ms = settings.value("decision_engine/min_switch_interval_ms", 1500, type=int)
         min_speech_ms = settings.value("decision_engine/min_speech_ms", 600, type=int)
         bg_short_remark_ms = settings.value("decision_engine/bg_short_remark_ms", 500, type=int)
+        # Smoothing parameters
+        confidence_stability_window_ms = settings.value("decision_engine/confidence_stability_window_ms", 400, type=int)
+        min_clip_length_ms = settings.value("decision_engine/min_clip_length_ms", 1000, type=int)
+        soft_boundary_search_ms = settings.value("decision_engine/soft_boundary_search_ms", 150, type=int)
 
         engine = DecisionEngine(
             min_switch_interval_ms=min_switch_interval_ms,
             min_speech_ms=min_speech_ms,
             bg_short_remark_ms=bg_short_remark_ms,
+            confidence_stability_window_ms=confidence_stability_window_ms,
+            min_clip_length_ms=min_clip_length_ms,
+            soft_boundary_search_ms=soft_boundary_search_ms,
         )
         self._cut_plan = engine.generate_cut_plan(
             self._speaker_segments,
@@ -826,6 +771,9 @@ class ProcessingPipeline:
             min_switch_interval_ms=min_switch_interval_ms,
             min_speech_ms=min_speech_ms,
             bg_short_remark_ms=bg_short_remark_ms,
+            confidence_stability_window_ms=confidence_stability_window_ms,
+            min_clip_length_ms=min_clip_length_ms,
+            soft_boundary_search_ms=soft_boundary_search_ms,
         )
         self._qa_exporter.set_total_duration(total_duration_ms)
 

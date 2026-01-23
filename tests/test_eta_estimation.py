@@ -219,3 +219,61 @@ class TestGetETADisplayText:
         text = get_eta_display_text(-100.0, SwitchingStrategy.FAST_RULES, False)
         assert text == "Calculating..."
 
+
+class TestRollingAverage:
+    """Tests for RollingAverage class used in ETA smoothing."""
+    
+    def test_single_value_returns_itself(self) -> None:
+        """Single value returns itself as average."""
+        from multicam_editor.logic.processing_pipeline import RollingAverage
+        avg = RollingAverage(window_size=5)
+        result = avg.add(100.0)
+        assert result == 100.0
+        assert avg.count == 1
+    
+    def test_average_of_multiple_values(self) -> None:
+        """Average is computed correctly for multiple values."""
+        from multicam_editor.logic.processing_pipeline import RollingAverage
+        avg = RollingAverage(window_size=5)
+        avg.add(10.0)
+        avg.add(20.0)
+        result = avg.add(30.0)
+        assert result == 20.0  # (10 + 20 + 30) / 3
+        assert avg.count == 3
+    
+    def test_window_size_limit(self) -> None:
+        """Window respects max size and drops oldest values."""
+        from multicam_editor.logic.processing_pipeline import RollingAverage
+        avg = RollingAverage(window_size=3)
+        avg.add(100.0)
+        avg.add(100.0)
+        avg.add(100.0)
+        # Now window is full with [100, 100, 100]
+        result = avg.add(10.0)
+        # Should be [100, 100, 10] -> 70
+        assert result == 70.0
+        assert avg.count == 3
+    
+    def test_reset_clears_values(self) -> None:
+        """Reset clears all stored values."""
+        from multicam_editor.logic.processing_pipeline import RollingAverage
+        avg = RollingAverage(window_size=5)
+        avg.add(50.0)
+        avg.add(60.0)
+        avg.reset()
+        assert avg.count == 0
+        # After reset, next value should be returned as-is
+        result = avg.add(100.0)
+        assert result == 100.0
+    
+    def test_smoothing_reduces_volatility(self) -> None:
+        """Rolling average smooths out volatile values."""
+        from multicam_editor.logic.processing_pipeline import RollingAverage
+        avg = RollingAverage(window_size=3)
+        # Simulate volatile ETA estimates
+        avg.add(60.0)   # Initial estimate
+        avg.add(120.0)  # Spike
+        result = avg.add(60.0)  # Back to normal
+        # Average should be (60 + 120 + 60) / 3 = 80, not 60
+        assert result == 80.0
+        # This demonstrates smoothing effect

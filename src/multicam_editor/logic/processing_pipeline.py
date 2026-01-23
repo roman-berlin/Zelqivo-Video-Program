@@ -61,6 +61,43 @@ STAGE_WEIGHTS = {
 }
 
 
+class RollingAverage:
+    """Rolling average calculator for smoothing ETA estimates.
+    
+    Maintains a sliding window of recent values and returns the average,
+    preventing volatile jumps in displayed ETA.
+    """
+    
+    def __init__(self, window_size: int = 5) -> None:
+        self._values: List[float] = []
+        self._window_size = window_size
+    
+    def add(self, value: float) -> float:
+        """Add a new value and return the smoothed average.
+        
+        Args:
+            value: New measurement to add.
+            
+        Returns:
+            Rolling average of recent values.
+        """
+        self._values.append(value)
+        if len(self._values) > self._window_size:
+            self._values.pop(0)
+        return sum(self._values) / len(self._values)
+    
+    def reset(self) -> None:
+        """Clear all stored values."""
+        self._values.clear()
+    
+    @property
+    def count(self) -> int:
+        """Number of values in the current window."""
+        return len(self._values)
+
+
+
+
 @dataclass
 class PipelineResult:
     """Result of pipeline execution."""
@@ -163,6 +200,9 @@ class ProcessingPipeline:
             current_stage="INIT",
             input_files=list(input_files),
         )
+
+        # Rolling average for ETA smoothing (prevents volatile jumps)
+        self._eta_smoother = RollingAverage(window_size=5)
 
     def _save_checkpoint(self, stage: str, rendered_segments: Optional[List[str]] = None) -> None:
         """Save current pipeline state for crash recovery."""
@@ -313,11 +353,14 @@ class ProcessingPipeline:
         overall_percent = int((completed_weight + stage_contribution) * 100 / total_weight)
         overall_percent = min(99, max(0, overall_percent))
 
-        # ETA calculation
+        # ETA calculation with rolling average for stability
         elapsed = time.time() - self._pipeline_start_time
         eta_seconds = None
-        if overall_percent > 5 and elapsed > 1:
-            eta_seconds = (elapsed / overall_percent) * (100 - overall_percent)
+        # Lower threshold to 2% for earlier ETA display (was 5%)
+        if overall_percent > 2 and elapsed > 0.5:
+            raw_eta = (elapsed / overall_percent) * (100 - overall_percent)
+            # Use rolling average to smooth out volatile jumps
+            eta_seconds = self._eta_smoother.add(raw_eta)
 
         # Emit via signals
         self.signals.progress.emit(overall_percent)

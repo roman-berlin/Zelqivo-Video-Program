@@ -126,12 +126,12 @@ class MainWindow(QMainWindow):
         ctrl_lay.addWidget(self.btn_add)
         ctrl_lay.addWidget(self.btn_process)
         
-        # ETA Label
-        self.lbl_eta = QLabel("")
-        self.lbl_eta.setObjectName("lblEta")
-        self.lbl_eta.setStyleSheet("color: #2980b9; font-weight: bold; margin-left: 10px;")
-        self.lbl_eta.setToolTip("Estimated time to process on your hardware")
-        ctrl_lay.addWidget(self.lbl_eta)
+        # Magic Settings button (opens advanced AI processing options)
+        self.btn_magic_settings = QPushButton("⚙️ Magic", ctrl_row)
+        self.btn_magic_settings.setObjectName("btnMagicSettings")
+        self.btn_magic_settings.setToolTip("Configure AI processing options")
+        self.btn_magic_settings.clicked.connect(self._show_magic_settings)
+        ctrl_lay.addWidget(self.btn_magic_settings)
         
         ctrl_lay.addWidget(self.btn_remove_all)
         ctrl_lay.addStretch(1)
@@ -153,6 +153,23 @@ class MainWindow(QMainWindow):
         left_layout.addWidget(self.lbl_process_hint)
         left_layout.addWidget(lbl)
         left_layout.addWidget(self.file_list, 1)
+
+        # --- ETA Status Bar (relocated for better visibility) ---
+        self.lbl_eta = QLabel("")
+        self.lbl_eta.setObjectName("lblEta")
+        self.lbl_eta.setStyleSheet("""
+            QLabel {
+                color: #2980b9;
+                font-weight: bold;
+                padding: 4px 8px;
+                background-color: rgba(41, 128, 185, 0.1);
+                border-radius: 4px;
+                margin: 4px 0;
+            }
+        """)
+        self.lbl_eta.setToolTip("Estimated time to process on your hardware")
+        self.lbl_eta.setVisible(False)  # Hidden until clips are loaded
+        left_layout.addWidget(self.lbl_eta)
 
         # --- Processing Options Group ---
         self._init_processing_options(left_layout)
@@ -652,6 +669,12 @@ class MainWindow(QMainWindow):
         dialog = SettingsDialog(self)
         dialog.exec()
 
+    def _show_magic_settings(self) -> None:
+        """Show the Magic Settings dialog for AI processing options."""
+        from .magic_settings_dialog import MagicSettingsDialog
+        dialog = MagicSettingsDialog(self)
+        dialog.exec()
+
     def _show_export_dialog(self) -> None:
         """Show the export dialog for the processed video."""
         if not self._result_path or not os.path.exists(self._result_path):
@@ -986,37 +1009,43 @@ class MainWindow(QMainWindow):
 
     def _update_eta_label(self) -> None:
         """Update ETA label based on current file duration and selected strategy."""
-        clips = self.project.clips()
-        if not clips:
+        # Get paths from file list (not project clips, as those may not have duration yet)
+        paths = self.file_list.all_paths()
+        if not paths:
             self.lbl_eta.setText("")
+            self.lbl_eta.setVisible(False)
             return
-            
-        # Sum duration of all clips (assuming all are used? Pipeline usually uses all)
-        # However, pipeline probe might update durations.
-        # Project.clips() have duration if probed.
-        total_seconds = sum(c.duration_ms for c in clips) / 1000.0
+        
+        # Probe each video for duration (cached by ffprobe module)
+        from ..utils.ffprobe import probe
+        total_ms = 0
+        for path in paths:
+            result = probe(path)
+            if not result.error and result.duration_ms > 0:
+                total_ms += result.duration_ms
+        
+        total_seconds = total_ms / 1000.0
+        
+        if total_seconds <= 0:
+            # Still no duration data - show loading state
+            self.lbl_eta.setText("📊 Probing videos...")
+            self.lbl_eta.setVisible(True)
+            return
         
         # Get strategy from settings
-        # Note: We need to load it same way as pipeline or settings dialog
         strategy_str = self.settings.value("switching/strategy", "balanced", type=str)
         try:
             strategy = SwitchingStrategy(strategy_str)
         except ValueError:
             strategy = SwitchingStrategy.BALANCED_LIPS_ENERGY
             
-        # Check GPU availability (maybe cache this? detect_gpu is fastish but uses torch import)
-        # We can detect once or just rely on eta_estimation (which calls detect_gpu if needed)
-        # eta_estimation.detect_gpu caches? No.
-        # But detect_gpu handles import error gracefully.
+        # Check GPU availability
         from ..logic.preflight import detect_gpu
         gpu_available = detect_gpu()
         
         eta_text = get_eta_display_text(total_seconds, strategy, gpu_available)
-        self.lbl_eta.setText(f"Est. Time: {eta_text}")
-        
-        # Color coding: optional
-        # If very long, maybe make it orange?
-        pass
+        self.lbl_eta.setText(f"📊 {eta_text}")
+        self.lbl_eta.setVisible(True)
 
     # --- Processing ---
     def _generate_output_path(self, input_paths: List[str]) -> str:

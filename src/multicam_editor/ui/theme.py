@@ -124,12 +124,26 @@ QComboBox:hover {
     border-color: #9e9e9e;
 }
 QCheckBox {
-    spacing: 6px;
+    spacing: 8px;
 }
 QCheckBox::indicator {
     width: 18px;
     height: 18px;
     border-radius: 3px;
+    border: 2px solid #9e9e9e;
+    background-color: #ffffff;
+}
+QCheckBox::indicator:checked {
+    background-color: #1976d2;
+    border-color: #1565c0;
+    image: url(data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIxNCIgaGVpZ2h0PSIxNCIgdmlld0JveD0iMCAwIDI0IDI0IiBmaWxsPSJub25lIiBzdHJva2U9IndoaXRlIiBzdHJva2Utd2lkdGg9IjMiIHN0cm9rZS1saW5lY2FwPSJyb3VuZCIgc3Ryb2tlLWxpbmVqb2luPSJyb3VuZCI+PHBvbHlsaW5lIHBvaW50cz0iMjAgNiA5IDE3IDQgMTIiPjwvcG9seWxpbmU+PC9zdmc+);
+}
+QCheckBox::indicator:unchecked:hover {
+    border-color: #616161;
+}
+QCheckBox::indicator:disabled {
+    background-color: #e0e0e0;
+    border-color: #bdbdbd;
 }
 QSpinBox, QDoubleSpinBox {
     border: 1px solid #bdbdbd;
@@ -284,13 +298,27 @@ QComboBox QAbstractItemView {
     selection-background-color: #555555;
 }
 QCheckBox {
-    spacing: 6px;
+    spacing: 8px;
     color: #e0e0e0;
 }
 QCheckBox::indicator {
     width: 18px;
     height: 18px;
     border-radius: 3px;
+    border: 2px solid #666666;
+    background-color: #3c3c3c;
+}
+QCheckBox::indicator:checked {
+    background-color: #1976d2;
+    border-color: #42a5f5;
+    image: url(data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIxNCIgaGVpZ2h0PSIxNCIgdmlld0JveD0iMCAwIDI0IDI0IiBmaWxsPSJub25lIiBzdHJva2U9IndoaXRlIiBzdHJva2Utd2lkdGg9IjMiIHN0cm9rZS1saW5lY2FwPSJyb3VuZCIgc3Ryb2tlLWxpbmVqb2luPSJyb3VuZCI+PHBvbHlsaW5lIHBvaW50cz0iMjAgNiA5IDE3IDQgMTIiPjwvcG9seWxpbmU+PC9zdmc+);
+}
+QCheckBox::indicator:unchecked:hover {
+    border-color: #888888;
+}
+QCheckBox::indicator:disabled {
+    background-color: #2d2d2d;
+    border-color: #444444;
 }
 QSpinBox, QDoubleSpinBox {
     background-color: #3c3c3c;

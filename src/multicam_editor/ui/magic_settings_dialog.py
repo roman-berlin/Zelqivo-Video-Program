@@ -104,6 +104,21 @@ class MagicSettingsDialog(QDialog):
         layout = QVBoxLayout(widget)
         layout.setSpacing(12)
         
+        # Switching Model Selection
+        model_group = QGroupBox("Switching Intelligence")
+        model_layout = QFormLayout(model_group)
+        
+        self.cmb_model = QComboBox()
+        self.cmb_model.addItems([
+            "⚡ Fast (CPU)",
+            "⚖ Balanced (Hybrid)",
+            "🎯 Best (Visual Only)"
+        ])
+        self.cmb_model.setToolTip("Choose the AI model for camera switching decisions")
+        model_layout.addRow("Model:", self.cmb_model)
+        
+        layout.addWidget(model_group)
+
         # Split Screen options
         group = QGroupBox("Camera Composition")
         group_layout = QVBoxLayout(group)
@@ -242,6 +257,9 @@ class MagicSettingsDialog(QDialog):
     def _load_settings(self) -> None:
         """Load saved settings from QSettings."""
         # AI Director
+        self.cmb_model.setCurrentIndex(
+            self.settings.value("magic/director/model_index", 0, type=int)
+        )
         self.chk_split_screen.setChecked(
             self.settings.value("magic/director/split_screen", False, type=bool)
         )
@@ -280,6 +298,7 @@ class MagicSettingsDialog(QDialog):
     def _save_and_accept(self) -> None:
         """Save settings to QSettings and close dialog."""
         # AI Director
+        self.settings.setValue("magic/director/model_index", self.cmb_model.currentIndex())
         self.settings.setValue("magic/director/split_screen", self.chk_split_screen.isChecked())
         self.settings.setValue("magic/director/reaction_shots", self.chk_reaction_shots.isChecked())
         self.settings.setValue("magic/director/wide_reset", self.chk_wide_reset.isChecked())
@@ -360,6 +379,7 @@ def get_magic_settings() -> dict:
     
     return {
         "director": {
+            "model_index": settings.value("magic/director/model_index", 0, type=int),
             "split_screen": settings.value("magic/director/split_screen", False, type=bool),
             "reaction_shots": settings.value("magic/director/reaction_shots", False, type=bool),
             "wide_reset": settings.value("magic/director/wide_reset", False, type=bool),

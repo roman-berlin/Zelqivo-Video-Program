@@ -78,13 +78,14 @@ class MainWindow(QMainWindow):
         # Video cap is enforced at the FileListWidget level.
         self.project = Project()
         self._current_path: str | None = None
+        self._output_folder: str | None = None  # Default: same as source
 
         # Initialize undo/redo stack
         self.undo_stack = QUndoStack(self)
 
         self._init_ui()
         self._init_undo_toolbar()
-        self._init_menu()
+        # Menu bar removed as per modern UI request
         self._connect_signals()
         self._refresh_counter()
 
@@ -159,6 +160,25 @@ class MainWindow(QMainWindow):
         self.btn_magic_settings.setToolTip("Configure AI processing options")
         self.btn_magic_settings.clicked.connect(self._show_magic_settings)
         ctrl_lay.addWidget(self.btn_magic_settings)
+
+        # Export (XML) button - Modern replacement for File > Export
+        self.btn_export = QPushButton("📤 Export XML", ctrl_row)
+        self.btn_export.setObjectName("btnExport")
+        self.btn_export.setToolTip("Export timeline to FCPXML for Premiere/DaVinci")
+        # Initially disabled until we have results
+        self.btn_export.clicked.connect(self._on_export_xml)
+        self.btn_export.setVisible(False) # Hidden until processing complete
+        ctrl_lay.addWidget(self.btn_export)
+
+        # App Settings button - Modern replacement for File > Settings
+        self.btn_app_settings = QPushButton("🛠 Settings", ctrl_row)
+        self.btn_app_settings.setObjectName("btnAppSettings")
+        self.btn_app_settings.setToolTip("Appearance and Application Settings")
+        self.btn_app_settings.clicked.connect(self._show_settings_dialog)
+        ctrl_lay.addWidget(self.btn_app_settings)
+
+        
+        # Helper text for removed buttons? No, tooltips are enough.
         
         ctrl_lay.addWidget(self.btn_remove_all)
         ctrl_lay.addStretch(1)
@@ -199,6 +219,7 @@ class MainWindow(QMainWindow):
         left_layout.addWidget(self.lbl_eta)
 
         # --- Processing Options Group ---
+        # --- Processing Options Group (External Audio, Output Folder) ---
         self._init_processing_options(left_layout)
 
         # Right: preview + trim panel + timeline
@@ -1130,10 +1151,16 @@ class MainWindow(QMainWindow):
 
         # --- 1. GPU Preflight Check ---
         # Load current strategy
-        strategy_str = self.settings.value("switching/strategy", "balanced", type=str)
-        try:
-            strategy = SwitchingStrategy(strategy_str)
-        except ValueError:
+        # --- 1. GPU Preflight Check ---
+        # Load current strategy from Magic Settings (Model Index)
+        # 0->Fast, 1->Balanced, 2->Best
+        model_index = self.settings.value("magic/director/model_index", 0, type=int)
+        
+        if model_index == 0:
+            strategy = SwitchingStrategy.FAST_RULES
+        elif model_index == 2:
+            strategy = SwitchingStrategy.BEST_LIPS
+        else:
             strategy = SwitchingStrategy.BALANCED_LIPS_ENERGY
 
         # Run check
@@ -1331,6 +1358,14 @@ class MainWindow(QMainWindow):
         else:
             self._toast("Failed to open video player")
             logger.warning("Failed to open video: %s", self._result_path)
+
+    def _show_settings_dialog(self) -> None:
+        """Open the application settings dialog."""
+        from .settings_dialog import SettingsDialog
+        dialog = SettingsDialog(self)
+        if dialog.exec():
+            # If settings changed (like theme), might need to re-apply
+            self._apply_startup_theme()
 
     def _on_open_folder(self) -> None:
         """Open the output folder in the system's file explorer."""

@@ -185,12 +185,15 @@ def cuts_from_speaker_segments(
     """
     cuts = []
     for seg in segments:
-        # Extract camera index from speaker_id (e.g., "cam0" -> 0)
-        speaker_id = seg.speaker_id if hasattr(seg, 'speaker_id') else str(seg.speaker)
+        # Extract camera index from speaker_id (e.g., "cam0" -> 0, 3 -> 3, None -> 0)
+        raw_id = seg.speaker_id if hasattr(seg, 'speaker_id') else getattr(seg, 'speaker', 0)
+        speaker_id = str(raw_id) if raw_id is not None else "0"
         
         if speaker_id.startswith("cam"):
             cam_idx = int(speaker_id[3:])
-        elif speaker_id.isdigit():
+        elif speaker_id.startswith("speaker_"):
+            cam_idx = int(speaker_id.replace("speaker_", ""))
+        elif speaker_id.lstrip("-").isdigit():
             cam_idx = int(speaker_id)
         else:
             cam_idx = 0

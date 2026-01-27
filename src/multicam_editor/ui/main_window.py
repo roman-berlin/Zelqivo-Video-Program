@@ -1308,7 +1308,7 @@ class MainWindow(QMainWindow):
         # Store result path for A/B comparison and export
         self._result_path = output_path
         self.btn_toggle_ab.setEnabled(True)
-        self.action_export.setEnabled(True)
+        self.btn_export.setVisible(True)
         
         # Show result section with Play button
         if hasattr(self, "result_group") and hasattr(self, "lbl_result_file"):

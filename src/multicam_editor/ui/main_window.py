@@ -63,7 +63,6 @@ from PyQt6.QtWidgets import QMessageBox
 
 
 
-VIDEO_CAP = 10
 MIN_VIDEOS_FOR_PROCESS = 2
 
 
@@ -121,8 +120,16 @@ class MainWindow(QMainWindow):
         self.btn_remove_all.setObjectName("btnRemoveAll")
         self.btn_remove_all.setEnabled(False)  # Enabled when >0 videos
         self.btn_remove_all.setToolTip("Remove all videos from the list")
-        self.lbl_counter = QLabel("Videos: 0/10", ctrl_row)
+        self.lbl_counter = QLabel("Videos: 0", ctrl_row)
         self.lbl_counter.setObjectName("lblCounter")
+        
+        # Synchronize All button
+        self.btn_sync_all = QPushButton("🔄 Sync All", ctrl_row)
+        self.btn_sync_all.setObjectName("btnSyncAll")
+        self.btn_sync_all.setToolTip("Synchronize all videos using audio waveform matching")
+        self.btn_sync_all.setEnabled(False)  # Enabled when >=2 videos
+        self.btn_sync_all.clicked.connect(self.on_synchronize_all)
+        ctrl_lay.addWidget(self.btn_sync_all)
         ctrl_lay.addWidget(self.btn_add)
         ctrl_lay.addWidget(self.btn_process)
         
@@ -138,7 +145,7 @@ class MainWindow(QMainWindow):
         ctrl_lay.addWidget(self.lbl_counter)
 
         # Inline hint for "need 2+ videos"
-        self.lbl_process_hint = QLabel("Add at least 2 videos to create a multicam edit.", left)
+        self.lbl_process_hint = QLabel("Add 2 or more videos to enable synchronization and editing.", left)
         self.lbl_process_hint.setObjectName("lblProcessHint")
         self.lbl_process_hint.setStyleSheet("color: gray; font-style: italic;")
         self.lbl_process_hint.setVisible(True)  # Visible initially
@@ -147,7 +154,7 @@ class MainWindow(QMainWindow):
         lbl.setObjectName("lblMediaFiles")
         self.file_list = FileListWidget(left)
         self.file_list.setObjectName("fileList")
-        self.file_list.set_video_cap(VIDEO_CAP)
+        # No video cap - unlimited inputs
 
         left_layout.addWidget(ctrl_row)
         left_layout.addWidget(self.lbl_process_hint)

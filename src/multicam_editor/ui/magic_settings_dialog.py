@@ -117,6 +117,14 @@ class MagicSettingsDialog(QDialog):
         self.cmb_model.setToolTip("Choose the AI model for camera switching decisions")
         model_layout.addRow("Model:", self.cmb_model)
         
+        # Warning label for "Best" model
+        self.lbl_model_warning = QLabel("")
+        self.lbl_model_warning.setWordWrap(True)
+        self.lbl_model_warning.setStyleSheet("color: #e67e22; font-size: 9pt; font-style: italic;")
+        model_layout.addRow("", self.lbl_model_warning)
+        
+        self.cmb_model.currentIndexChanged.connect(self._update_model_warning)
+        
         layout.addWidget(model_group)
 
         # Split Screen options
@@ -145,6 +153,14 @@ class MagicSettingsDialog(QDialog):
         layout.addStretch()
         
         return widget
+
+    def _update_model_warning(self) -> None:
+        """Update warning text based on selected model."""
+        index = self.cmb_model.currentIndex()
+        if index == 2:  # Best (Visual Only)
+            self.lbl_model_warning.setText("⚠️ High GPU usage. Processing will take significantly longer.")
+        else:
+            self.lbl_model_warning.setText("")
 
     def _create_audio_tab(self) -> QWidget:
         """Create Audio Engineer settings tab."""
@@ -260,6 +276,7 @@ class MagicSettingsDialog(QDialog):
         self.cmb_model.setCurrentIndex(
             self.settings.value("magic/director/model_index", 0, type=int)
         )
+        self._update_model_warning()
         self.chk_split_screen.setChecked(
             self.settings.value("magic/director/split_screen", False, type=bool)
         )

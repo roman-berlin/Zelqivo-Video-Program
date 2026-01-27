@@ -93,35 +93,9 @@ class SettingsDialog(QDialog):
         output_group.setLayout(output_layout)
         layout.addWidget(output_group)
 
-        # 3. Diarization Settings
-        diarization_group = QGroupBox("Diarization (Who is speaking?)")
-        diarization_layout = QFormLayout()
-
-        # Detection Mode dropdown removed - Switching Quality now controls backend
-        
-        # Switching Quality dropdown
-        self.combo_switching_quality = QComboBox()
-        self.combo_switching_quality.addItem("⚡ Fast (CPU) - Recommended", SwitchingStrategy.FAST_RULES.value)
-        self.combo_switching_quality.addItem("⚖️ Balanced - Hybrid", SwitchingStrategy.BALANCED_LIPS_ENERGY.value)
-        self.combo_switching_quality.addItem("🎯 Best - Visual Only", SwitchingStrategy.BEST_LIPS.value)
-        self.combo_switching_quality.setToolTip(
-            "Fast: Energy + Rules, recommended for most users.\n"
-            "Balanced: Hybrid audio + visual detection.\n"
-            "Best: Visual-only (may be slow without GPU)."
-        )
-        diarization_layout.addRow("Switching Quality:", self.combo_switching_quality)
-
-        # Helper text for strategy
-        self.lbl_strategy_help = QLabel("")
-        self.lbl_strategy_help.setWordWrap(True)
-        self.lbl_strategy_help.setStyleSheet("color: gray; font-size: 9pt; font-style: italic;")
-        diarization_layout.addRow("", self.lbl_strategy_help)
-
-        self.combo_switching_quality.currentIndexChanged.connect(self._update_strategy_help)
-        self._update_strategy_help()
-        
-        diarization_group.setLayout(diarization_layout)
-        layout.addWidget(diarization_group)
+        # 3. Diarization Settings - REMOVED (Moved to Magic Settings)
+        # diarization_group = QGroupBox("Diarization (Who is speaking?)")
+        # ... removed ...
 
         # 3. Advanced Settings Toggle Button
         self.btn_advanced = QPushButton("⚙️ Show Advanced Settings")
@@ -305,13 +279,8 @@ class SettingsDialog(QDialog):
         
         # Diarization mode loading removed - Switching Quality is the single control now
         
-        # Switching Quality (default to Balanced for backward compatibility)
-        strategy_str = self.settings.value(
-            "switching/strategy", SwitchingStrategy.BALANCED_LIPS_ENERGY.value, type=str
-        )
-        strategy_index = self.combo_switching_quality.findData(strategy_str)
-        if strategy_index >= 0:
-            self.combo_switching_quality.setCurrentIndex(strategy_index)
+        # Switching Quality - REMOVED (Controlled by Magic Settings)
+        # strategy_str = self.settings.value(...)
         
         # Decision engine
         self.spin_min_switch.setValue(
@@ -366,10 +335,8 @@ class SettingsDialog(QDialog):
         
         # Diarization mode save removed - Switching Quality is the single control now
         
-        # Switching Quality
-        selected_strategy = self.combo_switching_quality.currentData()
-        self.settings.setValue("switching/strategy", selected_strategy)
-        logger.info("Switching strategy saved: %s", selected_strategy)
+        # Switching Quality - REMOVED (Controlled by Magic Settings)
+        # self.settings.setValue("switching/strategy", selected_strategy)
         
         # Decision engine
         self.settings.setValue(

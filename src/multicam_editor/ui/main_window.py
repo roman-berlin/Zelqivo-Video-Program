@@ -1557,7 +1557,12 @@ class MainWindow(QMainWindow):
             # Store alignments (only cameras for now as external audio offset applies during processing)
             self._camera_alignments = {a.camera_index: a for a in camera_alignments}
             # Store external audio alignment for preview
+            # Store external audio alignment for preview
             self._external_audio_alignment = ext_alignment
+            
+            # Show waveforms button irrespective of success/failure for debugging
+            if hasattr(self, 'btn_view_waveforms'):
+                 self.btn_view_waveforms.setVisible(True)
             
             # Check for any failed alignments (exclude "no_audio" as those still sync with offset=0)
             failed = [a for a in camera_alignments if a.status == "failed"]

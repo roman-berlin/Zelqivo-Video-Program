@@ -220,7 +220,10 @@ class ProcessingProgressDialog(QDialog):
         self._cancelled = True
         self.btn_cancel.setEnabled(False)
         self.btn_cancel.setText("Cancelling...")
-        self.lbl_message.setText("Cancellation requested, please wait...")
+        self.lbl_message.setText("Cleaning up resources... (this may take a moment)")
+        # Set indeterminate progress (pulsing) to show activity
+        self.progress_bar.setRange(0, 0)
+        self.lbl_eta.setText("Terminating processes...")
         self.cancelRequested.emit()
 
     def update_progress(self, percent: int) -> None:
@@ -270,6 +273,7 @@ class ProcessingProgressDialog(QDialog):
     def set_finished(self, success: bool, message: str = "") -> None:
         """Show finished state."""
         self._cancelled = False
+        self.progress_bar.setRange(0, 100) # Reset from indeterminate
         if success:
             self.lbl_stage.setText("✓ Complete!")
             self.lbl_message.setText(message or "Processing finished successfully.")
@@ -289,6 +293,7 @@ class ProcessingProgressDialog(QDialog):
 
     def set_cancelled(self) -> None:
         """Show cancelled state."""
+        self.progress_bar.setRange(0, 100) # Reset from indeterminate
         self.lbl_stage.setText("Cancelled")
         self.lbl_message.setText("Processing was cancelled.")
         self.lbl_eta.setText("")

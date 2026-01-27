@@ -139,8 +139,19 @@ class MainWindow(QMainWindow):
         self.btn_preview_audio.clicked.connect(self._on_preview_audio)
         ctrl_lay.addWidget(self.btn_preview_audio)
         
+        # Waveforms button (new)
+        self.btn_view_waveforms = QPushButton("📊 Waveforms", ctrl_row)
+        self.btn_view_waveforms.setObjectName("btnViewWaveforms")
+        self.btn_view_waveforms.setToolTip("View audio waveforms to visually verify synchronization")
+        self.btn_view_waveforms.setVisible(False)
+        self.btn_view_waveforms.clicked.connect(self._on_view_waveforms)
+        ctrl_lay.addWidget(self.btn_view_waveforms)
+        
         ctrl_lay.addWidget(self.btn_add)
         ctrl_lay.addWidget(self.btn_process)
+        
+        # Internal list to track temp files for cleanup
+        self._temp_sync_files: List[str] = []
         
         # Magic Settings button (opens advanced AI processing options)
         self.btn_magic_settings = QPushButton("⚙️ Magic", ctrl_row)
@@ -793,8 +804,8 @@ class MainWindow(QMainWindow):
         # Unlimited files - no cap check needed
         remaining = None  # No limit
         
-        # Show progress dialog for multiple files (3+)
-        if len(videos) >= 3:
+        # Show progress dialog for multiple files (1+)
+        if len(videos) >= 1:
             self._add_files_with_progress(videos, remaining)
         else:
             # Quick add for 1-2 files
@@ -1469,23 +1480,40 @@ class MainWindow(QMainWindow):
         if external_audio:
             sync_paths.append(external_audio)
             
-        progress = QProgressDialog("Synchronizing cameras...", "Cancel", 0, len(sync_paths), self)
-        progress.setWindowTitle("Audio Synchronization")
-        progress.setWindowModality(Qt.WindowModality.WindowModal)
-        progress.setMinimumDuration(0)
-        progress.setValue(0)
-        progress.show()
+        # Create custom progress dialog (same style as loading)
+        is_dark = self.settings.value("appearance/theme", "light", type=str) == "dark"
+        dialog = LoadingDialog(self, "Synchronizing Cameras", dark_mode=is_dark)
+        dialog.show()
         QApplication.processEvents()
         
         try:
+            # Cleanup old temp wavs from previous sync
+            if hasattr(self, '_temp_sync_files') and self._temp_sync_files:
+                for wav in self._temp_sync_files:
+                    try:
+                        if os.path.exists(wav):
+                            os.remove(wav)
+                    except Exception as e:
+                        logger.warning("Failed to delete temp wav %s: %s", wav, e)
+                self._temp_sync_files.clear()
+
+            total_items = len(sync_paths)
+            
             def on_progress(idx: int, total: int) -> None:
-                if progress.wasCanceled():
+                if dialog.is_cancelled():
                     raise InterruptedError("Sync cancelled by user")
-                progress.setValue(idx + 1)
-                progress.setLabelText(f"Aligning camera {idx + 1}/{total}...")
+                
+                current_file = os.path.basename(sync_paths[idx]) if idx < len(sync_paths) else ""
+                dialog.set_progress(idx + 1, total_items, f"Aligning {current_file}...")
                 QApplication.processEvents()
             
-            alignments = align_cameras(sync_paths, on_progress=on_progress)
+            # Pass keep_wavs=True to enable visualization
+            alignments = align_cameras(sync_paths, on_progress=on_progress, keep_wavs=True)
+            
+            # Collect new temp files
+            for a in alignments:
+                if a.wav_path:
+                    self._temp_sync_files.append(a.wav_path)
             
             # Separate camera alignments from external audio alignment
             camera_alignments = [a for a in alignments if a.camera_index < len(paths)]
@@ -1501,7 +1529,7 @@ class MainWindow(QMainWindow):
             # Consider "ok", "no_audio", and any non-failed as succeeded
             succeeded = [a for a in camera_alignments if a.status != "failed"]
             
-            progress.close()
+            dialog.close()
             
             if failed:
                 failed_names = [os.path.basename(paths[a.camera_index]) for a in failed]
@@ -1526,25 +1554,48 @@ class MainWindow(QMainWindow):
                 self._toast(f"✅ Synced {len(succeeded)} cameras: {offset_str}", 8000)
                 logger.info("Synchronization complete: %s", {a.camera_index: a.offset_ms for a in alignments})
                 
-                # Show Preview Audio button if all synced
-                if self.file_list.all_synced():
+                # Show Verify Sync button if we have at least 2 tracks (cameras + ext) to compare
+                total_synced = len(succeeded) + (1 if (ext_alignment and ext_alignment.status != "failed") else 0)
+                if total_synced >= 2:
                     self._show_preview_audio_option()
+                    
+            elif failed:
+                 # Show detailed reason for first failure
+                first_fail = failed[0]
+                self._toast(f"❌ Sync failed: {first_fail.message}", 5000)
             else:
                 self._toast("❌ Synchronization failed for all cameras", 3000)
                 
         except InterruptedError:
-            progress.close()
+            dialog.close()
             self._toast("Synchronization cancelled")
             logger.info("Synchronization cancelled by user")
         except Exception as e:
-            progress.close()
+            dialog.close()
             logger.error("Synchronization error: %s", e, exc_info=True)
             self._toast(f"Sync error: {str(e)[:50]}")
 
     def _show_preview_audio_option(self) -> None:
-        """Show the Preview Audio button after successful sync."""
+        """Show the Verify Sync button after successful sync."""
+        self.btn_preview_audio.setText("🔊 Verify Sync")
+        self.btn_preview_audio.setToolTip("Play mixed audio to check synchronization")
         self.btn_preview_audio.setVisible(True)
-        self._toast("💡 Click '▶ Preview Audio' to verify sync quality", 4000)
+        self.btn_preview_audio.setEnabled(True)
+        
+        if hasattr(self, 'btn_view_waveforms'):
+            self.btn_view_waveforms.setVisible(True)
+
+    def _on_view_waveforms(self) -> None:
+        """Show the waveform visualization dialog."""
+        from .waveform_dialog import WaveformDialog
+        
+        # Collect all alignments including external
+        alignments = list(self._camera_alignments.values())
+        if hasattr(self, '_external_audio_alignment') and self._external_audio_alignment:
+            alignments.append(self._external_audio_alignment)
+            
+        dialog = WaveformDialog(alignments, self)
+        dialog.exec()
 
     def _on_preview_audio(self) -> None:
         """Play mixed audio from all synced cameras to verify sync quality.

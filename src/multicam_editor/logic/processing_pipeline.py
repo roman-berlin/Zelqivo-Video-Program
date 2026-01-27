@@ -737,6 +737,7 @@ class ProcessingPipeline:
                     hysteresis_ratio=1.6,
                     consecutive_wins=3,
                     hold_time_ms=2000,  # Prevent rapid switching
+                    cancel_callback=lambda: self._cancelled,  # Check for cancellation
                 )
                 energy_backend.set_camera_audio_paths(camera_audio_paths)
                 

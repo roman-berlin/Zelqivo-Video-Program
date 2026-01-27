@@ -148,6 +148,14 @@ class MainWindow(QMainWindow):
         self.btn_view_waveforms.clicked.connect(self._on_view_waveforms)
         ctrl_lay.addWidget(self.btn_view_waveforms)
         
+        # Multi-View button (synchronized camera preview)
+        self.btn_multiview = QPushButton("📺 Multi-View", ctrl_row)
+        self.btn_multiview.setObjectName("btnMultiView")
+        self.btn_multiview.setToolTip("Preview all cameras synchronized in a 2x2 grid")
+        self.btn_multiview.setVisible(False)  # Hidden until sync completes
+        self.btn_multiview.clicked.connect(self._on_multiview)
+        ctrl_lay.addWidget(self.btn_multiview)
+        
         ctrl_lay.addWidget(self.btn_add)
         ctrl_lay.addWidget(self.btn_process)
         
@@ -1624,6 +1632,9 @@ class MainWindow(QMainWindow):
         
         if hasattr(self, 'btn_view_waveforms'):
             self.btn_view_waveforms.setVisible(True)
+        
+        if hasattr(self, 'btn_multiview'):
+            self.btn_multiview.setVisible(True)
 
     def _on_view_waveforms(self) -> None:
         """Show the waveform visualization dialog."""
@@ -1635,6 +1646,24 @@ class MainWindow(QMainWindow):
             alignments.append(self._external_audio_alignment)
             
         dialog = WaveformDialog(alignments, self)
+        dialog.exec()
+
+    def _on_multiview(self) -> None:
+        """Open multi-view synchronized camera preview."""
+        from .multiview_dialog import MultiViewDialog
+        
+        # Get video paths
+        paths = self.file_list.get_files()
+        if len(paths) < 2:
+            self._toast("Need at least 2 videos for multi-view")
+            return
+        
+        # Get sync offsets
+        sync_offsets = {}
+        for cam_idx, alignment in self._camera_alignments.items():
+            sync_offsets[cam_idx] = alignment.offset_ms
+        
+        dialog = MultiViewDialog(self, paths, sync_offsets)
         dialog.exec()
 
     def _on_preview_audio(self) -> None:

@@ -47,6 +47,7 @@ class FileListWidget(QWidget):
         self._path_set: set[str] = set()
         self._video_count: int = 0
         self._cap: int | None = None  # set by MainWindow; None = unlimited
+        self._sync_status: dict[str, bool] = {}  # path -> synced (True=🟢, False=🔴)
 
         # DnD
         self.setAcceptDrops(True)
@@ -101,6 +102,35 @@ class FileListWidget(QWidget):
                 if p:
                     paths.append(p)
         return paths
+
+    def set_sync_status(self, path: str, synced: bool) -> None:
+        """Update sync status indicator for a file (🔴 not synced → 🟢 synced)."""
+        if path not in self._path_set:
+            return
+        
+        self._sync_status[path] = synced
+        indicator = "🟢" if synced else "🔴"
+        
+        # Find and update the item
+        for row in range(self._model.rowCount()):
+            item = self._model.item(row)
+            if item and item.data(Qt.ItemDataRole.UserRole) == path:
+                # Get base text (without indicator)
+                base_text = item.data(Qt.ItemDataRole.UserRole + 2)
+                if base_text:
+                    item.setText(f"{indicator} {base_text}")
+                break
+
+    def set_all_synced(self, synced: bool = True) -> None:
+        """Update sync status for all files at once."""
+        for path in self._path_set:
+            self.set_sync_status(path, synced)
+
+    def all_synced(self) -> bool:
+        """Return True if all files have been synced."""
+        if not self._sync_status:
+            return False
+        return all(self._sync_status.values())
 
     def reorder_to_paths(self, new_order: list[str]) -> None:
         """Rebuild the list to match new_order; ignores paths not present.
@@ -238,12 +268,18 @@ class FileListWidget(QWidget):
             if result.audio_codec:
                 tooltip += f" / {result.audio_codec}"
 
-        item = QStandardItem(display_text)
+        # Add sync status indicator (🔴 = not synced initially)
+        sync_indicator = "🔴"
+        display_with_status = f"{sync_indicator} {display_text}"
+
+        item = QStandardItem(display_with_status)
         item.setEditable(False)
         item.setToolTip(tooltip)
         item.setData(abs_path, Qt.ItemDataRole.UserRole)
+        item.setData(display_text, Qt.ItemDataRole.UserRole + 2)  # Store base text
         self._model.appendRow(item)
         self._path_set.add(abs_path)
+        self._sync_status[abs_path] = False  # Not synced initially
         self._video_count += 1
 
     @staticmethod

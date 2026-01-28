@@ -148,14 +148,6 @@ class MainWindow(QMainWindow):
         self.btn_view_waveforms.clicked.connect(self._on_view_waveforms)
         ctrl_lay.addWidget(self.btn_view_waveforms)
         
-        # Multi-View button (synchronized camera preview)
-        self.btn_multiview = QPushButton("📺 Multi-View", ctrl_row)
-        self.btn_multiview.setObjectName("btnMultiView")
-        self.btn_multiview.setToolTip("Preview all cameras synchronized in a 2x2 grid")
-        self.btn_multiview.setVisible(False)  # Hidden until sync completes
-        self.btn_multiview.clicked.connect(self._on_multiview)
-        ctrl_lay.addWidget(self.btn_multiview)
-        
         ctrl_lay.addWidget(self.btn_add)
         ctrl_lay.addWidget(self.btn_process)
         
@@ -1637,8 +1629,6 @@ class MainWindow(QMainWindow):
         if hasattr(self, 'btn_view_waveforms'):
             self.btn_view_waveforms.setVisible(True)
         
-        if hasattr(self, 'btn_multiview'):
-            self.btn_multiview.setVisible(True)
 
     def _on_view_waveforms(self) -> None:
         """Show the waveform visualization dialog."""
@@ -1652,33 +1642,16 @@ class MainWindow(QMainWindow):
         dialog = WaveformDialog(alignments, self)
         dialog.exec()
 
-    def _on_multiview(self) -> None:
-        """Open multi-view synchronized camera preview."""
-        from .multiview_dialog import MultiViewDialog
-        
-        # Get video paths
-        paths = self.file_list.get_files()
-        if len(paths) < 2:
-            self._toast("Need at least 2 videos for multi-view")
-            return
-        
-        # Get sync offsets
-        sync_offsets = {}
-        for cam_idx, alignment in self._camera_alignments.items():
-            sync_offsets[cam_idx] = alignment.offset_ms
-        
-        dialog = MultiViewDialog(self, paths, sync_offsets)
-        dialog.exec()
-
     def _on_preview_audio(self) -> None:
         """Play mixed audio from all synced cameras to verify sync quality.
         
-        Mixes audio from all cameras with their sync offsets applied,
-        plays for ~8 seconds so user can detect echo/delay issues.
+        Uses a two-step approach:
+        1. Mix audio tracks with ffmpeg to a temp WAV file
+        2. Play the temp file with ffplay
         """
         import subprocess
         import tempfile
-        from ..utils.ffmpeg import find_ffmpeg_binary, extract_audio_to_wav
+        from ..utils.ffmpeg import get_ffmpeg_path
         
         paths = self.file_list.all_paths()
         if len(paths) < 2:
@@ -1693,78 +1666,151 @@ class MainWindow(QMainWindow):
         self._toast("🎵 Preparing audio preview...", 2000)
         
         try:
-            # Find ffplay executable
-            ffplay = find_ffmpeg_binary("ffplay")
-            if not ffplay:
-                self._toast("FFplay not found - cannot preview audio")
+            # Find ffmpeg/ffplay executables
+            ffmpeg_path = get_ffmpeg_path()
+            if not ffmpeg_path:
+                self._toast("FFmpeg not found - cannot preview audio")
                 return
             
-            # Build filter_complex to mix all audio tracks with offsets
-            # Build filter_complex to mix all audio tracks with offsets
+            # Derive ffplay path from ffmpeg path
+            if ffmpeg_path == "ffmpeg":
+                ffplay = "ffplay"
+                ffmpeg = "ffmpeg"
+            else:
+                ffplay = ffmpeg_path.replace("ffmpeg.exe", "ffplay.exe").replace("ffmpeg", "ffplay")
+                ffmpeg = ffmpeg_path
+            
+            # Create temp file for mixed audio
+            temp_dir = tempfile.gettempdir()
+            temp_audio = os.path.join(temp_dir, "multicam_preview_mix.wav")
+            
+            # Build ffmpeg command to mix audio
             inputs = []
             filter_parts = []
             
-            # Helper to add input with offset
-            def add_input(path, offset_ms, idx):
-                inputs.extend(["-i", path])
-                offset_s = offset_ms / 1000.0
-                if offset_s >= 0:
-                    filter_parts.append(f"[{idx}:a]adelay={int(offset_s * 1000)}|{int(offset_s * 1000)}[a{idx}]")
-                else:
-                    filter_parts.append(f"[{idx}:a]atrim=start={abs(offset_s)}[a{idx}]")
-
-            # Add camera inputs
             current_idx = 0
             for i, path in enumerate(paths):
                 alignment = self._camera_alignments.get(i)
-                offset = alignment.offset_ms if alignment else 0.0
-                add_input(path, offset, current_idx)
-                current_idx += 1
+                offset_ms = alignment.offset_ms if alignment else 0.0
                 
-            # Add external audio input if available and synced
-            has_external = (hasattr(self, '_external_audio_alignment') and 
-                          self._external_audio_alignment and 
-                          hasattr(self, '_external_audio_path') and 
-                          self._external_audio_path)
-            
-            if has_external:
-                add_input(self._external_audio_path, self._external_audio_alignment.offset_ms, current_idx)
+                inputs.extend(["-i", path])
+                
+                # Apply delay for positive offsets, trim for negative
+                if offset_ms >= 0:
+                    delay_ms = int(offset_ms)
+                    filter_parts.append(f"[{current_idx}:a]adelay={delay_ms}|{delay_ms}[a{current_idx}]")
+                else:
+                    trim_s = abs(offset_ms) / 1000.0
+                    filter_parts.append(f"[{current_idx}:a]atrim=start={trim_s:.3f}[a{current_idx}]")
+                
                 current_idx += 1
-
-            # Mix all audio streams
+            
+            # Mix all streams
             mix_inputs = "".join(f"[a{i}]" for i in range(current_idx))
-            filter_parts.append(f"{mix_inputs}amix=inputs={current_idx}:duration=first:dropout_transition=2[out]")
+            filter_parts.append(f"{mix_inputs}amix=inputs={current_idx}:duration=shortest[out]")
             
             filter_complex = ";".join(filter_parts)
             
-            # Build ffplay command (play for 8 seconds)
-            cmd = [
-                ffplay,
-                "-nodisp",  # No video window
-                "-autoexit",  # Exit when done
-                "-t", "8",   # Play 8 seconds
+            # Build ffmpeg command - mix audio to temp file (8 seconds only)
+            ffmpeg_cmd = [
+                ffmpeg,
+                "-y",  # Overwrite
                 *inputs,
                 "-filter_complex", filter_complex,
-                "-map", "[out]"
+                "-map", "[out]",
+                "-t", "8",  # 8 seconds
+                "-ac", "2",  # Stereo
+                "-ar", "44100",  # 44.1kHz
+                temp_audio
             ]
             
-            logger.debug("FFplay command: %s", " ".join(cmd))
+            logger.debug("FFmpeg mix command: %s", " ".join(ffmpeg_cmd))
             
-            # Run in background with Popen
-            self._audio_preview_process = subprocess.Popen(
-                cmd,
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
-                creationflags=subprocess.CREATE_NO_WINDOW if os.name == 'nt' else 0
+            # Run ffmpeg to create mixed audio
+            result = subprocess.run(
+                ffmpeg_cmd,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                creationflags=subprocess.CREATE_NO_WINDOW if os.name == 'nt' else 0,
+                timeout=30
             )
             
-            self._toast("🎵 Playing synced audio preview (8s)... Listen for echoes!", 8000)
+            if result.returncode != 0:
+                stderr = result.stderr.decode('utf-8', errors='ignore')[:500]
+                logger.error("FFmpeg mix failed: %s", stderr)
+                self._toast("❌ Failed to mix audio. Check video files have audio tracks.")
+                return
             
-            # Update button to show "Stop" state
-            self.btn_preview_audio.setText("⏹ Stop Preview")
-            self.btn_preview_audio.clicked.disconnect()
-            self.btn_preview_audio.clicked.connect(self._stop_preview_audio)
+            if not os.path.exists(temp_audio):
+                logger.error("Temp audio file not created")
+                self._toast("❌ Audio mixing failed - no output file")
+                return
             
+            logger.info("Mixed audio created: %s", temp_audio)
+            
+            # Now play the mixed audio with ffplay
+            ffplay_cmd = [
+                ffplay,
+                "-nodisp",    # No video window
+                "-autoexit",  # Exit when done
+                temp_audio
+            ]
+            
+            logger.debug("FFplay command: %s", " ".join(ffplay_cmd))
+            
+            # Show preview dialog
+            from .audio_preview_dialog import AudioPreviewDialog
+            preview_dialog = AudioPreviewDialog(self, duration_seconds=8)
+            
+            # Start ffplay
+            try:
+                self._audio_preview_process = subprocess.Popen(
+                    ffplay_cmd,
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.PIPE,
+                    creationflags=subprocess.CREATE_NO_WINDOW if os.name == 'nt' else 0
+                )
+            except FileNotFoundError:
+                logger.error("ffplay not found")
+                self._toast("❌ ffplay not found. Install FFmpeg with ffplay.")
+                return
+            except Exception as e:
+                logger.error("Failed to start ffplay: %s", e)
+                self._toast(f"❌ Audio playback failed: {e}")
+                return
+            
+            # Brief check if process started
+            import time
+            time.sleep(0.3)
+            if self._audio_preview_process.poll() is not None:
+                stderr = self._audio_preview_process.stderr.read().decode('utf-8', errors='ignore') if self._audio_preview_process.stderr else ''
+                logger.error("ffplay exited immediately: %s", stderr[:200])
+                self._toast("❌ Audio playback failed. Check ffplay installation.")
+                return
+            
+            # Show dialog (blocks until done)
+            result = preview_dialog.exec()
+            
+            # Cleanup
+            if self._audio_preview_process and self._audio_preview_process.poll() is None:
+                self._audio_preview_process.terminate()
+                try:
+                    self._audio_preview_process.wait(timeout=2)
+                except subprocess.TimeoutExpired:
+                    self._audio_preview_process.kill()
+            
+            self._audio_preview_process = None
+            
+            # Clean up temp file
+            try:
+                if os.path.exists(temp_audio):
+                    os.remove(temp_audio)
+            except Exception:
+                pass
+            
+        except subprocess.TimeoutExpired:
+            logger.error("Audio mixing timed out")
+            self._toast("❌ Audio mixing took too long")
         except Exception as e:
             logger.error("Audio preview failed: %s", e, exc_info=True)
             self._toast(f"Audio preview failed: {str(e)[:40]}")

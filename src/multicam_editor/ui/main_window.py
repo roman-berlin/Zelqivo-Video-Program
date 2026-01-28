@@ -42,7 +42,7 @@ from .timeline.adapter import TimelineAdapter
 from ..core.project import Project
 # Import undo/redo commands
 from ..logic.processing_worker import ProcessingThread
-from ..logic.commands import AddClipsCommand
+from ..logic.commands import AddClipsCommand, RemoveClipsCommand, TrimCommand
 from ..logic.preflight import check_preflight_warnings, format_warnings_for_display
 from ..logic.preflight import (
     run_gpu_preflight_check, 
@@ -59,6 +59,7 @@ from ..logic.eta_estimation import (
 from .progress_dialog import ProcessingProgressDialog
 from .loading_dialog import LoadingDialog
 from .gpu_warning_dialog import show_gpu_warning_dialog
+from .custom_title_bar import CustomTitleBar
 from PyQt6.QtWidgets import QMessageBox
 
 
@@ -71,6 +72,10 @@ class MainWindow(QMainWindow):
 
     def __init__(self) -> None:
         super().__init__()
+        # Frameless window for modern look
+        self.setWindowFlags(
+            Qt.WindowType.FramelessWindowHint | Qt.WindowType.Window
+        )
         self.setWindowTitle("MultiCamEditor")
         self.resize(1280, 800)
         self.settings = QSettings("MultiCamEditor", "MultiCamEditor")
@@ -95,10 +100,21 @@ class MainWindow(QMainWindow):
     # --- UI setup ---
     def _init_ui(self) -> None:
         central = QWidget(self)
-        root = QHBoxLayout(central)
+        main_layout = QVBoxLayout(central)
+        main_layout.setContentsMargins(0, 0, 0, 0)
+        main_layout.setSpacing(0)
+        
+        # Custom title bar
+        self.title_bar = CustomTitleBar(self)
+        main_layout.addWidget(self.title_bar)
+        
+        # Content area
+        content = QWidget()
+        root = QHBoxLayout(content)
+        main_layout.addWidget(content, 1)
         root.setContentsMargins(8, 8, 8, 8)
 
-        splitter = QSplitter(Qt.Orientation.Horizontal, central)
+        splitter = QSplitter(Qt.Orientation.Horizontal, content)
         splitter.setChildrenCollapsible(False)
         root.addWidget(splitter)
 
@@ -362,9 +378,8 @@ class MainWindow(QMainWindow):
         self.chk_external_audio = QCheckBox("Use external audio")
         self.chk_external_audio.setObjectName("chkExternalAudio")
         self.chk_external_audio.setToolTip("Replace camera audio with external audio file")
-        self.chk_external_audio.setChecked(
-            self.settings.value("processing/use_external_audio", False, type=bool)
-        )
+        # Always start unchecked - don't persist between sessions
+        self.chk_external_audio.setChecked(False)
         self.chk_external_audio.toggled.connect(self._on_external_audio_toggled)
         layout.addWidget(self.chk_external_audio, row, 0, 1, 3)
         row += 1

@@ -1170,6 +1170,10 @@ class MainWindow(QMainWindow):
             strategy = SwitchingStrategy.BEST_LIPS
         else:
             strategy = SwitchingStrategy.BALANCED_LIPS_ENERGY
+        
+        # Save mapped strategy so ProcessingPipeline can read it
+        # This was missing, causing all modes to use the default FAST_RULES
+        self.settings.setValue("switching/strategy", strategy.value)
 
         # Run check
         status = run_gpu_preflight_check(

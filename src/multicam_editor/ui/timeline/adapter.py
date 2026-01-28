@@ -170,14 +170,8 @@ class TimelineAdapter:
             self._key_to_index[key] = i
 
         self.scene.relayout_compact()
-
-        if self.file_list is not None:
-            try:
-                self.file_list.clear()
-                for clip in clips:
-                    self.file_list.addItem(clip.display_title())
-            except Exception:
-                pass
+        # Note: File list sync is handled by MainWindow._refresh_after_undo_redo
+        # which calls file_list.sync_from_paths() with the correct API
 
     def _select_and_scroll_by_key_impl(self, key: str) -> None:
         try:

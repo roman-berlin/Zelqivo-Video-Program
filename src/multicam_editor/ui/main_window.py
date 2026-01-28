@@ -925,10 +925,14 @@ class MainWindow(QMainWindow):
         """Handle removal request for all videos.
         
         Uses RemoveClipsCommand for proper Project sync and undo support.
+        Also cleans up sync-related state to prevent stale data.
         """
         clips = self.project.clips()
         if not clips:
             return
+        
+        # Clean up sync state before removal
+        self._cleanup_sync_state()
         
         # Get all clip IDs
         clip_ids = [clip.id for clip in clips]
@@ -940,6 +944,33 @@ class MainWindow(QMainWindow):
             refresh_callback=self._refresh_after_undo_redo
         )
         self.undo_stack.push(cmd)
+
+    def _cleanup_sync_state(self) -> None:
+        """Clean up synchronization-related state.
+        
+        Called when videos are removed to prevent crashes from stale data.
+        """
+        # Clear camera alignments
+        if hasattr(self, '_camera_alignments'):
+            self._camera_alignments = {}
+        if hasattr(self, '_external_audio_alignment'):
+            self._external_audio_alignment = None
+        
+        # Hide verification buttons
+        if hasattr(self, 'btn_preview_audio'):
+            self.btn_preview_audio.setVisible(False)
+        if hasattr(self, 'btn_view_waveforms'):
+            self.btn_view_waveforms.setVisible(False)
+        
+        # Clean up temp sync files
+        if hasattr(self, '_temp_sync_files') and self._temp_sync_files:
+            for wav in self._temp_sync_files:
+                try:
+                    if os.path.exists(wav):
+                        os.remove(wav)
+                except Exception:
+                    pass
+            self._temp_sync_files.clear()
 
     def _on_scene_selection_changed(self) -> None:
         """Mirror timeline selection to file list to drive preview."""
@@ -1662,8 +1693,8 @@ class MainWindow(QMainWindow):
             self._toast("Please run Sync All first")
             return
         
-        logger.info("Starting audio preview for %d cameras", len(paths))
-        self._toast("🎵 Preparing audio preview...", 2000)
+        logger.info("Starting sequential audio preview for %d cameras", len(paths))
+        self._toast("🎵 Playing each camera (3 sec each)...", 3000)
         
         try:
             # Find ffmpeg/ffplay executables
@@ -1695,30 +1726,40 @@ class MainWindow(QMainWindow):
                 
                 inputs.extend(["-i", path])
                 
-                # Apply delay for positive offsets, trim for negative
-                if offset_ms >= 0:
-                    delay_ms = int(offset_ms)
-                    filter_parts.append(f"[{current_idx}:a]adelay={delay_ms}|{delay_ms}[a{current_idx}]")
+                # For sequential playback: extract 3 seconds starting at sync point + 2s
+                # Apply offset to start time, then take 3 second segment
+                start_s = 2.0  # Skip first 2 seconds
+                if offset_ms > 0:
+                    # Camera starts later, add offset to start time
+                    start_s = max(0, start_s - (offset_ms / 1000.0))
                 else:
-                    trim_s = abs(offset_ms) / 1000.0
-                    filter_parts.append(f"[{current_idx}:a]atrim=start={trim_s:.3f}[a{current_idx}]")
+                    # Camera starts earlier, subtract offset from start time
+                    start_s = start_s + (abs(offset_ms) / 1000.0)
+                
+                # Extract 3 seconds from each camera and add beep marker
+                filter_parts.append(
+                    f"[{current_idx}:a]atrim=start={start_s:.3f}:duration=3,asetpts=PTS-STARTPTS,"
+                    f"volume=1.5[a{current_idx}]"
+                )
                 
                 current_idx += 1
             
-            # Mix all streams
-            mix_inputs = "".join(f"[a{i}]" for i in range(current_idx))
-            filter_parts.append(f"{mix_inputs}amix=inputs={current_idx}:duration=shortest[out]")
+            # Concatenate all streams sequentially (not mix)
+            # This plays each camera's audio one after another
+            concat_inputs = "".join(f"[a{i}]" for i in range(current_idx))
+            filter_parts.append(f"{concat_inputs}concat=n={current_idx}:v=0:a=1[out]")
             
             filter_complex = ";".join(filter_parts)
             
-            # Build ffmpeg command - mix audio to temp file (8 seconds only)
+            # Build ffmpeg command - concatenate audio to temp file
+            # Total duration = 3 seconds × number of cameras
+            total_duration = 3 * current_idx
             ffmpeg_cmd = [
                 ffmpeg,
                 "-y",  # Overwrite
                 *inputs,
                 "-filter_complex", filter_complex,
                 "-map", "[out]",
-                "-t", "8",  # 8 seconds
                 "-ac", "2",  # Stereo
                 "-ar", "44100",  # 44.1kHz
                 temp_audio
@@ -1746,9 +1787,9 @@ class MainWindow(QMainWindow):
                 self._toast("❌ Audio mixing failed - no output file")
                 return
             
-            logger.info("Mixed audio created: %s", temp_audio)
+            logger.info("Sequential audio preview created: %s", temp_audio)
             
-            # Now play the mixed audio with ffplay
+            # Now play the sequential audio with ffplay
             ffplay_cmd = [
                 ffplay,
                 "-nodisp",    # No video window
@@ -1758,9 +1799,9 @@ class MainWindow(QMainWindow):
             
             logger.debug("FFplay command: %s", " ".join(ffplay_cmd))
             
-            # Show preview dialog
+            # Show preview dialog with dynamic duration (3 sec per camera)
             from .audio_preview_dialog import AudioPreviewDialog
-            preview_dialog = AudioPreviewDialog(self, duration_seconds=8)
+            preview_dialog = AudioPreviewDialog(self, duration_seconds=total_duration)
             
             # Start ffplay
             try:

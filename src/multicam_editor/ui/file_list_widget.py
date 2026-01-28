@@ -48,6 +48,7 @@ class FileListWidget(QWidget):
         self._video_count: int = 0
         self._cap: int | None = None  # set by MainWindow; None = unlimited
         self._sync_status: dict[str, bool] = {}  # path -> synced (True=🟢, False=🔴)
+        self._sync_mode_enabled: bool = False  # Only show sync dots when enabled
 
         # DnD
         self.setAcceptDrops(True)
@@ -55,6 +56,35 @@ class FileListWidget(QWidget):
     # ------------------------ Public API ------------------------
     def set_video_cap(self, cap: int | None) -> None:
         self._cap = cap
+
+    def set_sync_mode_enabled(self, enabled: bool) -> None:
+        """Enable/disable sync status indicators in the file list.
+        
+        When disabled, no sync dots appear next to files.
+        When enabled, sync status dots (🔴/🟢) are shown.
+        """
+        if self._sync_mode_enabled == enabled:
+            return
+        self._sync_mode_enabled = enabled
+        # Refresh all items to show/hide sync indicators
+        for row in range(self._model.rowCount()):
+            item = self._model.item(row)
+            if item:
+                path = item.data(Qt.ItemDataRole.UserRole)
+                is_result = item.data(Qt.ItemDataRole.UserRole + 1)
+                if path and not is_result:
+                    base_text = item.data(Qt.ItemDataRole.UserRole + 2)
+                    if base_text:
+                        if enabled:
+                            synced = self._sync_status.get(path, False)
+                            indicator = "🟢" if synced else "🔴"
+                            item.setText(f"{indicator} {base_text}")
+                        else:
+                            item.setText(base_text)
+
+    def is_sync_mode_enabled(self) -> bool:
+        """Return whether sync mode is currently enabled."""
+        return self._sync_mode_enabled
 
     def add_files(
         self, paths: List[str], *, cap_remaining: int | None = None
@@ -268,9 +298,12 @@ class FileListWidget(QWidget):
             if result.audio_codec:
                 tooltip += f" / {result.audio_codec}"
 
-        # Add sync status indicator (🔴 = not synced initially)
-        sync_indicator = "🔴"
-        display_with_status = f"{sync_indicator} {display_text}"
+        # Only show sync indicator if sync mode is enabled
+        if self._sync_mode_enabled:
+            sync_indicator = "🔴"  # Not synced initially
+            display_with_status = f"{sync_indicator} {display_text}"
+        else:
+            display_with_status = display_text
 
         item = QStandardItem(display_with_status)
         item.setEditable(False)

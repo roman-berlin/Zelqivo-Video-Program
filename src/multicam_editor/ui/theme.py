@@ -65,6 +65,31 @@ QPushButton#btnAdvanced:checked {
     background-color: #e0e0e0;
     border-color: #9e9e9e;
 }
+QPushButton#btnProcess {
+    background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+        stop:0 #00c853, stop:1 #00a846);
+    color: white;
+    font-size: 13px;
+    font-weight: bold;
+    border: 2px solid #00a846;
+    border-radius: 8px;
+    padding: 8px 20px;
+    min-width: 130px;
+}
+QPushButton#btnProcess:hover {
+    background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+        stop:0 #00e676, stop:1 #00c853);
+    border-color: #00c853;
+}
+QPushButton#btnProcess:pressed {
+    background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+        stop:0 #00a846, stop:1 #009624);
+}
+QPushButton#btnProcess:disabled {
+    background: #bdbdbd;
+    border-color: #9e9e9e;
+    color: #757575;
+}
 QToolBar {
     background-color: #fafafa;
     border-bottom: 1px solid #e0e0e0;
@@ -216,6 +241,31 @@ QPushButton#btnAdvanced:hover {
 QPushButton#btnAdvanced:checked {
     background-color: #555555;
     border-color: #666666;
+}
+QPushButton#btnProcess {
+    background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+        stop:0 #00c853, stop:1 #00a846);
+    color: white;
+    font-size: 13px;
+    font-weight: bold;
+    border: 2px solid #00a846;
+    border-radius: 8px;
+    padding: 8px 20px;
+    min-width: 130px;
+}
+QPushButton#btnProcess:hover {
+    background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+        stop:0 #00e676, stop:1 #00c853);
+    border-color: #00c853;
+}
+QPushButton#btnProcess:pressed {
+    background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+        stop:0 #00a846, stop:1 #009624);
+}
+QPushButton#btnProcess:disabled {
+    background: #555555;
+    border-color: #444444;
+    color: #888888;
 }
 QToolBar {
     background-color: #252525;

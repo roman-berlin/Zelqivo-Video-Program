@@ -9,7 +9,7 @@ from __future__ import annotations
 import logging
 from typing import Optional
 
-from PyQt6.QtCore import Qt, QSettings
+from PyQt6.QtCore import Qt, QSettings, pyqtSignal
 from PyQt6.QtWidgets import (
     QCheckBox,
     QComboBox,
@@ -32,11 +32,15 @@ class MagicSettingsDialog(QDialog):
     """Dialog for configuring AI processing options.
     
     Provides placeholder controls for future AI features:
+    - Video Synchronization (audio waveform matching)
     - AI Director (split screen, reaction shots)
     - Audio Engineer (leveling, noise reduction, ducking)
     - Captions & Branding (styles, logos)
     - Content Repurposing (teasers, silence removal)
     """
+    
+    # Signal emitted when user clicks "Sync Now" button
+    sync_requested = pyqtSignal()
 
     def __init__(self, parent: Optional[QWidget] = None) -> None:
         super().__init__(parent)
@@ -61,6 +65,36 @@ class MagicSettingsDialog(QDialog):
         header = QLabel("Configure your zero-click automation pipeline")
         header.setStyleSheet("color: #888; font-style: italic; margin-bottom: 8px;")
         layout.addWidget(header)
+        
+        # Synchronization section (at the top, before tabs)
+        sync_group = QGroupBox("🔄 Video Synchronization")
+        sync_group.setObjectName("groupSync")
+        sync_layout = QVBoxLayout(sync_group)
+        
+        self.chk_sync_enabled = QCheckBox("Synchronize videos before processing")
+        self.chk_sync_enabled.setObjectName("chkSyncEnabled")
+        self.chk_sync_enabled.setToolTip(
+            "Align all cameras using audio waveform matching before creating video"
+        )
+        sync_layout.addWidget(self.chk_sync_enabled)
+        
+        sync_hint = QLabel("Aligns all camera angles using audio waveform matching")
+        sync_hint.setStyleSheet("color: #888; font-size: 10px; margin-left: 24px;")
+        sync_layout.addWidget(sync_hint)
+        
+        # Sync Now button row
+        sync_btn_row = QHBoxLayout()
+        sync_btn_row.setContentsMargins(24, 8, 0, 0)
+        self.btn_sync_now = QPushButton("🔄 Sync Now")
+        self.btn_sync_now.setObjectName("btnSyncNow")
+        self.btn_sync_now.setToolTip("Synchronize all videos immediately")
+        self.btn_sync_now.setFixedWidth(120)
+        self.btn_sync_now.clicked.connect(self._on_sync_now)
+        sync_btn_row.addWidget(self.btn_sync_now)
+        sync_btn_row.addStretch()
+        sync_layout.addLayout(sync_btn_row)
+        
+        layout.addWidget(sync_group)
         
         # Tab widget
         tabs = QTabWidget(self)
@@ -97,6 +131,11 @@ class MagicSettingsDialog(QDialog):
         
         # Apply theme styling
         self._apply_theme()
+    
+    def _on_sync_now(self) -> None:
+        """Handle Sync Now button click."""
+        self.sync_requested.emit()
+        logger.info("Sync Now requested from Magic Settings")
 
     def _create_director_tab(self) -> QWidget:
         """Create AI Director settings tab."""
@@ -272,6 +311,11 @@ class MagicSettingsDialog(QDialog):
 
     def _load_settings(self) -> None:
         """Load saved settings from QSettings."""
+        # Synchronization
+        self.chk_sync_enabled.setChecked(
+            self.settings.value("magic/sync/enabled", False, type=bool)
+        )
+        
         # AI Director
         self.cmb_model.setCurrentIndex(
             self.settings.value("magic/director/model_index", 0, type=int)
@@ -314,6 +358,9 @@ class MagicSettingsDialog(QDialog):
 
     def _save_and_accept(self) -> None:
         """Save settings to QSettings and close dialog."""
+        # Synchronization
+        self.settings.setValue("magic/sync/enabled", self.chk_sync_enabled.isChecked())
+        
         # AI Director
         self.settings.setValue("magic/director/model_index", self.cmb_model.currentIndex())
         self.settings.setValue("magic/director/split_screen", self.chk_split_screen.isChecked())
@@ -390,6 +437,9 @@ def get_magic_settings() -> dict:
     settings = QSettings("MultiCamEditor", "MultiCamEditor")
     
     return {
+        "sync": {
+            "enabled": settings.value("magic/sync/enabled", False, type=bool),
+        },
         "director": {
             "model_index": settings.value("magic/director/model_index", 0, type=int),
             "split_screen": settings.value("magic/director/split_screen", False, type=bool),
@@ -409,3 +459,4 @@ def get_magic_settings() -> dict:
             "remove_silence": settings.value("magic/repurpose/remove_silence", False, type=bool),
         },
     }
+

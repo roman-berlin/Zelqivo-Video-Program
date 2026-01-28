@@ -129,7 +129,7 @@ class MainWindow(QMainWindow):
         self.btn_add = QPushButton("Add Videos…", ctrl_row)
         self.btn_add.setObjectName("btnAddFiles")
         self.btn_add.setToolTip("Add 2 or more camera videos (MP4/MOV/AVI)")
-        self.btn_process = QPushButton("Create Video", ctrl_row)
+        self.btn_process = QPushButton("✨ Create Video", ctrl_row)
         self.btn_process.setObjectName("btnProcess")
         self.btn_process.setEnabled(False)  # Enabled when >=2 videos
         self.btn_process.setToolTip("Automatically sync and switch cameras")
@@ -140,12 +140,13 @@ class MainWindow(QMainWindow):
         self.lbl_counter = QLabel("Videos: 0", ctrl_row)
         self.lbl_counter.setObjectName("lblCounter")
         
-        # Synchronize All button
+        # Synchronize All button (hidden - sync is now in Magic Settings)
         self.btn_sync_all = QPushButton("🔄 Sync All", ctrl_row)
         self.btn_sync_all.setObjectName("btnSyncAll")
         self.btn_sync_all.setToolTip("Synchronize all videos using audio waveform matching")
         self.btn_sync_all.setEnabled(False)  # Enabled when >=2 videos
         self.btn_sync_all.clicked.connect(self.on_synchronize_all)
+        self.btn_sync_all.setVisible(False)  # Hidden - sync is now in Magic Settings
         ctrl_lay.addWidget(self.btn_sync_all)
         
         # Preview Audio button (visible after sync completes)
@@ -750,9 +751,15 @@ class MainWindow(QMainWindow):
 
     def _show_magic_settings(self) -> None:
         """Show the Magic Settings dialog for AI processing options."""
-        from .magic_settings_dialog import MagicSettingsDialog
+        from .magic_settings_dialog import MagicSettingsDialog, get_magic_settings
         dialog = MagicSettingsDialog(self)
+        # Connect sync_requested signal to trigger synchronization
+        dialog.sync_requested.connect(self.on_synchronize_all)
         dialog.exec()
+        # After dialog closes, update file list sync mode based on settings
+        magic_settings = get_magic_settings()
+        sync_enabled = magic_settings.get("sync", {}).get("enabled", False)
+        self.file_list.set_sync_mode_enabled(sync_enabled)
 
     def _show_export_dialog(self) -> None:
         """Show the export dialog for the processed video."""

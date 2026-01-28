@@ -148,9 +148,8 @@ class ProcessingOptionsWidget(QGroupBox):
 
     def _load_settings(self) -> None:
         """Load saved settings."""
-        self.chk_external_audio.setChecked(
-            self.settings.value("processing/use_external_audio", False, type=bool)
-        )
+        # Always start unchecked as we don't persist the audio file path
+        self.chk_external_audio.setChecked(False)
         # Don't load external_audio_path from settings - always start fresh
         # Audio file from previous session should not persist
 

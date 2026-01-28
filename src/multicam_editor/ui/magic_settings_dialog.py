@@ -355,9 +355,7 @@ class MagicSettingsDialog(QDialog):
                     left: 10px;
                     padding: 0 5px;
                 }
-                QCheckBox {
-                    spacing: 8px;
-                }
+
                 QTabWidget::pane {
                     border: 1px solid #555;
                     border-radius: 6px;
@@ -379,9 +377,6 @@ class MagicSettingsDialog(QDialog):
                     subcontrol-origin: margin;
                     left: 10px;
                     padding: 0 5px;
-                }
-                QCheckBox {
-                    spacing: 8px;
                 }
                 QTabWidget::pane {
                     border: 1px solid #ddd;

@@ -42,7 +42,7 @@ from .timeline.adapter import TimelineAdapter
 from ..core.project import Project
 # Import undo/redo commands
 from ..logic.processing_worker import ProcessingThread
-from ..logic.commands import AddClipsCommand
+from ..logic.commands import AddClipsCommand, RemoveClipsCommand, TrimCommand
 from ..logic.preflight import check_preflight_warnings, format_warnings_for_display
 from ..logic.preflight import (
     run_gpu_preflight_check, 
@@ -59,6 +59,7 @@ from ..logic.eta_estimation import (
 from .progress_dialog import ProcessingProgressDialog
 from .loading_dialog import LoadingDialog
 from .gpu_warning_dialog import show_gpu_warning_dialog
+from .custom_title_bar import CustomTitleBar
 from PyQt6.QtWidgets import QMessageBox
 
 
@@ -71,6 +72,10 @@ class MainWindow(QMainWindow):
 
     def __init__(self) -> None:
         super().__init__()
+        # Frameless window for modern look
+        self.setWindowFlags(
+            Qt.WindowType.FramelessWindowHint | Qt.WindowType.Window
+        )
         self.setWindowTitle("MultiCamEditor")
         self.resize(1280, 800)
         self.settings = QSettings("MultiCamEditor", "MultiCamEditor")
@@ -78,13 +83,14 @@ class MainWindow(QMainWindow):
         # Video cap is enforced at the FileListWidget level.
         self.project = Project()
         self._current_path: str | None = None
+        self._output_folder: str | None = None  # Default: same as source
 
         # Initialize undo/redo stack
         self.undo_stack = QUndoStack(self)
 
         self._init_ui()
         self._init_undo_toolbar()
-        self._init_menu()
+        # Menu bar removed as per modern UI request
         self._connect_signals()
         self._refresh_counter()
 
@@ -94,10 +100,21 @@ class MainWindow(QMainWindow):
     # --- UI setup ---
     def _init_ui(self) -> None:
         central = QWidget(self)
-        root = QHBoxLayout(central)
+        main_layout = QVBoxLayout(central)
+        main_layout.setContentsMargins(0, 0, 0, 0)
+        main_layout.setSpacing(0)
+        
+        # Custom title bar
+        self.title_bar = CustomTitleBar(self)
+        main_layout.addWidget(self.title_bar)
+        
+        # Content area
+        content = QWidget()
+        root = QHBoxLayout(content)
+        main_layout.addWidget(content, 1)
         root.setContentsMargins(8, 8, 8, 8)
 
-        splitter = QSplitter(Qt.Orientation.Horizontal, central)
+        splitter = QSplitter(Qt.Orientation.Horizontal, content)
         splitter.setChildrenCollapsible(False)
         root.addWidget(splitter)
 
@@ -112,7 +129,7 @@ class MainWindow(QMainWindow):
         self.btn_add = QPushButton("Add Videos…", ctrl_row)
         self.btn_add.setObjectName("btnAddFiles")
         self.btn_add.setToolTip("Add 2 or more camera videos (MP4/MOV/AVI)")
-        self.btn_process = QPushButton("Create Video", ctrl_row)
+        self.btn_process = QPushButton("✨ Create Video", ctrl_row)
         self.btn_process.setObjectName("btnProcess")
         self.btn_process.setEnabled(False)  # Enabled when >=2 videos
         self.btn_process.setToolTip("Automatically sync and switch cameras")
@@ -123,15 +140,36 @@ class MainWindow(QMainWindow):
         self.lbl_counter = QLabel("Videos: 0", ctrl_row)
         self.lbl_counter.setObjectName("lblCounter")
         
-        # Synchronize All button
+        # Synchronize All button (hidden - sync is now in Magic Settings)
         self.btn_sync_all = QPushButton("🔄 Sync All", ctrl_row)
         self.btn_sync_all.setObjectName("btnSyncAll")
         self.btn_sync_all.setToolTip("Synchronize all videos using audio waveform matching")
         self.btn_sync_all.setEnabled(False)  # Enabled when >=2 videos
         self.btn_sync_all.clicked.connect(self.on_synchronize_all)
+        self.btn_sync_all.setVisible(False)  # Hidden - sync is now in Magic Settings
         ctrl_lay.addWidget(self.btn_sync_all)
+        
+        # Preview Audio button (visible after sync completes)
+        self.btn_preview_audio = QPushButton("▶ Preview Audio", ctrl_row)
+        self.btn_preview_audio.setObjectName("btnPreviewAudio")
+        self.btn_preview_audio.setToolTip("Play mixed audio from all synced cameras (5-10s) to verify sync quality")
+        self.btn_preview_audio.setVisible(False)  # Hidden until sync completes
+        self.btn_preview_audio.clicked.connect(self._on_preview_audio)
+        ctrl_lay.addWidget(self.btn_preview_audio)
+        
+        # Waveforms button (new)
+        self.btn_view_waveforms = QPushButton("📊 Waveforms", ctrl_row)
+        self.btn_view_waveforms.setObjectName("btnViewWaveforms")
+        self.btn_view_waveforms.setToolTip("View audio waveforms to visually verify synchronization")
+        self.btn_view_waveforms.setVisible(False)
+        self.btn_view_waveforms.clicked.connect(self._on_view_waveforms)
+        ctrl_lay.addWidget(self.btn_view_waveforms)
+        
         ctrl_lay.addWidget(self.btn_add)
         ctrl_lay.addWidget(self.btn_process)
+        
+        # Internal list to track temp files for cleanup
+        self._temp_sync_files: List[str] = []
         
         # Magic Settings button (opens advanced AI processing options)
         self.btn_magic_settings = QPushButton("⚙️ Magic", ctrl_row)
@@ -139,6 +177,25 @@ class MainWindow(QMainWindow):
         self.btn_magic_settings.setToolTip("Configure AI processing options")
         self.btn_magic_settings.clicked.connect(self._show_magic_settings)
         ctrl_lay.addWidget(self.btn_magic_settings)
+
+        # Export (XML) button - Modern replacement for File > Export
+        self.btn_export = QPushButton("📤 Export XML", ctrl_row)
+        self.btn_export.setObjectName("btnExport")
+        self.btn_export.setToolTip("Export timeline to FCPXML for Premiere/DaVinci")
+        # Initially disabled until we have results
+        self.btn_export.clicked.connect(self._on_export_xml)
+        self.btn_export.setVisible(False) # Hidden until processing complete
+        ctrl_lay.addWidget(self.btn_export)
+
+        # App Settings button - Modern replacement for File > Settings
+        self.btn_app_settings = QPushButton("🛠 Settings", ctrl_row)
+        self.btn_app_settings.setObjectName("btnAppSettings")
+        self.btn_app_settings.setToolTip("Appearance and Application Settings")
+        self.btn_app_settings.clicked.connect(self._show_settings_dialog)
+        ctrl_lay.addWidget(self.btn_app_settings)
+
+        
+        # Helper text for removed buttons? No, tooltips are enough.
         
         ctrl_lay.addWidget(self.btn_remove_all)
         ctrl_lay.addStretch(1)
@@ -179,6 +236,7 @@ class MainWindow(QMainWindow):
         left_layout.addWidget(self.lbl_eta)
 
         # --- Processing Options Group ---
+        # --- Processing Options Group (External Audio, Output Folder) ---
         self._init_processing_options(left_layout)
 
         # Right: preview + trim panel + timeline
@@ -321,9 +379,8 @@ class MainWindow(QMainWindow):
         self.chk_external_audio = QCheckBox("Use external audio")
         self.chk_external_audio.setObjectName("chkExternalAudio")
         self.chk_external_audio.setToolTip("Replace camera audio with external audio file")
-        self.chk_external_audio.setChecked(
-            self.settings.value("processing/use_external_audio", False, type=bool)
-        )
+        # Always start unchecked - don't persist between sessions
+        self.chk_external_audio.setChecked(False)
         self.chk_external_audio.toggled.connect(self._on_external_audio_toggled)
         layout.addWidget(self.chk_external_audio, row, 0, 1, 3)
         row += 1
@@ -435,6 +492,12 @@ class MainWindow(QMainWindow):
         self.lbl_result_file.setStyleSheet("font-weight: bold;")
         result_layout.addWidget(self.lbl_result_file, 1)
         
+        # Stats label - shows detection time and model
+        self.lbl_detection_stats = QLabel("")
+        self.lbl_detection_stats.setObjectName("lblDetectionStats")
+        self.lbl_detection_stats.setStyleSheet("color: #888; font-size: 11px;")
+        result_layout.addWidget(self.lbl_detection_stats)
+        
         self.btn_play_result = QPushButton("▶ Play Video")
         self.btn_play_result.setObjectName("btnPlayResult")
         self.btn_play_result.setToolTip("Open the generated video in your default player")
@@ -442,7 +505,27 @@ class MainWindow(QMainWindow):
         self.btn_play_result.clicked.connect(self._on_play_result)
         result_layout.addWidget(self.btn_play_result)
         
+        # Open Folder button
+        self.btn_open_folder = QPushButton("📁 Open Folder")
+        self.btn_open_folder.setObjectName("btnOpenFolder")
+        self.btn_open_folder.setToolTip("Open the output folder in file explorer")
+        self.btn_open_folder.setFixedWidth(110)
+        self.btn_open_folder.clicked.connect(self._on_open_folder)
+        result_layout.addWidget(self.btn_open_folder)
+        
+        # Export XML button
+        self.btn_export_xml = QPushButton("📄 Export XML")
+        self.btn_export_xml.setObjectName("btnExportXml")
+        self.btn_export_xml.setToolTip("Export timeline as FCPXML for Premiere Pro / DaVinci Resolve")
+        self.btn_export_xml.setFixedWidth(110)
+        self.btn_export_xml.clicked.connect(self._on_export_xml)
+        result_layout.addWidget(self.btn_export_xml)
+        
         parent_layout.addWidget(self.result_group)
+        
+        # Store detection stats for display
+        self._detection_time_s = 0.0
+        self._detection_model = ""
 
     def _on_external_audio_toggled(self, checked: bool) -> None:
         """Save external audio setting and update UI state."""
@@ -678,9 +761,15 @@ class MainWindow(QMainWindow):
 
     def _show_magic_settings(self) -> None:
         """Show the Magic Settings dialog for AI processing options."""
-        from .magic_settings_dialog import MagicSettingsDialog
+        from .magic_settings_dialog import MagicSettingsDialog, get_magic_settings
         dialog = MagicSettingsDialog(self)
+        # Connect sync_requested signal to trigger synchronization
+        dialog.sync_requested.connect(self.on_synchronize_all)
         dialog.exec()
+        # After dialog closes, update file list sync mode based on settings
+        magic_settings = get_magic_settings()
+        sync_enabled = magic_settings.get("sync", {}).get("enabled", False)
+        self.file_list.set_sync_mode_enabled(sync_enabled)
 
     def _show_export_dialog(self) -> None:
         """Show the export dialog for the processed video."""
@@ -765,13 +854,11 @@ class MainWindow(QMainWindow):
         if not videos:
             self._toast("No supported video files selected.")
             return
-        remaining = max(0, VIDEO_CAP - self.file_list.video_count())
-        if remaining <= 0:
-            self._toast("Video limit reached (10/10). Remove some to add more.")
-            return
+        # Unlimited files - no cap check needed
+        remaining = None  # No limit
         
-        # Show progress dialog for multiple files (3+)
-        if len(videos) >= 3:
+        # Show progress dialog for multiple files (1+)
+        if len(videos) >= 1:
             self._add_files_with_progress(videos, remaining)
         else:
             # Quick add for 1-2 files
@@ -792,9 +879,11 @@ class MainWindow(QMainWindow):
         # Process files one by one with progress updates
         added: List[str] = []
         skipped_dup: List[str] = []
-        total = min(len(videos), remaining)
+        # Handle unlimited case (remaining=None)
+        total = len(videos) if remaining is None else min(len(videos), remaining)
+        videos_to_add = videos if remaining is None else videos[:remaining]
         
-        for i, video_path in enumerate(videos[:remaining]):
+        for i, video_path in enumerate(videos_to_add):
             if dialog.is_cancelled():
                 break
             
@@ -818,10 +907,8 @@ class MainWindow(QMainWindow):
         """Handle the result of adding files and show appropriate messages."""
         if skipped_dup:
             self._toast(f"Skipped {len(skipped_dup)} duplicate file(s).")
-        if len(videos) > len(added) + len(skipped_dup):
-            skipped_by_cap = len(videos) - len(added) - len(skipped_dup)
-            if skipped_by_cap > 0:
-                self._toast(f"Reached 10-video cap. Skipped {skipped_by_cap} file(s).")
+        # No cap limit - all files should be added
+        pass
         self._refresh_counter()
 
     # --- Handlers ---
@@ -870,10 +957,14 @@ class MainWindow(QMainWindow):
         """Handle removal request for all videos.
         
         Uses RemoveClipsCommand for proper Project sync and undo support.
+        Also cleans up sync-related state to prevent stale data.
         """
         clips = self.project.clips()
         if not clips:
             return
+        
+        # Clean up sync state before removal
+        self._cleanup_sync_state()
         
         # Get all clip IDs
         clip_ids = [clip.id for clip in clips]
@@ -885,6 +976,33 @@ class MainWindow(QMainWindow):
             refresh_callback=self._refresh_after_undo_redo
         )
         self.undo_stack.push(cmd)
+
+    def _cleanup_sync_state(self) -> None:
+        """Clean up synchronization-related state.
+        
+        Called when videos are removed to prevent crashes from stale data.
+        """
+        # Clear camera alignments
+        if hasattr(self, '_camera_alignments'):
+            self._camera_alignments = {}
+        if hasattr(self, '_external_audio_alignment'):
+            self._external_audio_alignment = None
+        
+        # Hide verification buttons
+        if hasattr(self, 'btn_preview_audio'):
+            self.btn_preview_audio.setVisible(False)
+        if hasattr(self, 'btn_view_waveforms'):
+            self.btn_view_waveforms.setVisible(False)
+        
+        # Clean up temp sync files
+        if hasattr(self, '_temp_sync_files') and self._temp_sync_files:
+            for wav in self._temp_sync_files:
+                try:
+                    if os.path.exists(wav):
+                        os.remove(wav)
+                except Exception:
+                    pass
+            self._temp_sync_files.clear()
 
     def _on_scene_selection_changed(self) -> None:
         """Mirror timeline selection to file list to drive preview."""
@@ -999,8 +1117,8 @@ class MainWindow(QMainWindow):
 
     def _refresh_counter(self, *_args) -> None:
         count = self.file_list.video_count()
-        self.lbl_counter.setText(f"Videos: {count}/{VIDEO_CAP}")
-        self.btn_add.setEnabled(count < VIDEO_CAP)
+        self.lbl_counter.setText(f"Videos: {count}")
+        self.btn_add.setEnabled(True)  # Always allow adding more
         
         # Create Video requires: 2+ videos AND output folder selected
         has_enough_videos = count >= MIN_VIDEOS_FOR_PROCESS
@@ -1008,6 +1126,8 @@ class MainWindow(QMainWindow):
         self.btn_process.setEnabled(has_enough_videos and has_output_folder)
         
         self.btn_remove_all.setEnabled(count > 0)
+        # Sync button requires 2+ videos
+        self.btn_sync_all.setEnabled(count >= MIN_VIDEOS_FOR_PROCESS)
         # Show/hide inline hint based on video count
         self.lbl_process_hint.setVisible(count < MIN_VIDEOS_FOR_PROCESS)
         
@@ -1094,11 +1214,21 @@ class MainWindow(QMainWindow):
 
         # --- 1. GPU Preflight Check ---
         # Load current strategy
-        strategy_str = self.settings.value("switching/strategy", "balanced", type=str)
-        try:
-            strategy = SwitchingStrategy(strategy_str)
-        except ValueError:
+        # --- 1. GPU Preflight Check ---
+        # Load current strategy from Magic Settings (Model Index)
+        # 0->Fast, 1->Balanced, 2->Best
+        model_index = self.settings.value("magic/director/model_index", 0, type=int)
+        
+        if model_index == 0:
+            strategy = SwitchingStrategy.FAST_RULES
+        elif model_index == 2:
+            strategy = SwitchingStrategy.BEST_LIPS
+        else:
             strategy = SwitchingStrategy.BALANCED_LIPS_ENERGY
+        
+        # Save mapped strategy so ProcessingPipeline can read it
+        # This was missing, causing all modes to use the default FAST_RULES
+        self.settings.setValue("switching/strategy", strategy.value)
 
         # Run check
         status = run_gpu_preflight_check(
@@ -1214,6 +1344,8 @@ class MainWindow(QMainWindow):
         self._processing_thread.progress.connect(self._on_processing_progress)
         self._processing_thread.stage.connect(self._on_processing_stage)
         self._processing_thread.finished_with_path.connect(self._on_processing_finished)
+        self._processing_thread.segments_ready.connect(self._on_segments_ready)
+        self._processing_thread.detection_stats.connect(self._on_detection_stats)
         self._processing_thread.error.connect(self._on_processing_error)
         self._processing_thread.finished.connect(self._on_thread_finished)
         
@@ -1244,13 +1376,40 @@ class MainWindow(QMainWindow):
         # Store result path for A/B comparison and export
         self._result_path = output_path
         self.btn_toggle_ab.setEnabled(True)
-        self.action_export.setEnabled(True)
+        self.btn_export.setVisible(True)
         
-        # Show result section with Play button
+        # Show result section with Play button and stats
         if hasattr(self, "result_group") and hasattr(self, "lbl_result_file"):
             self.lbl_result_file.setText(os.path.basename(output_path))
             self.lbl_result_file.setToolTip(output_path)
+            
+            # Update detection stats label
+            if hasattr(self, "lbl_detection_stats") and self._detection_time_s > 0:
+                # Format time nicely (e.g., "1m 23s" or "45s")
+                total_seconds = int(self._detection_time_s)
+                if total_seconds >= 60:
+                    mins = total_seconds // 60
+                    secs = total_seconds % 60
+                    time_str = f"{mins}m {secs}s"
+                else:
+                    time_str = f"{total_seconds}s"
+                
+                stats_text = f"⏱️ Detection: {time_str} • Model: {self._detection_model}"
+                self.lbl_detection_stats.setText(stats_text)
+                self.lbl_detection_stats.setVisible(True)
+            
             self.result_group.setVisible(True)
+
+    def _on_segments_ready(self, segments: list) -> None:
+        """Store speaker segments for XML export."""
+        self._speaker_segments = segments
+        logger.debug("Received %d speaker segments for export", len(segments))
+
+    def _on_detection_stats(self, detection_time_s: float, detection_model: str) -> None:
+        """Store detection stats for display in Generated Video section."""
+        self._detection_time_s = detection_time_s
+        self._detection_model = detection_model
+        logger.debug("Detection stats: %.1fs using %s", detection_time_s, detection_model)
 
     def _on_processing_error(self, error_msg: str) -> None:
         """Handle processing error."""
@@ -1289,6 +1448,65 @@ class MainWindow(QMainWindow):
         else:
             self._toast("Failed to open video player")
             logger.warning("Failed to open video: %s", self._result_path)
+
+    def _show_settings_dialog(self) -> None:
+        """Open the application settings dialog."""
+        from .settings_dialog import SettingsDialog
+        dialog = SettingsDialog(self)
+        if dialog.exec():
+            # If settings changed (like theme), might need to re-apply
+            self._apply_startup_theme()
+
+    def _on_open_folder(self) -> None:
+        """Open the output folder in the system's file explorer."""
+        if not self._output_folder or not os.path.isdir(self._output_folder):
+            self._toast("Output folder not available")
+            return
+        
+        from PyQt6.QtCore import QUrl
+        from PyQt6.QtGui import QDesktopServices
+        
+        url = QUrl.fromLocalFile(self._output_folder)
+        if QDesktopServices.openUrl(url):
+            logger.info("Opened folder: %s", self._output_folder)
+        else:
+            self._toast("Failed to open folder")
+
+    def _on_export_xml(self) -> None:
+        """Export timeline as FCPXML for Premiere Pro / DaVinci Resolve."""
+        if not hasattr(self, "_result_path") or not self._result_path:
+            self._toast("No processed video - run Magic Edit first")
+            return
+        
+        if not hasattr(self, "_speaker_segments") or not self._speaker_segments:
+            self._toast("No timeline data available for export")
+            return
+        
+        from ..logic.fcpxml_export import generate_fcpxml, cuts_from_speaker_segments
+        
+        # Get source paths
+        paths = self.file_list.all_paths()
+        if not paths:
+            self._toast("No source videos available")
+            return
+        
+        # Create XML path alongside the output video
+        xml_path = self._result_path.replace(".mp4", ".fcpxml")
+        
+        # Convert speaker segments to timeline cuts
+        cuts = cuts_from_speaker_segments(self._speaker_segments, paths)
+        
+        # Get video properties (try to use actual values)
+        fps = 30.0
+        resolution = (1920, 1080)
+        
+        if generate_fcpxml(cuts, paths, xml_path, 
+                          project_name=os.path.basename(self._result_path).replace(".mp4", ""),
+                          fps=fps, resolution=resolution):
+            self._toast(f"✅ Exported: {os.path.basename(xml_path)}", 3000)
+            logger.info("Exported FCPXML: %s", xml_path)
+        else:
+            self._toast("Failed to export XML")
 
     def _toast(self, message: str, timeout_ms: int = 4000) -> None:
         self.statusBar().showMessage(message, timeout_ms)
@@ -1356,6 +1574,356 @@ class MainWindow(QMainWindow):
         except Exception:
             pass
 
+    def on_synchronize_all(self) -> None:
+        """Synchronize all video files using audio waveform correlation.
+        
+        Uses cross-correlation to find time offsets between camera audio tracks,
+        aligning them to a common timeline reference (first camera).
+        Also includes external audio if enabled.
+        """
+        from ..logic.audio_sync import align_cameras, CameraAlignment
+        from PyQt6.QtWidgets import QApplication, QProgressDialog
+        
+        paths = self.file_list.all_paths()
+        if len(paths) < 2:
+            self._toast("Need at least 2 videos to synchronize")
+            return
+        
+        # Include external audio if enabled and selected
+        external_audio = None
+        if (hasattr(self, 'chk_external_audio') and 
+            self.chk_external_audio.isChecked() and 
+            self._external_audio_path):
+            external_audio = self._external_audio_path
+            logger.info("Including external audio in sync: %s", os.path.basename(external_audio))
+        
+        logger.info("Starting audio synchronization for %d cameras", len(paths))
+        
+        # Create progress dialog
+        is_dark = self.settings.value("appearance/theme", "light", type=str) == "dark"
+        sync_paths = list(paths)
+        if external_audio:
+            sync_paths.append(external_audio)
+            
+        # Create custom progress dialog (same style as loading)
+        is_dark = self.settings.value("appearance/theme", "light", type=str) == "dark"
+        dialog = LoadingDialog(self, "Synchronizing Cameras", dark_mode=is_dark)
+        dialog.show()
+        QApplication.processEvents()
+        
+        try:
+            # Cleanup old temp wavs from previous sync
+            if hasattr(self, '_temp_sync_files') and self._temp_sync_files:
+                for wav in self._temp_sync_files:
+                    try:
+                        if os.path.exists(wav):
+                            os.remove(wav)
+                    except Exception as e:
+                        logger.warning("Failed to delete temp wav %s: %s", wav, e)
+                self._temp_sync_files.clear()
 
+            total_items = len(sync_paths)
+            
+            def on_progress(idx: int, total: int) -> None:
+                if dialog.is_cancelled():
+                    raise InterruptedError("Sync cancelled by user")
+                
+                current_file = os.path.basename(sync_paths[idx]) if idx < len(sync_paths) else ""
+                dialog.set_progress(idx + 1, total_items, f"Aligning {current_file}...")
+                QApplication.processEvents()
+            
+            # Pass keep_wavs=True to enable visualization
+            alignments = align_cameras(sync_paths, on_progress=on_progress, keep_wavs=True)
+            
+            # Collect new temp files
+            for a in alignments:
+                if a.wav_path:
+                    self._temp_sync_files.append(a.wav_path)
+            
+            # Separate camera alignments from external audio alignment
+            camera_alignments = [a for a in alignments if a.camera_index < len(paths)]
+            ext_alignment = next((a for a in alignments if a.camera_index == len(paths)), None)
+            
+            # Store alignments (only cameras for now as external audio offset applies during processing)
+            self._camera_alignments = {a.camera_index: a for a in camera_alignments}
+            # Store external audio alignment for preview
+            # Store external audio alignment for preview
+            self._external_audio_alignment = ext_alignment
+            
+            # Show waveforms button irrespective of success/failure for debugging
+            if hasattr(self, 'btn_view_waveforms'):
+                 self.btn_view_waveforms.setVisible(True)
+            
+            # Check for any failed alignments (exclude "no_audio" as those still sync with offset=0)
+            failed = [a for a in camera_alignments if a.status == "failed"]
+            # Consider "ok", "no_audio", and any non-failed as succeeded
+            succeeded = [a for a in camera_alignments if a.status != "failed"]
+            
+            dialog.close()
+            
+            if failed:
+                failed_names = [os.path.basename(paths[a.camera_index]) for a in failed]
+                self._toast(f"Warning: {len(failed)} camera(s) failed to sync: {', '.join(failed_names[:3])}", 4000)
+            
+            if succeeded:
+                # Update sync status indicators to green for ALL non-failed alignments
+                for a in succeeded:
+                    self.file_list.set_sync_status(paths[a.camera_index], True)
+                
+                # Show sync offsets in status
+                offsets = [f"Cam{a.camera_index + 1}: {a.offset_ms:+.0f}ms" for a in succeeded[:4]]
+                offset_str = ", ".join(offsets)
+                if len(succeeded) > 4:
+                    offset_str += f" (+{len(succeeded) - 4} more)"
+                
+                if ext_alignment and ext_alignment.status != "failed":
+                    offset_str += f" + Ext: {ext_alignment.offset_ms:+.0f}ms"
+                elif external_audio:
+                    offset_str += " + Ext (Fail)"
+                    
+                self._toast(f"✅ Synced {len(succeeded)} cameras: {offset_str}", 8000)
+                logger.info("Synchronization complete: %s", {a.camera_index: a.offset_ms for a in alignments})
+                
+                # Show Verify Sync button if we have at least 2 tracks (cameras + ext) to compare
+                total_synced = len(succeeded) + (1 if (ext_alignment and ext_alignment.status != "failed") else 0)
+                if total_synced >= 2:
+                    self._show_preview_audio_option()
+                    
+            elif failed:
+                 # Show detailed reason for first failure
+                first_fail = failed[0]
+                self._toast(f"❌ Sync failed: {first_fail.message}", 5000)
+            else:
+                self._toast("❌ Synchronization failed for all cameras", 3000)
+                
+        except InterruptedError:
+            dialog.close()
+            self._toast("Synchronization cancelled")
+            logger.info("Synchronization cancelled by user")
+        except Exception as e:
+            dialog.close()
+            logger.error("Synchronization error: %s", e, exc_info=True)
+            self._toast(f"Sync error: {str(e)[:50]}")
+
+    def _show_preview_audio_option(self) -> None:
+        """Show the Verify Sync button after successful sync."""
+        self.btn_preview_audio.setText("🔊 Verify Sync")
+        self.btn_preview_audio.setToolTip("Play mixed audio to check synchronization")
+        self.btn_preview_audio.setVisible(True)
+        self.btn_preview_audio.setEnabled(True)
+        
+        if hasattr(self, 'btn_view_waveforms'):
+            self.btn_view_waveforms.setVisible(True)
+        
+
+    def _on_view_waveforms(self) -> None:
+        """Show the waveform visualization dialog."""
+        from .waveform_dialog import WaveformDialog
+        
+        # Collect all alignments including external
+        alignments = list(self._camera_alignments.values())
+        if hasattr(self, '_external_audio_alignment') and self._external_audio_alignment:
+            alignments.append(self._external_audio_alignment)
+            
+        dialog = WaveformDialog(alignments, self)
+        dialog.exec()
+
+    def _on_preview_audio(self) -> None:
+        """Play mixed audio from all synced cameras to verify sync quality.
+        
+        Uses a two-step approach:
+        1. Mix audio tracks with ffmpeg to a temp WAV file
+        2. Play the temp file with ffplay
+        """
+        import subprocess
+        import tempfile
+        from ..utils.ffmpeg import get_ffmpeg_path
+        
+        paths = self.file_list.all_paths()
+        if len(paths) < 2:
+            self._toast("Need at least 2 synced videos")
+            return
+        
+        if not hasattr(self, '_camera_alignments') or not self._camera_alignments:
+            self._toast("Please run Sync All first")
+            return
+        
+        logger.info("Starting sequential audio preview for %d cameras", len(paths))
+        self._toast("🎵 Playing each camera (3 sec each)...", 3000)
+        
+        try:
+            # Find ffmpeg/ffplay executables
+            ffmpeg_path = get_ffmpeg_path()
+            if not ffmpeg_path:
+                self._toast("FFmpeg not found - cannot preview audio")
+                return
+            
+            # Derive ffplay path from ffmpeg path
+            if ffmpeg_path == "ffmpeg":
+                ffplay = "ffplay"
+                ffmpeg = "ffmpeg"
+            else:
+                ffplay = ffmpeg_path.replace("ffmpeg.exe", "ffplay.exe").replace("ffmpeg", "ffplay")
+                ffmpeg = ffmpeg_path
+            
+            # Create temp file for mixed audio
+            temp_dir = tempfile.gettempdir()
+            temp_audio = os.path.join(temp_dir, "multicam_preview_mix.wav")
+            
+            # Build ffmpeg command to mix audio
+            inputs = []
+            filter_parts = []
+            
+            current_idx = 0
+            for i, path in enumerate(paths):
+                alignment = self._camera_alignments.get(i)
+                offset_ms = alignment.offset_ms if alignment else 0.0
+                
+                inputs.extend(["-i", path])
+                
+                # For sequential playback: extract 3 seconds starting at sync point + 2s
+                # Apply offset to start time, then take 3 second segment
+                start_s = 2.0  # Skip first 2 seconds
+                if offset_ms > 0:
+                    # Camera starts later, add offset to start time
+                    start_s = max(0, start_s - (offset_ms / 1000.0))
+                else:
+                    # Camera starts earlier, subtract offset from start time
+                    start_s = start_s + (abs(offset_ms) / 1000.0)
+                
+                # Extract 3 seconds from each camera and add beep marker
+                filter_parts.append(
+                    f"[{current_idx}:a]atrim=start={start_s:.3f}:duration=3,asetpts=PTS-STARTPTS,"
+                    f"volume=1.5[a{current_idx}]"
+                )
+                
+                current_idx += 1
+            
+            # Concatenate all streams sequentially (not mix)
+            # This plays each camera's audio one after another
+            concat_inputs = "".join(f"[a{i}]" for i in range(current_idx))
+            filter_parts.append(f"{concat_inputs}concat=n={current_idx}:v=0:a=1[out]")
+            
+            filter_complex = ";".join(filter_parts)
+            
+            # Build ffmpeg command - concatenate audio to temp file
+            # Total duration = 3 seconds × number of cameras
+            total_duration = 3 * current_idx
+            ffmpeg_cmd = [
+                ffmpeg,
+                "-y",  # Overwrite
+                *inputs,
+                "-filter_complex", filter_complex,
+                "-map", "[out]",
+                "-ac", "2",  # Stereo
+                "-ar", "44100",  # 44.1kHz
+                temp_audio
+            ]
+            
+            logger.debug("FFmpeg mix command: %s", " ".join(ffmpeg_cmd))
+            
+            # Run ffmpeg to create mixed audio
+            result = subprocess.run(
+                ffmpeg_cmd,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                creationflags=subprocess.CREATE_NO_WINDOW if os.name == 'nt' else 0,
+                timeout=30
+            )
+            
+            if result.returncode != 0:
+                stderr = result.stderr.decode('utf-8', errors='ignore')[:500]
+                logger.error("FFmpeg mix failed: %s", stderr)
+                self._toast("❌ Failed to mix audio. Check video files have audio tracks.")
+                return
+            
+            if not os.path.exists(temp_audio):
+                logger.error("Temp audio file not created")
+                self._toast("❌ Audio mixing failed - no output file")
+                return
+            
+            logger.info("Sequential audio preview created: %s", temp_audio)
+            
+            # Now play the sequential audio with ffplay
+            ffplay_cmd = [
+                ffplay,
+                "-nodisp",    # No video window
+                "-autoexit",  # Exit when done
+                temp_audio
+            ]
+            
+            logger.debug("FFplay command: %s", " ".join(ffplay_cmd))
+            
+            # Show preview dialog with dynamic duration (3 sec per camera)
+            from .audio_preview_dialog import AudioPreviewDialog
+            preview_dialog = AudioPreviewDialog(self, duration_seconds=total_duration)
+            
+            # Start ffplay
+            try:
+                self._audio_preview_process = subprocess.Popen(
+                    ffplay_cmd,
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.PIPE,
+                    creationflags=subprocess.CREATE_NO_WINDOW if os.name == 'nt' else 0
+                )
+            except FileNotFoundError:
+                logger.error("ffplay not found")
+                self._toast("❌ ffplay not found. Install FFmpeg with ffplay.")
+                return
+            except Exception as e:
+                logger.error("Failed to start ffplay: %s", e)
+                self._toast(f"❌ Audio playback failed: {e}")
+                return
+            
+            # Brief check if process started
+            import time
+            time.sleep(0.3)
+            if self._audio_preview_process.poll() is not None:
+                stderr = self._audio_preview_process.stderr.read().decode('utf-8', errors='ignore') if self._audio_preview_process.stderr else ''
+                logger.error("ffplay exited immediately: %s", stderr[:200])
+                self._toast("❌ Audio playback failed. Check ffplay installation.")
+                return
+            
+            # Show dialog (blocks until done)
+            result = preview_dialog.exec()
+            
+            # Cleanup
+            if self._audio_preview_process and self._audio_preview_process.poll() is None:
+                self._audio_preview_process.terminate()
+                try:
+                    self._audio_preview_process.wait(timeout=2)
+                except subprocess.TimeoutExpired:
+                    self._audio_preview_process.kill()
+            
+            self._audio_preview_process = None
+            
+            # Clean up temp file
+            try:
+                if os.path.exists(temp_audio):
+                    os.remove(temp_audio)
+            except Exception:
+                pass
+            
+        except subprocess.TimeoutExpired:
+            logger.error("Audio mixing timed out")
+            self._toast("❌ Audio mixing took too long")
+        except Exception as e:
+            logger.error("Audio preview failed: %s", e, exc_info=True)
+            self._toast(f"Audio preview failed: {str(e)[:40]}")
+
+    def _stop_preview_audio(self) -> None:
+        """Stop the audio preview playback."""
+        if hasattr(self, '_audio_preview_process') and self._audio_preview_process:
+            try:
+                self._audio_preview_process.terminate()
+                self._audio_preview_process = None
+            except Exception:
+                pass
+        
+        # Reset button
+        self.btn_preview_audio.setText("▶ Preview Audio")
+        self.btn_preview_audio.clicked.disconnect()
+        self.btn_preview_audio.clicked.connect(self._on_preview_audio)
+        self._toast("Audio preview stopped")
 
 

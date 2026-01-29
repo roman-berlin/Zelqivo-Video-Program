@@ -37,6 +37,8 @@ class ProcessingWorker(QObject):
     progress = pyqtSignal(int)
     stage = pyqtSignal(str, int, str, float)  # stage_name, stage_percent, message, eta_seconds
     finished = pyqtSignal(str)
+    segments_ready = pyqtSignal(list)  # Speaker segments for XML export
+    detection_stats = pyqtSignal(float, str)  # detection_time_s, detection_model
     error = pyqtSignal(str)
 
     def __init__(
@@ -108,6 +110,16 @@ class ProcessingWorker(QObject):
                 logger.info("Pipeline was cancelled")
             elif not result.success:
                 logger.error("Pipeline failed: %s", result.error)
+            elif result.speaker_segments:
+                # Emit segments for XML export
+                self.segments_ready.emit(result.speaker_segments)
+            
+            # Emit detection stats for UI display
+            if result.detection_time_s > 0:
+                self.detection_stats.emit(
+                    result.detection_time_s,
+                    result.detection_model,
+                )
 
         except ValueError as ve:
             # Pipeline validation error (e.g., < 2 files)
@@ -136,6 +148,8 @@ class ProcessingThread(QThread):
     progress = pyqtSignal(int)
     stage = pyqtSignal(str, int, str, float)  # stage_name, stage_percent, message, eta_seconds
     finished_with_path = pyqtSignal(str)
+    segments_ready = pyqtSignal(list)  # Speaker segments for XML export
+    detection_stats = pyqtSignal(float, str)  # detection_time_s, detection_model
     error = pyqtSignal(str)
 
     def __init__(
@@ -177,6 +191,8 @@ class ProcessingThread(QThread):
         self._worker.progress.connect(self.progress.emit)
         self._worker.stage.connect(self.stage.emit)
         self._worker.finished.connect(self.finished_with_path.emit)
+        self._worker.segments_ready.connect(self.segments_ready.emit)
+        self._worker.detection_stats.connect(self.detection_stats.emit)
         self._worker.error.connect(self.error.emit)
 
         # Run the worker

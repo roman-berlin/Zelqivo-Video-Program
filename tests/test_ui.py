@@ -45,13 +45,14 @@ class TestMainWindow:
         assert main_window.isVisible()
         assert main_window.windowTitle() == "MultiCamEditor"
 
-    def test_window_has_menu_bar(self, main_window):
-        """Main window should have a menu bar."""
-        menu_bar = main_window.menuBar()
-        assert menu_bar is not None
-        # Check File menu exists
-        actions = menu_bar.actions()
-        assert len(actions) > 0
+    def test_window_has_modern_toolbar(self, main_window):
+        """Main window should have modern toolbar buttons (replaced old menu bar)."""
+        # Check for Settings button (replaces File > Settings)
+        assert hasattr(main_window, "btn_app_settings")
+        # Check for Magic Settings button
+        assert hasattr(main_window, "btn_magic_settings")
+        # Check for Export button (replaces File > Export)
+        assert hasattr(main_window, "btn_export")
 
     def test_initial_video_count(self, main_window):
         """Initial video count should be zero."""

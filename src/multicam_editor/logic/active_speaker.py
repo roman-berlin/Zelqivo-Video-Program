@@ -151,6 +151,7 @@ class RealEnergyVADBackend:
         hysteresis_ratio: float = DEFAULT_HYSTERESIS_RATIO,
         consecutive_wins: int = DEFAULT_CONSECUTIVE_WINS,
         hold_time_ms: int = DEFAULT_HOLD_TIME_MS,
+        cancel_callback: Optional[Callable[[], bool]] = None,
     ) -> None:
         self.window_ms = window_ms
         self.silence_threshold = silence_threshold
@@ -160,6 +161,7 @@ class RealEnergyVADBackend:
         self.hysteresis_ratio = hysteresis_ratio
         self.consecutive_wins = consecutive_wins
         self.hold_time_ms = hold_time_ms
+        self.cancel_callback = cancel_callback
         # Paths to camera audio WAV files (set before diarize)
         self._camera_audio_paths: List[str] = []
 
@@ -191,6 +193,9 @@ class RealEnergyVADBackend:
             sample_rate = 16000  # Expected from ffmpeg extraction
 
             for i, wav_path in enumerate(self._camera_audio_paths):
+                if self.cancel_callback and self.cancel_callback():
+                    logger.info("RealEnergyVADBackend: cancelled during audio loading")
+                    return []
                 samples, sr = self._load_wav_samples(wav_path)
                 if sr != sample_rate and sr > 0:
                     logger.warning("Camera %d sample rate %d != expected %d", i, sr, sample_rate)
@@ -224,6 +229,9 @@ class RealEnergyVADBackend:
                         rms = self._compute_rms(samples[start:end])
                         cam_energy.append(rms)
                 energy_matrix.append(cam_energy)
+                if self.cancel_callback and self.cancel_callback():
+                    logger.info("RealEnergyVADBackend: cancelled during energy calculation")
+                    return []
 
             # Estimate adaptive noise floor per camera (p20 of energy distribution)
             noise_floors = self._estimate_noise_floors(energy_matrix)

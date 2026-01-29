@@ -105,6 +105,13 @@ class PipelineResult:
     output_path: str = ""
     error: str = ""
     cancelled: bool = False
+    speaker_segments: list = None  # List of SpeakerSegment for XML export
+    detection_time_s: float = 0.0  # Time taken for speaker detection (seconds)
+    detection_model: str = ""  # Model/strategy used for detection
+    
+    def __post_init__(self):
+        if self.speaker_segments is None:
+            self.speaker_segments = []
 
 
 @dataclass
@@ -189,6 +196,10 @@ class ProcessingPipeline:
 
         # Camera alignment offsets (camera_idx -> offset_ms)
         self._camera_offsets: dict[int, float] = {}
+        
+        # Detection stats for UI display
+        self._detection_time_s: float = 0.0
+        self._detection_model: str = ""
 
         # QA artifacts exporter
         self._qa_exporter = QAArtifactExporter()
@@ -486,7 +497,13 @@ class ProcessingPipeline:
             # Delete checkpoint on successful completion
             delete_checkpoint(self._run_id)
 
-            return PipelineResult(success=True, output_path=final_path)
+            return PipelineResult(
+                success=True, 
+                output_path=final_path,
+                speaker_segments=self._speaker_segments,
+                detection_time_s=self._detection_time_s,
+                detection_model=self._detection_model,
+            )
 
         except Exception as e:
             logger.error("Pipeline error: %s", e, exc_info=True)
@@ -594,9 +611,20 @@ class ProcessingPipeline:
         try:
             from ..utils.ffmpeg import extract_audio_to_wav
             
+            # Start detection timer
+            detection_start = time.time()
+            
             # Determine strategy
             strategy = self._load_switching_strategy()
             logger.info("Using switching strategy: %s", strategy.value)
+            
+            # Record model name for stats display
+            strategy_names = {
+                SwitchingStrategy.BEST_LIPS: "Best (Lips)",
+                SwitchingStrategy.BALANCED_LIPS_ENERGY: "Balanced (Hybrid)",
+                SwitchingStrategy.FAST_RULES: "Fast (Energy)",
+            }
+            self._detection_model = strategy_names.get(strategy, strategy.value)
 
             # Get engine from strategy
             engine, config = select_switching_engine(strategy)
@@ -690,9 +718,68 @@ class ProcessingPipeline:
                     )
                      
                 logger.info("Detection complete: %d segments", len(self._speaker_segments))
+
+            elif strategy == SwitchingStrategy.FAST_RULES:
+                # FAST_RULES: CPU-only energy-based detection using RealEnergyVADBackend
+                logger.info("FAST_RULES: Starting energy-based detection")
+                self._emit_progress(10, "Extracting audio from cameras...")
+                
+                # Extract audio from each camera to WAV
+                camera_audio_paths = []
+                for i, video_path in enumerate(self.input_files):
+                    if self._cancelled:
+                        return False
+                    self._emit_progress(
+                        10 + int((i + 1) * 30 / len(self.input_files)),
+                        f"Extracting audio from camera {i + 1}/{len(self.input_files)}..."
+                    )
+                    audio_result = extract_audio_to_wav(
+                        video_path, sample_rate=16000, mono=True
+                    )
+                    if not audio_result.success:
+                        raise RuntimeError(
+                            f"Audio extraction failed for camera {i}: {audio_result.error}"
+                        )
+                    camera_audio_paths.append(audio_result.output_path)
+                    self._temp_files.append(audio_result.output_path)
+                
+                self._emit_progress(45, "Analyzing audio energy levels...")
+                
+                # Use RealEnergyVADBackend for robust energy-based switching
+                # This backend already has hysteresis, consecutive wins, and hold time
+                energy_backend = RealEnergyVADBackend(
+                    window_ms=200,
+                    silence_threshold=0.01,
+                    min_segment_ms=500,
+                    noise_percentile=20,
+                    gate_factor=2.5,
+                    hysteresis_ratio=1.6,
+                    consecutive_wins=3,
+                    hold_time_ms=2000,  # Prevent rapid switching
+                    cancel_callback=lambda: self._cancelled,  # Check for cancellation
+                )
+                energy_backend.set_camera_audio_paths(camera_audio_paths)
+                
+                self._emit_progress(60, "Detecting active speakers...")
+                
+                # diarize() returns List[SpeakerSegment] with speaker_id == camera_id
+                self._speaker_segments = energy_backend.diarize(
+                    audio_path="",  # Not used when camera_audio_paths are set
+                    num_channels=len(self.input_files),
+                )
+                
+                logger.info("FAST_RULES complete: %d segments", len(self._speaker_segments))
             
             # Record for QA artifacts
             self._qa_exporter.set_diarization(self._speaker_segments)
+            
+            # Calculate detection time
+            self._detection_time_s = time.time() - detection_start
+            logger.info(
+                "Detection took %.1fs using %s",
+                self._detection_time_s,
+                self._detection_model
+            )
             
             self._emit_progress(100, f"Detection complete: {len(self._speaker_segments)} segments")
             return True

@@ -65,6 +65,31 @@ QPushButton#btnAdvanced:checked {
     background-color: #e0e0e0;
     border-color: #9e9e9e;
 }
+QPushButton#btnProcess {
+    background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+        stop:0 #00c853, stop:1 #00a846);
+    color: white;
+    font-size: 13px;
+    font-weight: bold;
+    border: 2px solid #00a846;
+    border-radius: 8px;
+    padding: 8px 20px;
+    min-width: 130px;
+}
+QPushButton#btnProcess:hover {
+    background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+        stop:0 #00e676, stop:1 #00c853);
+    border-color: #00c853;
+}
+QPushButton#btnProcess:pressed {
+    background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+        stop:0 #00a846, stop:1 #009624);
+}
+QPushButton#btnProcess:disabled {
+    background: #bdbdbd;
+    border-color: #9e9e9e;
+    color: #757575;
+}
 QToolBar {
     background-color: #fafafa;
     border-bottom: 1px solid #e0e0e0;
@@ -127,19 +152,19 @@ QCheckBox {
     spacing: 8px;
 }
 QCheckBox::indicator {
-    width: 18px;
-    height: 18px;
-    border-radius: 3px;
+    width: 20px;
+    height: 20px;
+    border-radius: 4px;
     border: 2px solid #9e9e9e;
     background-color: #ffffff;
 }
 QCheckBox::indicator:checked {
     background-color: #1976d2;
-    border-color: #1565c0;
-    image: url(data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIxNCIgaGVpZ2h0PSIxNCIgdmlld0JveD0iMCAwIDI0IDI0IiBmaWxsPSJub25lIiBzdHJva2U9IndoaXRlIiBzdHJva2Utd2lkdGg9IjMiIHN0cm9rZS1saW5lY2FwPSJyb3VuZCIgc3Ryb2tlLWxpbmVqb2luPSJyb3VuZCI+PHBvbHlsaW5lIHBvaW50cz0iMjAgNiA5IDE3IDQgMTIiPjwvcG9seWxpbmU+PC9zdmc+);
+    border-color: #1976d2;
+    image: url(data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIxNiIgaGVpZ2h0PSIxNiIgdmlld0JveD0iMCAwIDI0IDI0IiBmaWxsPSJub25lIiBzdHJva2U9IndoaXRlIiBzdHJva2Utd2lkdGg9IjQiIHN0cm9rZS1saW5lY2FwPSJyb3VuZCIgc3Ryb2tlLWxpbmVqb2luPSJyb3VuZCI+PHBvbHlsaW5lIHBvaW50cz0iMjAgNiA5IDE3IDQgMTIiPjwvcG9seWxpbmU+PC9zdmc+);
 }
 QCheckBox::indicator:unchecked:hover {
-    border-color: #616161;
+    border-color: #1976d2;
 }
 QCheckBox::indicator:disabled {
     background-color: #e0e0e0;
@@ -216,6 +241,31 @@ QPushButton#btnAdvanced:hover {
 QPushButton#btnAdvanced:checked {
     background-color: #555555;
     border-color: #666666;
+}
+QPushButton#btnProcess {
+    background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+        stop:0 #00c853, stop:1 #00a846);
+    color: white;
+    font-size: 13px;
+    font-weight: bold;
+    border: 2px solid #00a846;
+    border-radius: 8px;
+    padding: 8px 20px;
+    min-width: 130px;
+}
+QPushButton#btnProcess:hover {
+    background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+        stop:0 #00e676, stop:1 #00c853);
+    border-color: #00c853;
+}
+QPushButton#btnProcess:pressed {
+    background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+        stop:0 #00a846, stop:1 #009624);
+}
+QPushButton#btnProcess:disabled {
+    background: #555555;
+    border-color: #444444;
+    color: #888888;
 }
 QToolBar {
     background-color: #252525;
@@ -302,19 +352,19 @@ QCheckBox {
     color: #e0e0e0;
 }
 QCheckBox::indicator {
-    width: 18px;
-    height: 18px;
-    border-radius: 3px;
+    width: 20px;
+    height: 20px;
+    border-radius: 4px;
     border: 2px solid #666666;
     background-color: #3c3c3c;
 }
 QCheckBox::indicator:checked {
     background-color: #1976d2;
-    border-color: #42a5f5;
-    image: url(data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIxNCIgaGVpZ2h0PSIxNCIgdmlld0JveD0iMCAwIDI0IDI0IiBmaWxsPSJub25lIiBzdHJva2U9IndoaXRlIiBzdHJva2Utd2lkdGg9IjMiIHN0cm9rZS1saW5lY2FwPSJyb3VuZCIgc3Ryb2tlLWxpbmVqb2luPSJyb3VuZCI+PHBvbHlsaW5lIHBvaW50cz0iMjAgNiA5IDE3IDQgMTIiPjwvcG9seWxpbmU+PC9zdmc+);
+    border-color: #1976d2;
+    image: url(data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIxNiIgaGVpZ2h0PSIxNiIgdmlld0JveD0iMCAwIDI0IDI0IiBmaWxsPSJub25lIiBzdHJva2U9IndoaXRlIiBzdHJva2Utd2lkdGg9IjQiIHN0cm9rZS1saW5lY2FwPSJyb3VuZCIgc3Ryb2tlLWxpbmVqb2luPSJyb3VuZCI+PHBvbHlsaW5lIHBvaW50cz0iMjAgNiA5IDE3IDQgMTIiPjwvcG9seWxpbmU+PC9zdmc+);
 }
 QCheckBox::indicator:unchecked:hover {
-    border-color: #888888;
+    border-color: #1976d2;
 }
 QCheckBox::indicator:disabled {
     background-color: #2d2d2d;

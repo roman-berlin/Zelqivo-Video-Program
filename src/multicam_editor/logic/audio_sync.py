@@ -75,6 +75,7 @@ class CameraAlignment:
     offset_ms: float
     status: str  # "ok", "no_audio", "failed"
     message: str
+    wav_path: Optional[str] = None
 
 
 def _load_audio_mono(path: str, sr: int = _SYNC_SR) -> tuple[np.ndarray, int]:
@@ -252,6 +253,7 @@ def align_audio_offset(
 def align_cameras(
     video_paths: List[str],
     on_progress: Optional[callable] = None,
+    keep_wavs: bool = False,
 ) -> List[CameraAlignment]:
     """Align multiple cameras using audio cross-correlation.
 
@@ -283,7 +285,8 @@ def align_cameras(
             video_path=primary_path,
             offset_ms=0.0,
             status="ok",
-            message="Primary camera (reference)"
+            message="Primary camera (reference)",
+            wav_path=None
         ))
 
         if on_progress:
@@ -420,17 +423,29 @@ def align_cameras(
                     message=f"Correlation failed: {e}"
                 ))
 
+            # Update wav_path if keeping
+            if keep_wavs and secondary_wav:
+                 results[-1].wav_path = secondary_wav
+
             if on_progress:
                 on_progress(i, len(video_paths))
+        
+        # If keeping wavs, update primary wav path too
+        if keep_wavs and len(results) > 0 and temp_wavs:
+             # First wav in temp_wavs is primary if successful
+             results[0].wav_path = temp_wavs[0]
 
     finally:
-        # Cleanup temp WAV files
-        for wav_path in temp_wavs:
-            try:
-                if os.path.isfile(wav_path):
-                    os.remove(wav_path)
-                    logger.debug("Cleaned up temp WAV: %s", os.path.basename(wav_path))
-            except Exception as e:
-                logger.debug("Failed to cleanup %s: %s", wav_path, e)
+        if not keep_wavs:
+            # Cleanup temp WAV files
+            for wav_path in temp_wavs:
+                try:
+                    if os.path.isfile(wav_path):
+                        os.remove(wav_path)
+                        logger.debug("Cleaned up temp WAV: %s", os.path.basename(wav_path))
+                except Exception as e:
+                    logger.debug("Failed to cleanup %s: %s", wav_path, e)
+        else:
+            logger.info("Keeping temp WAV files for visualization")
 
     return results

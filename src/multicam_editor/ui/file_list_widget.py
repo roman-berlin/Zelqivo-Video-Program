@@ -47,6 +47,8 @@ class FileListWidget(QWidget):
         self._path_set: set[str] = set()
         self._video_count: int = 0
         self._cap: int | None = None  # set by MainWindow; None = unlimited
+        self._sync_status: dict[str, bool] = {}  # path -> synced (True=🟢, False=🔴)
+        self._sync_mode_enabled: bool = False  # Only show sync dots when enabled
 
         # DnD
         self.setAcceptDrops(True)
@@ -54,6 +56,35 @@ class FileListWidget(QWidget):
     # ------------------------ Public API ------------------------
     def set_video_cap(self, cap: int | None) -> None:
         self._cap = cap
+
+    def set_sync_mode_enabled(self, enabled: bool) -> None:
+        """Enable/disable sync status indicators in the file list.
+        
+        When disabled, no sync dots appear next to files.
+        When enabled, sync status dots (🔴/🟢) are shown.
+        """
+        if self._sync_mode_enabled == enabled:
+            return
+        self._sync_mode_enabled = enabled
+        # Refresh all items to show/hide sync indicators
+        for row in range(self._model.rowCount()):
+            item = self._model.item(row)
+            if item:
+                path = item.data(Qt.ItemDataRole.UserRole)
+                is_result = item.data(Qt.ItemDataRole.UserRole + 1)
+                if path and not is_result:
+                    base_text = item.data(Qt.ItemDataRole.UserRole + 2)
+                    if base_text:
+                        if enabled:
+                            synced = self._sync_status.get(path, False)
+                            indicator = "🟢" if synced else "🔴"
+                            item.setText(f"{indicator} {base_text}")
+                        else:
+                            item.setText(base_text)
+
+    def is_sync_mode_enabled(self) -> bool:
+        """Return whether sync mode is currently enabled."""
+        return self._sync_mode_enabled
 
     def add_files(
         self, paths: List[str], *, cap_remaining: int | None = None
@@ -101,6 +132,35 @@ class FileListWidget(QWidget):
                 if p:
                     paths.append(p)
         return paths
+
+    def set_sync_status(self, path: str, synced: bool) -> None:
+        """Update sync status indicator for a file (🔴 not synced → 🟢 synced)."""
+        if path not in self._path_set:
+            return
+        
+        self._sync_status[path] = synced
+        indicator = "🟢" if synced else "🔴"
+        
+        # Find and update the item
+        for row in range(self._model.rowCount()):
+            item = self._model.item(row)
+            if item and item.data(Qt.ItemDataRole.UserRole) == path:
+                # Get base text (without indicator)
+                base_text = item.data(Qt.ItemDataRole.UserRole + 2)
+                if base_text:
+                    item.setText(f"{indicator} {base_text}")
+                break
+
+    def set_all_synced(self, synced: bool = True) -> None:
+        """Update sync status for all files at once."""
+        for path in self._path_set:
+            self.set_sync_status(path, synced)
+
+    def all_synced(self) -> bool:
+        """Return True if all files have been synced."""
+        if not self._sync_status:
+            return False
+        return all(self._sync_status.values())
 
     def reorder_to_paths(self, new_order: list[str]) -> None:
         """Rebuild the list to match new_order; ignores paths not present.
@@ -238,12 +298,21 @@ class FileListWidget(QWidget):
             if result.audio_codec:
                 tooltip += f" / {result.audio_codec}"
 
-        item = QStandardItem(display_text)
+        # Only show sync indicator if sync mode is enabled
+        if self._sync_mode_enabled:
+            sync_indicator = "🔴"  # Not synced initially
+            display_with_status = f"{sync_indicator} {display_text}"
+        else:
+            display_with_status = display_text
+
+        item = QStandardItem(display_with_status)
         item.setEditable(False)
         item.setToolTip(tooltip)
         item.setData(abs_path, Qt.ItemDataRole.UserRole)
+        item.setData(display_text, Qt.ItemDataRole.UserRole + 2)  # Store base text
         self._model.appendRow(item)
         self._path_set.add(abs_path)
+        self._sync_status[abs_path] = False  # Not synced initially
         self._video_count += 1
 
     @staticmethod

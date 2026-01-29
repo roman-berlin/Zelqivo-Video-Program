@@ -76,9 +76,9 @@ class MainWindow(QMainWindow):
         self.setWindowFlags(
             Qt.WindowType.FramelessWindowHint | Qt.WindowType.Window
         )
-        self.setWindowTitle("MultiCamEditor")
+        self.setWindowTitle("Zelqivo")
         self.resize(1280, 800)
-        self.settings = QSettings("MultiCamEditor", "MultiCamEditor")
+        self.settings = QSettings("Zelqivo", "Zelqivo")
         # Instantiate the core Project used by the timeline and trim panel.
         # Video cap is enforced at the FileListWidget level.
         self.project = Project()

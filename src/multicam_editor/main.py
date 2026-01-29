@@ -67,7 +67,7 @@ def main() -> int:
     configure_logging()
 
     app = QApplication(sys.argv)
-    app.setApplicationName("MultiCamEditor")
+    app.setApplicationName("Zelqivo")
 
     # NOTE: Do NOT call AA_UseHighDpiPixmaps / AA_EnableHighDpiScaling on Qt6
     # They were removed; defaults are already enabled.

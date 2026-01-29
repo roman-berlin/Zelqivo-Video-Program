@@ -167,3 +167,32 @@ class TestPipelineResult:
         result = PipelineResult(success=False, error="Something went wrong")
         assert result.success is False
         assert result.error == "Something went wrong"
+
+    def test_detection_stats_default_values(self):
+        """Detection stats fields default to zero/empty."""
+        result = PipelineResult(success=True, output_path="/path/to/output.mp4")
+        assert result.detection_time_s == 0.0
+        assert result.detection_model == ""
+
+    def test_detection_stats_with_values(self):
+        """Detection stats can be set on result."""
+        result = PipelineResult(
+            success=True,
+            output_path="/path/to/output.mp4",
+            detection_time_s=135.5,
+            detection_model="Balanced (Hybrid)",
+        )
+        assert result.detection_time_s == 135.5
+        assert result.detection_model == "Balanced (Hybrid)"
+
+    def test_detection_stats_with_all_strategies(self):
+        """Detection stats work with all strategy names."""
+        strategies = ["Best (Lips)", "Balanced (Hybrid)", "Fast (Energy)"]
+        for strategy in strategies:
+            result = PipelineResult(
+                success=True,
+                detection_time_s=60.0,
+                detection_model=strategy,
+            )
+            assert result.detection_model == strategy
+

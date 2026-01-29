@@ -106,6 +106,8 @@ class PipelineResult:
     error: str = ""
     cancelled: bool = False
     speaker_segments: list = None  # List of SpeakerSegment for XML export
+    detection_time_s: float = 0.0  # Time taken for speaker detection (seconds)
+    detection_model: str = ""  # Model/strategy used for detection
     
     def __post_init__(self):
         if self.speaker_segments is None:
@@ -194,6 +196,10 @@ class ProcessingPipeline:
 
         # Camera alignment offsets (camera_idx -> offset_ms)
         self._camera_offsets: dict[int, float] = {}
+        
+        # Detection stats for UI display
+        self._detection_time_s: float = 0.0
+        self._detection_model: str = ""
 
         # QA artifacts exporter
         self._qa_exporter = QAArtifactExporter()
@@ -494,7 +500,9 @@ class ProcessingPipeline:
             return PipelineResult(
                 success=True, 
                 output_path=final_path,
-                speaker_segments=self._speaker_segments
+                speaker_segments=self._speaker_segments,
+                detection_time_s=self._detection_time_s,
+                detection_model=self._detection_model,
             )
 
         except Exception as e:
@@ -603,9 +611,20 @@ class ProcessingPipeline:
         try:
             from ..utils.ffmpeg import extract_audio_to_wav
             
+            # Start detection timer
+            detection_start = time.time()
+            
             # Determine strategy
             strategy = self._load_switching_strategy()
             logger.info("Using switching strategy: %s", strategy.value)
+            
+            # Record model name for stats display
+            strategy_names = {
+                SwitchingStrategy.BEST_LIPS: "Best (Lips)",
+                SwitchingStrategy.BALANCED_LIPS_ENERGY: "Balanced (Hybrid)",
+                SwitchingStrategy.FAST_RULES: "Fast (Energy)",
+            }
+            self._detection_model = strategy_names.get(strategy, strategy.value)
 
             # Get engine from strategy
             engine, config = select_switching_engine(strategy)
@@ -753,6 +772,14 @@ class ProcessingPipeline:
             
             # Record for QA artifacts
             self._qa_exporter.set_diarization(self._speaker_segments)
+            
+            # Calculate detection time
+            self._detection_time_s = time.time() - detection_start
+            logger.info(
+                "Detection took %.1fs using %s",
+                self._detection_time_s,
+                self._detection_model
+            )
             
             self._emit_progress(100, f"Detection complete: {len(self._speaker_segments)} segments")
             return True

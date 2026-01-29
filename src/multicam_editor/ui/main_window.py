@@ -492,6 +492,12 @@ class MainWindow(QMainWindow):
         self.lbl_result_file.setStyleSheet("font-weight: bold;")
         result_layout.addWidget(self.lbl_result_file, 1)
         
+        # Stats label - shows detection time and model
+        self.lbl_detection_stats = QLabel("")
+        self.lbl_detection_stats.setObjectName("lblDetectionStats")
+        self.lbl_detection_stats.setStyleSheet("color: #888; font-size: 11px;")
+        result_layout.addWidget(self.lbl_detection_stats)
+        
         self.btn_play_result = QPushButton("▶ Play Video")
         self.btn_play_result.setObjectName("btnPlayResult")
         self.btn_play_result.setToolTip("Open the generated video in your default player")
@@ -516,6 +522,10 @@ class MainWindow(QMainWindow):
         result_layout.addWidget(self.btn_export_xml)
         
         parent_layout.addWidget(self.result_group)
+        
+        # Store detection stats for display
+        self._detection_time_s = 0.0
+        self._detection_model = ""
 
     def _on_external_audio_toggled(self, checked: bool) -> None:
         """Save external audio setting and update UI state."""
@@ -1335,6 +1345,7 @@ class MainWindow(QMainWindow):
         self._processing_thread.stage.connect(self._on_processing_stage)
         self._processing_thread.finished_with_path.connect(self._on_processing_finished)
         self._processing_thread.segments_ready.connect(self._on_segments_ready)
+        self._processing_thread.detection_stats.connect(self._on_detection_stats)
         self._processing_thread.error.connect(self._on_processing_error)
         self._processing_thread.finished.connect(self._on_thread_finished)
         
@@ -1367,16 +1378,38 @@ class MainWindow(QMainWindow):
         self.btn_toggle_ab.setEnabled(True)
         self.btn_export.setVisible(True)
         
-        # Show result section with Play button
+        # Show result section with Play button and stats
         if hasattr(self, "result_group") and hasattr(self, "lbl_result_file"):
             self.lbl_result_file.setText(os.path.basename(output_path))
             self.lbl_result_file.setToolTip(output_path)
+            
+            # Update detection stats label
+            if hasattr(self, "lbl_detection_stats") and self._detection_time_s > 0:
+                # Format time nicely (e.g., "1m 23s" or "45s")
+                total_seconds = int(self._detection_time_s)
+                if total_seconds >= 60:
+                    mins = total_seconds // 60
+                    secs = total_seconds % 60
+                    time_str = f"{mins}m {secs}s"
+                else:
+                    time_str = f"{total_seconds}s"
+                
+                stats_text = f"⏱️ Detection: {time_str} • Model: {self._detection_model}"
+                self.lbl_detection_stats.setText(stats_text)
+                self.lbl_detection_stats.setVisible(True)
+            
             self.result_group.setVisible(True)
 
     def _on_segments_ready(self, segments: list) -> None:
         """Store speaker segments for XML export."""
         self._speaker_segments = segments
         logger.debug("Received %d speaker segments for export", len(segments))
+
+    def _on_detection_stats(self, detection_time_s: float, detection_model: str) -> None:
+        """Store detection stats for display in Generated Video section."""
+        self._detection_time_s = detection_time_s
+        self._detection_model = detection_model
+        logger.debug("Detection stats: %.1fs using %s", detection_time_s, detection_model)
 
     def _on_processing_error(self, error_msg: str) -> None:
         """Handle processing error."""

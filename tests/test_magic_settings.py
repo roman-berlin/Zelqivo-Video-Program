@@ -22,7 +22,7 @@ def qapp():
 @pytest.fixture
 def clear_magic_settings():
     """Clear magic settings before each test."""
-    settings = QSettings("MultiCamEditor", "MultiCamEditor")
+    settings = QSettings("Zelqivo", "Zelqivo")
     # Clear all magic/* keys
     settings.beginGroup("magic")
     settings.remove("")  # Remove all keys in this group
@@ -85,7 +85,7 @@ class TestMagicSettingsDialog:
         dialog._save_and_accept()
         
         # Verify in QSettings
-        settings = QSettings("MultiCamEditor", "MultiCamEditor")
+        settings = QSettings("Zelqivo", "Zelqivo")
         assert settings.value("magic/director/split_screen", False, type=bool) is True
         assert settings.value("magic/audio/noise_reduction", False, type=bool) is True
         assert settings.value("magic/repurpose/vertical_teasers", False, type=bool) is True

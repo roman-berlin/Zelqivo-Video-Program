@@ -49,7 +49,7 @@ class MagicSettingsDialog(QDialog):
         self.setMinimumWidth(480)
         self.setMinimumHeight(400)
         
-        self.settings = QSettings("MultiCamEditor", "MultiCamEditor")
+        self.settings = QSettings("Zelqivo", "Zelqivo")
         
         # Detect theme for styling
         self._dark_mode = self.settings.value("appearance/theme", "light", type=str) == "dark"
@@ -434,7 +434,7 @@ class MagicSettingsDialog(QDialog):
 
 def get_magic_settings() -> dict:
     """Load all magic settings as a dictionary (helper for other modules)."""
-    settings = QSettings("MultiCamEditor", "MultiCamEditor")
+    settings = QSettings("Zelqivo", "Zelqivo")
     
     return {
         "sync": {

@@ -1324,6 +1324,9 @@ class MainWindow(QMainWindow):
             strategy.value, external_audio is not None, len(paths), quality, output_path
         )
 
+        # Record start time for total duration calculation
+        self._processing_start_time = time.time()
+
         # Create and show progress dialog
         self._progress_dialog = ProcessingProgressDialog(self)
         self._progress_dialog.set_output_path(output_path)
@@ -1383,20 +1386,42 @@ class MainWindow(QMainWindow):
             self.lbl_result_file.setText(os.path.basename(output_path))
             self.lbl_result_file.setToolTip(output_path)
             
-            # Update detection stats label
-            if hasattr(self, "lbl_detection_stats") and self._detection_time_s > 0:
-                # Format time nicely (e.g., "1m 23s" or "45s")
-                total_seconds = int(self._detection_time_s)
-                if total_seconds >= 60:
-                    mins = total_seconds // 60
-                    secs = total_seconds % 60
-                    time_str = f"{mins}m {secs}s"
-                else:
-                    time_str = f"{total_seconds}s"
+            # Update detection stats label with Total Time
+            if hasattr(self, "lbl_detection_stats"):
+                stats_parts = []
                 
-                stats_text = f"⏱️ Detection: {time_str} • Model: {self._detection_model}"
-                self.lbl_detection_stats.setText(stats_text)
-                self.lbl_detection_stats.setVisible(True)
+                # Calculate total processing time
+                if hasattr(self, "_processing_start_time"):
+                    total_duration = time.time() - self._processing_start_time
+                    
+                    # Format time (e.g., "1m 30s")
+                    total_seconds = int(total_duration)
+                    if total_seconds >= 60:
+                        mins = total_seconds // 60
+                        secs = total_seconds % 60
+                        time_str = f"{mins}m {secs}s"
+                    else:
+                        time_str = f"{total_seconds}s"
+                    stats_parts.append(f"⏱️ Total Time: {time_str}")
+
+                # Add detection time if available
+                if self._detection_time_s > 0:
+                     # Format detection time
+                    det_seconds = int(self._detection_time_s)
+                    if det_seconds >= 60:
+                        d_mins = det_seconds // 60
+                        d_secs = det_seconds % 60
+                        d_time_str = f"{d_mins}m {d_secs}s"
+                    else:
+                        d_time_str = f"{det_seconds}s"
+                    stats_parts.append(f"Detection: {d_time_str}")
+                
+                if self._detection_model:
+                     stats_parts.append(f"Model: {self._detection_model}")
+                
+                if stats_parts:
+                    self.lbl_detection_stats.setText(" • ".join(stats_parts))
+                    self.lbl_detection_stats.setVisible(True)
             
             self.result_group.setVisible(True)
 

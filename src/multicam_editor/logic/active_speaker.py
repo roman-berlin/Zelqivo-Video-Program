@@ -1531,8 +1531,10 @@ class HybridBackend:
         Detect regions of speech in audio using RMS energy.
         
         Returns list of (start_ms, end_ms) tuples where speech occurs.
+        Uses numpy for memory-efficient processing.
         """
         import wave
+        import numpy as np
         
         try:
             with wave.open(audio_path, 'rb') as wf:
@@ -1541,72 +1543,97 @@ class HybridBackend:
                 n_channels = wf.getnchannels()
                 sample_width = wf.getsampwidth()
                 
+                # Check for empty file
+                if n_frames == 0:
+                    logger.warning("Audio file empty: %s", audio_path)
+                    return [(0, duration_ms)]
+
                 # Read all audio data
                 raw_data = wf.readframes(n_frames)
         except Exception as e:
             logger.warning("Could not read audio for VAD: %s, using full duration", e)
             return [(0, duration_ms)]
         
-        # Convert to samples
-        import struct
-        if sample_width == 2:
-            fmt = f"<{n_frames * n_channels}h"
-            samples = list(struct.unpack(fmt, raw_data))
-        else:
-            logger.warning("Unsupported sample width %d, using full duration", sample_width)
+        # Use numpy for efficient memory handling
+        try:
+            if sample_width == 2:
+                # 16-bit audio (standard)
+                samples = np.frombuffer(raw_data, dtype=np.int16)
+            elif sample_width == 4:
+                # 32-bit float or int
+                samples = np.frombuffer(raw_data, dtype=np.int32) 
+            else:
+                logger.warning("Unsupported sample width %d, using full duration", sample_width)
+                return [(0, duration_ms)]
+                
+            # Convert to float32 (smaller than default float64) and normalize
+            samples = samples.astype(np.float32) / 32768.0
+            
+            # If stereo, use first channel only
+            if n_channels > 1:
+                samples = samples[::n_channels]
+                
+            # Calculate window size in samples
+            window_samples = int(sample_rate * self.sample_interval_ms / 1000)
+            if window_samples <= 0:
+                 window_samples = 1000 # Fallback
+            
+            # Truncate to full windows for reshaped calculation (fastest)
+            num_windows = len(samples) // window_samples
+            if num_windows == 0:
+                 return [(0, duration_ms)]
+                 
+            truncated_len = num_windows * window_samples
+            
+            # Reshape to (num_windows, window_samples) to calculate RMS for all windows at once
+            windows = samples[:truncated_len].reshape(num_windows, window_samples)
+            
+            # RMS = sqrt(mean(square(samples)))
+            means_sq = np.mean(windows**2, axis=1)
+            rms_values = np.sqrt(means_sq)
+            
+            # Identify speech windows
+            is_speech = rms_values >= self.speech_threshold
+            
+            # Convert boolean array to start/end times
+            speech_regions: List[tuple[int, int]] = []
+            in_speech = False
+            speech_start = 0
+            
+            for i, speech_detected in enumerate(is_speech):
+                time_ms = int(i * self.sample_interval_ms)
+                
+                if speech_detected:
+                    if not in_speech:
+                        speech_start = time_ms
+                        in_speech = True
+                else:
+                    if in_speech:
+                        speech_regions.append((speech_start, time_ms))
+                        in_speech = False
+            
+            # Close final region
+            if in_speech:
+                speech_regions.append((speech_start, duration_ms))
+                
+            # Merge close regions (within 500ms)
+            merged: List[tuple[int, int]] = []
+            for start, end in speech_regions:
+                if merged and start - merged[-1][1] < 500:
+                    # Extend previous region
+                    merged[-1] = (merged[-1][0], end)
+                else:
+                    merged.append((start, end))
+                    
+            logger.info("HYBRID: Found %d speech regions covering %.1f%% of audio",
+                       len(merged),
+                       100 * sum(e - s for s, e in merged) / duration_ms if duration_ms > 0 else 0)
+            
+            return merged if merged else [(0, duration_ms)]
+
+        except Exception as e:
+            logger.error("VAD processing failed: %s, using full duration", e, exc_info=True)
             return [(0, duration_ms)]
-        
-        # Normalize
-        samples = [s / 32768.0 for s in samples]
-        
-        # If stereo, use first channel only
-        if n_channels > 1:
-            samples = samples[::n_channels]
-        
-        # Analyze in windows
-        window_samples = int(sample_rate * self.sample_interval_ms / 1000)
-        speech_regions: List[tuple[int, int]] = []
-        in_speech = False
-        speech_start = 0
-        
-        for i in range(0, len(samples), window_samples):
-            window = samples[i:i + window_samples]
-            if not window:
-                break
-            
-            # Calculate RMS
-            rms = (sum(s * s for s in window) / len(window)) ** 0.5
-            time_ms = int(i * 1000 / sample_rate)
-            
-            if rms >= self.speech_threshold:
-                if not in_speech:
-                    # Start of speech
-                    speech_start = time_ms
-                    in_speech = True
-            else:
-                if in_speech:
-                    # End of speech
-                    speech_regions.append((speech_start, time_ms))
-                    in_speech = False
-        
-        # Close final region
-        if in_speech:
-            speech_regions.append((speech_start, duration_ms))
-        
-        # Merge close regions (within 500ms)
-        merged: List[tuple[int, int]] = []
-        for start, end in speech_regions:
-            if merged and start - merged[-1][1] < 500:
-                # Extend previous region
-                merged[-1] = (merged[-1][0], end)
-            else:
-                merged.append((start, end))
-        
-        logger.info("HYBRID: Found %d speech regions covering %.1f%% of audio",
-                   len(merged),
-                   100 * sum(e - s for s, e in merged) / duration_ms if duration_ms > 0 else 0)
-        
-        return merged if merged else [(0, duration_ms)]
     
     def detect_speakers(
         self,

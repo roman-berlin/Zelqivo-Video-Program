@@ -953,6 +953,11 @@ class PyannoteBackend:
             import torch
         except ImportError as e:
             return False, f"Import error: {e}"
+        except RuntimeError as e:
+            # Can occur if torchvision is broken/incompatible
+            return False, f"Runtime error during import: {e}"
+        except Exception as e:
+            return False, f"Unexpected error during import: {e}"
             
         # Check for token
         try:

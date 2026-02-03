@@ -91,7 +91,11 @@ To enable AI features, install: pip install multicam-editor[ai]
 #### Run the Test Suite
 
 ```bash
-pytest -q
+# Run non-Qt tests (recommended, no display needed)
+pytest tests/ --ignore=tests/test_ui.py --ignore=tests/test_magic_settings.py --ignore=tests/test_file_list_time.py --ignore=tests/test_processing_worker_signals.py --ignore=tests/test_processing_time.py -v
+
+# Quick coverage report
+pytest --cov=src --cov-report=term-missing
 ```
 
 4. **Lint, format and type‑check the code**:

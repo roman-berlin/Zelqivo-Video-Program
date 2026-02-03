@@ -51,7 +51,7 @@ class ProcessingProgressDialog(QDialog):
         self._output_path: Optional[str] = None
         
         # Detect theme
-        settings = QSettings("MultiCamEditor", "MultiCamEditor")
+        settings = QSettings("Zelqivo", "Zelqivo")
         self._dark_mode = settings.value("appearance/theme", "light", type=str) == "dark"
         
         self._init_ui()

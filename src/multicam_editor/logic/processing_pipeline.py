@@ -227,7 +227,7 @@ class ProcessingPipeline:
 
     def _load_switching_strategy(self) -> SwitchingStrategy:
         """Load switching strategy from QSettings."""
-        settings = QSettings("MultiCamEditor", "MultiCamEditor")
+        settings = QSettings("Zelqivo", "Zelqivo")
         strategy_str = settings.value("switching/strategy", DEFAULT_STRATEGY.value, type=str)
         
         try:

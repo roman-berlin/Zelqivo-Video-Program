@@ -36,7 +36,7 @@ class CustomTitleBar(QWidget):
         layout.setSpacing(0)
         
         # App icon/title
-        self.lbl_title = QLabel("MultiCamEditor")
+        self.lbl_title = QLabel("Zelqivo")
         self.lbl_title.setObjectName("lblWindowTitle")
         layout.addWidget(self.lbl_title)
         

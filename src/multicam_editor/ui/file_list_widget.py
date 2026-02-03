@@ -290,6 +290,7 @@ class FileListWidget(QWidget):
                 parts.append(result.resolution_str())
             if result.fps:
                 parts.append(f"{result.fps:.0f}fps")
+
             if parts:
                 display_text = f"{base}  [{' | '.join(parts)}]"
             tooltip = abs_path

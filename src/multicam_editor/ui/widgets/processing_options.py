@@ -39,7 +39,7 @@ class ProcessingOptionsWidget(QGroupBox):
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__("Processing Options", parent)
         self.setObjectName("groupProcessingOptions")
-        self.settings = QSettings("MultiCamEditor", "MultiCamEditor")
+        self.settings = QSettings("Zelqivo", "Zelqivo")
 
         self._external_audio_path: str | None = None
         self._output_folder: str | None = None

@@ -43,7 +43,7 @@ class TestMainWindow:
     def test_window_opens(self, main_window):
         """Main window should open without errors."""
         assert main_window.isVisible()
-        assert main_window.windowTitle() == "MultiCamEditor"
+        assert main_window.windowTitle() == "Zelqivo"
 
     def test_window_has_modern_toolbar(self, main_window):
         """Main window should have modern toolbar buttons (replaced old menu bar)."""

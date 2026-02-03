@@ -42,7 +42,7 @@ class SettingsDialog(QDialog):
         self.resize(420, 550)  # Taller to show more content
         self.setMinimumHeight(400)
         self.setMaximumHeight(800)
-        self.settings = QSettings("MultiCamEditor", "MultiCamEditor")
+        self.settings = QSettings("Zelqivo", "Zelqivo")
 
         self._init_ui()
         self._load_settings()
@@ -71,7 +71,7 @@ class SettingsDialog(QDialog):
         appearance_layout.setSpacing(8)
 
         # Toggle button for dark/light mode
-        self.btn_theme_toggle = QPushButton("🌙 Dark Mode")
+        self.btn_theme_toggle = QPushButton("☀️ Light Mode")
         self.btn_theme_toggle.setCheckable(True)
         self.btn_theme_toggle.setToolTip("Toggle between light and dark themes")
         self.btn_theme_toggle.setObjectName("btnThemeToggle")
@@ -229,9 +229,9 @@ class SettingsDialog(QDialog):
         
         # Update button text
         if checked:
-            self.btn_theme_toggle.setText("☀️ Light Mode")
-        else:
             self.btn_theme_toggle.setText("🌙 Dark Mode")
+        else:
+            self.btn_theme_toggle.setText("☀️ Light Mode")
         
         # Apply theme immediately
         from PyQt6.QtWidgets import QApplication
@@ -268,9 +268,9 @@ class SettingsDialog(QDialog):
         self.btn_theme_toggle.setChecked(is_dark)
         # Set initial button text (without triggering the signal)
         if is_dark:
-            self.btn_theme_toggle.setText("☀️ Light Mode")
-        else:
             self.btn_theme_toggle.setText("🌙 Dark Mode")
+        else:
+            self.btn_theme_toggle.setText("☀️ Light Mode")
         
         # Output
         self.combo_quality.setCurrentText(
@@ -411,7 +411,7 @@ class SettingsDialog(QDialog):
 
 def get_audio_mix_settings() -> AudioMixSettings:
     """Load audio mix settings from QSettings (standalone helper)."""
-    settings = QSettings("MultiCamEditor", "MultiCamEditor")
+    settings = QSettings("Zelqivo", "Zelqivo")
     mode_text = settings.value("audio_mix/mode", "Replace", type=str)
     mode = AudioMixMode.MIX if mode_text == "Mix" else AudioMixMode.REPLACE
     return AudioMixSettings(
@@ -425,7 +425,7 @@ def get_audio_mix_settings() -> AudioMixSettings:
 
 def get_diarization_mode() -> DiarizationMode:
     """Load diarization mode from QSettings (standalone helper)."""
-    settings = QSettings("MultiCamEditor", "MultiCamEditor")
+    settings = QSettings("Zelqivo", "Zelqivo")
     mode_str = settings.value("diarization/mode", DiarizationMode.HYBRID.value, type=str)
     try:
         return DiarizationMode(mode_str)
@@ -439,7 +439,7 @@ def get_qa_overlay_enabled() -> bool:
     Returns:
         True if QA overlay is enabled, False otherwise (default: False).
     """
-    settings = QSettings("MultiCamEditor", "MultiCamEditor")
+    settings = QSettings("Zelqivo", "Zelqivo")
     return settings.value("qa_overlay/enabled", False, type=bool)
 
 
@@ -450,7 +450,7 @@ def get_switching_strategy() -> SwitchingStrategy:
         SwitchingStrategy enum value. Defaults to BALANCED_LIPS_ENERGY for
         backward compatibility with existing installations.
     """
-    settings = QSettings("MultiCamEditor", "MultiCamEditor")
+    settings = QSettings("Zelqivo", "Zelqivo")
     strategy_str = settings.value(
         "switching/strategy", SwitchingStrategy.BALANCED_LIPS_ENERGY.value, type=str
     )

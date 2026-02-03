@@ -31,7 +31,7 @@ This document provides an honest assessment of what actually exists in the codeb
 | **Processing Pipeline** | ✅ Fully Implemented | `logic/processing_pipeline.py` | Yes | Yes | Full orchestration: probe → align → diarize → decision → render → concat |
 | **Video Rendering** | ✅ Fully Implemented | `logic/video_merger.py` | Yes | Yes | Segment rendering, concatenation, single-pass mode |
 | **FCPXML Export** | ✅ Fully Implemented | `logic/fcpxml_export.py` | Yes | Yes | Generates valid FCPXML 1.11 for Premiere/DaVinci |
-| **Audio Sync (Cross-correlation)** | ⚠️ Partially Implemented | `logic/audio_sync.py` | Yes | Yes | Requires `librosa` optional dependency (not in core install) |
+| **Audio Sync (Cross-correlation)** | ✅ Fully Implemented | `logic/audio_sync.py` | Yes | Yes | Requires `librosa` optional dependency (installed) |
 | **External Audio** | ✅ Fully Implemented | `ui/main_window.py`, `logic/processing_pipeline.py` | Yes | Yes | Replace camera audio with external audio file |
 | **Camera-Speaker Mapping** | ✅ Fully Implemented | `ui/main_window.py` | Yes | Yes | Manual mapping of cameras to speakers |
 | **Output Folder Selection** | ✅ Fully Implemented | `ui/main_window.py` | Yes | Yes | User chooses output directory |

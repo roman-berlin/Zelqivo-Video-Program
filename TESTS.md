@@ -18,8 +18,8 @@ The project has 26 test files in `tests/`. **Tests run successfully** when Qt-de
 | `test_backends.py` | Backend availability detection | No | ✅ Should work |
 | `test_file_utils.py` | File type detection | No | ✅ Should work |
 | `test_active_speaker.py` | Speaker detection backends | No | ✅ Should work |
-| `test_audio_sync.py` | Audio synchronization | No | ⚠️ Needs librosa |
-| `test_audio_mix.py` | Audio mixing | No | ⚠️ Needs librosa |
+| `test_audio_sync.py` | Audio synchronization | No | ✅ Should work |
+| `test_audio_mix.py` | Audio mixing | No | ✅ Should work |
 | `test_decision_engine.py` | Cut decision logic | No | ✅ Should work |
 | `test_fast_rules_engine.py` | FAST_RULES switching | No | ✅ Should work |
 | `test_switching_strategy.py` | Strategy enum/loader | No | ✅ Should work |

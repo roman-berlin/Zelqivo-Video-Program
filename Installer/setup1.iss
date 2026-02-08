@@ -4,7 +4,7 @@
 ;   C:\Python Projects\Video_Program\installer\assets\icons\Zelqivo.ico
 
 #define MyAppName "Zelqivo"
-#define MyAppVersion "1.0.1"
+#define MyAppVersion "1.0.3"
 #define MyAppPublisher "Roman Berlin"
 #define MyAppExeName "MulticamEditor.exe"
 

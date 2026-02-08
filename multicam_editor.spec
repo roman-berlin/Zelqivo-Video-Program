@@ -54,6 +54,9 @@ hiddenimports = [
     'imageio',
     'imageio_ffmpeg',
     'imageio_ffmpeg.binaries',
+    # AI/Audio processing
+    'librosa',
+    'soundfile',
 ]
 
 # Add all cv2 submodules
@@ -101,7 +104,6 @@ a = Analysis(
         'jupyter',
         # AI packages (optional, not bundled in core build)
         'torch',
-        'librosa',
         'pyannote',
         'speechbrain',
     ],

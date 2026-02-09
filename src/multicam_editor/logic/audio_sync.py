@@ -55,6 +55,10 @@ def is_audio_sync_available() -> tuple[bool, Optional[str]]:
 # Target sample rate for cross-correlation (lower for faster processing)
 _SYNC_SR = 16000
 
+# Minimum acceptable correlation score (0-1 range)
+# Below this threshold, sync is considered unreliable
+MIN_CORRELATION_SCORE = 0.05
+
 
 @dataclass
 class SyncResult:
@@ -73,9 +77,10 @@ class CameraAlignment:
     camera_index: int
     video_path: str
     offset_ms: float
-    status: str  # "ok", "no_audio", "failed"
+    status: str  # "ok", "no_audio", "failed", "low_correlation"
     message: str
     wav_path: Optional[str] = None
+    correlation_score: Optional[float] = None  # Quality metric (0-1 range)
 
 
 def _load_audio_mono(path: str, sr: int = _SYNC_SR) -> tuple[np.ndarray, int]:
@@ -396,22 +401,39 @@ def align_cameras(
                         video_path=path,
                         offset_ms=0.0,
                         status="failed",
-                        message="Audio too short for correlation"
+                        message="Audio too short for correlation",
+                        correlation_score=None
                     ))
                     if on_progress:
                         on_progress(i, len(video_paths))
                     continue
 
                 offset_ms, corr_score, _ = _cross_correlate_offset(primary_audio, secondary_audio, sr)
-                logger.info("Camera %d offset: %.1f ms (correlation=%.4f)", i, offset_ms, corr_score)
-
-                results.append(CameraAlignment(
-                    camera_index=i,
-                    video_path=path,
-                    offset_ms=offset_ms,
-                    status="ok",
-                    message=f"Aligned (correlation={corr_score:.3f})"
-                ))
+                
+                # Check correlation quality
+                if corr_score < MIN_CORRELATION_SCORE:
+                    logger.warning(
+                        "Camera %d: Low correlation score %.4f (< %.2f) - sync unreliable, using offset=0",
+                        i, corr_score, MIN_CORRELATION_SCORE
+                    )
+                    results.append(CameraAlignment(
+                        camera_index=i,
+                        video_path=path,
+                        offset_ms=0.0,  # Fallback to 0 for low correlation
+                        status="low_correlation",
+                        message=f"Low correlation ({corr_score:.3f}) - using offset=0",
+                        correlation_score=corr_score
+                    ))
+                else:
+                    logger.info("Camera %d offset: %.1f ms (correlation=%.4f)", i, offset_ms, corr_score)
+                    results.append(CameraAlignment(
+                        camera_index=i,
+                        video_path=path,
+                        offset_ms=offset_ms,
+                        status="ok",
+                        message=f"Aligned (correlation={corr_score:.3f})",
+                        correlation_score=corr_score
+                    ))
 
             except Exception as e:
                 logger.error("Correlation failed for camera %d: %s", i, e, exc_info=True)
@@ -420,7 +442,8 @@ def align_cameras(
                     video_path=path,
                     offset_ms=0.0,
                     status="failed",
-                    message=f"Correlation failed: {e}"
+                    message=f"Correlation failed: {e}",
+                    correlation_score=None
                 ))
 
             # Update wav_path if keeping

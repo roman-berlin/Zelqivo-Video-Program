@@ -5,7 +5,7 @@ This document outlines the standard operating procedure (SOP) for interacting wi
 ## PHASE 1: INITIALIZATION (The Handshake)
 At the start of every coding session or new chat window, copy-paste this command to "boot up" the team:
 
-> **"Initialize Zelqivo Team. Load context from `.ai_instructions`. I am ready to start. Current Mode: Interactive Team."**
+> "Initialize Zelqivo Team. Load context from .ai_instructions. I am ready to start. Current Mode: Interactive Team."
 
 ---
 

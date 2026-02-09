@@ -1,7 +1,7 @@
 # Feature Reality Matrix
 
-> **Last Updated**: 2026-02-03
-> **Audit Version**: 2.0
+> **Last Updated**: 2026-02-09
+> **Audit Version**: 2.1
 > **Status**: COMPREHENSIVE AUDIT COMPLETE
 
 ## Executive Summary
@@ -13,7 +13,7 @@ This document provides an honest assessment of what actually exists in the codeb
 - **Partially Implemented**: 4
 - **UI-Only (No Backend)**: 4
 - **Stub/Placeholder**: 1
-- **Test Status**: ✅ 417 passed, 2 skipped (no failures)
+- **Test Status**: ✅ 419 passed, 2 skipped (no failures)
 
 ---
 
@@ -31,7 +31,7 @@ This document provides an honest assessment of what actually exists in the codeb
 | **Processing Pipeline** | ✅ Fully Implemented | `logic/processing_pipeline.py` | Yes | Yes | Full orchestration: probe → align → diarize → decision → render → concat |
 | **Video Rendering** | ✅ Fully Implemented | `logic/video_merger.py` | Yes | Yes | Segment rendering, concatenation, single-pass mode |
 | **FCPXML Export** | ✅ Fully Implemented | `logic/fcpxml_export.py` | Yes | Yes | Generates valid FCPXML 1.11 for Premiere/DaVinci |
-| **Audio Sync (Cross-correlation)** | ✅ Fully Implemented | `logic/audio_sync.py` | Yes | Yes | Requires `librosa` optional dependency (installed) |
+| **Audio Sync (Cross-correlation)** | ✅ Fully Implemented | `logic/audio_sync.py` | Yes | Yes | Requires `librosa` core dependency (always available) |
 | **External Audio** | ✅ Fully Implemented | `ui/main_window.py`, `logic/processing_pipeline.py` | Yes | Yes | Replace camera audio with external audio file |
 | **Camera-Speaker Mapping** | ✅ Fully Implemented | `ui/main_window.py` | Yes | Yes | Manual mapping of cameras to speakers |
 | **Output Folder Selection** | ✅ Fully Implemented | `ui/main_window.py` | Yes | Yes | User chooses output directory |
@@ -74,7 +74,7 @@ This document provides an honest assessment of what actually exists in the codeb
 
 ### 1. Tests Require Qt Exclusion (RESOLVED)
 - **26 test files** in `tests/` directory
-- **417 passed, 2 skipped** when Qt tests excluded
+- **419 passed, 2 skipped** when Qt tests excluded
 - **0 failures** after fixing exception handling in optional backends
 - **Command**: `pytest tests/ --ignore=tests/test_ui.py --ignore=tests/test_magic_settings.py --ignore=tests/test_file_list_time.py --ignore=tests/test_processing_worker_signals.py --ignore=tests/test_processing_time.py`
 - **Qt tests ignored**: 5 files require pytest-qt with virtual display
@@ -90,7 +90,7 @@ The following features have backend implementations but are **hidden from UI** f
 ### 3. Optional Dependency Features
 These features require optional packages not in the core install:
 - **Pyannote Diarization**: Requires `pyannote.audio`, `torch`, HuggingFace auth
-- **Audio Sync**: Requires `librosa`, `soundfile`
+- **Audio Sync**: Now included in core dependencies (`librosa`, `soundfile`)
 - **Lips Detection**: Requires `torch`, GPU, model download
 
 ### 4. Removed Due to Instability
@@ -109,8 +109,8 @@ These features require optional packages not in the core install:
 | FFprobe | Required | `ffprobe -version` |
 | Core (PyQt6, numpy) | Required | Auto-detected |
 | Energy VAD | Always available | Built-in |
+| Librosa/Audio Sync | Required (core) | Included in base install |
 | Pyannote | Optional | `pip install multicam-editor[ai]` |
-| Librosa/Audio Sync | Optional | `pip install multicam-editor[ai]` |
 
 Run health check: `python -m multicam_editor.utils.backends`
 

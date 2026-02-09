@@ -422,6 +422,39 @@ class ProcessingPipeline:
         self._qa_exporter.start_run()
 
         try:
+            # PREFLIGHT CHECKS: Run comprehensive validation before processing
+            from .preflight import PreflightManager
+            
+            logger.info("Running preflight validation checks...")
+            self.signals.status.emit("Running preflight checks...")
+            
+            preflight = PreflightManager()
+            preflight_result = preflight.run_full_check(
+                self.input_files,
+                output_path or tempfile.gettempdir()
+            )
+            
+            # Handle critical errors (blocking)
+            if not preflight_result.ok:
+                error_messages = [e.message for e in preflight_result.critical_errors]
+                error_msg = "\n".join(error_messages)
+                logger.error("Preflight validation failed: %s", error_msg)
+                self.signals.error.emit(f"Cannot process files:\n\n{error_msg}")
+                return PipelineResult(
+                    success=False, 
+                    error=f"Preflight validation failed:\n{error_msg}"
+                )
+            
+            # Handle warnings (non-blocking - log for now, UI can add dialog later)
+            if preflight_result.warnings:
+                warning_messages = [w.message for w in preflight_result.warnings]
+                for warning in warning_messages:
+                    logger.warning("Preflight warning: %s", warning)
+                # TODO: Show warning dialog with "Proceed Anyway" option
+                # For now, we just log and continue
+            
+            logger.info("Preflight checks passed ✓")
+            
             # Stage 1: Probe all input files
             if not self._stage_probe():
                 return PipelineResult(success=False, cancelled=self._cancelled,

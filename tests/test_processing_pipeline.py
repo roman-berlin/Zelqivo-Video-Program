@@ -12,6 +12,20 @@ from multicam_editor.logic.processing_pipeline import (
 )
 from multicam_editor.utils.signals import ProcessingSignals
 
+# Patch target for PreflightManager - must be where it's defined since
+# processing_pipeline.py uses a local import: from .preflight import PreflightManager
+_PREFLIGHT_PATCH = 'multicam_editor.logic.preflight.PreflightManager'
+
+
+def _mock_preflight_pass(mock_cls):
+    """Configure a mock PreflightManager to always pass."""
+    instance = mock_cls.return_value
+    result = MagicMock()
+    result.ok = True
+    result.critical_errors = []
+    result.warnings = []
+    instance.run_full_check.return_value = result
+
 
 class TestPipelineStage:
     """Tests for pipeline stage enum."""
@@ -87,51 +101,59 @@ class TestProcessingPipeline:
         pipeline.cancel()
         assert pipeline._cancelled is True
 
-    @patch('multicam_editor.logic.processing_pipeline.probe')
-    def test_probe_stage_fails_on_error(self, mock_probe):
+    def test_probe_stage_fails_on_error(self):
         """Pipeline should fail if probe returns error."""
         from multicam_editor.utils.ffprobe import ProbeResult
 
-        mock_probe.return_value = ProbeResult(duration_ms=0, error="File not found")
+        with patch(_PREFLIGHT_PATCH) as mock_preflight, \
+             patch('multicam_editor.logic.processing_pipeline.probe') as mock_probe:
+            _mock_preflight_pass(mock_preflight)
+            mock_probe.return_value = ProbeResult(duration_ms=0, error="File not found")
 
-        signals = ProcessingSignals()
-        error_captured = []
-        signals.error.connect(error_captured.append)
+            signals = ProcessingSignals()
+            error_captured = []
+            signals.error.connect(error_captured.append)
 
-        pipeline = ProcessingPipeline(["file1.mp4", "file2.mp4"], signals)
-        result = pipeline.run()
+            pipeline = ProcessingPipeline(["file1.mp4", "file2.mp4"], signals)
+            result = pipeline.run()
 
         assert result.success is False
         assert "Probe stage failed" in result.error
 
-    @patch('multicam_editor.logic.processing_pipeline.probe')
-    def test_cancel_during_probe(self, mock_probe):
+    def test_cancel_during_probe(self):
         """Pipeline should stop when cancelled during probe."""
         from multicam_editor.utils.ffprobe import ProbeResult
 
-        def cancel_on_first_call(*args):
-            pipeline.cancel()
-            return ProbeResult(duration_ms=5000)
+        with patch(_PREFLIGHT_PATCH) as mock_preflight, \
+             patch('multicam_editor.logic.processing_pipeline.probe') as mock_probe:
+            _mock_preflight_pass(mock_preflight)
 
-        mock_probe.side_effect = cancel_on_first_call
+            def cancel_on_first_call(*args):
+                pipeline.cancel()
+                return ProbeResult(duration_ms=5000)
 
-        signals = ProcessingSignals()
-        pipeline = ProcessingPipeline(["file1.mp4", "file2.mp4"], signals)
-        result = pipeline.run()
+            mock_probe.side_effect = cancel_on_first_call
+
+            signals = ProcessingSignals()
+            pipeline = ProcessingPipeline(["file1.mp4", "file2.mp4"], signals)
+            result = pipeline.run()
 
         assert result.cancelled is True
         assert result.success is False
 
     def test_progress_callback_called(self):
         """Progress callback should be invoked."""
+        from multicam_editor.utils.ffprobe import ProbeResult
+
         signals = ProcessingSignals()
         progress_updates = []
 
         def on_progress(p: PipelineProgress):
             progress_updates.append(p)
 
-        with patch('multicam_editor.logic.processing_pipeline.probe') as mock_probe:
-            from multicam_editor.utils.ffprobe import ProbeResult
+        with patch(_PREFLIGHT_PATCH) as mock_preflight, \
+             patch('multicam_editor.logic.processing_pipeline.probe') as mock_probe:
+            _mock_preflight_pass(mock_preflight)
             mock_probe.return_value = ProbeResult(duration_ms=0, error="test error")
 
             pipeline = ProcessingPipeline(
@@ -195,4 +217,3 @@ class TestPipelineResult:
                 detection_model=strategy,
             )
             assert result.detection_model == strategy
-

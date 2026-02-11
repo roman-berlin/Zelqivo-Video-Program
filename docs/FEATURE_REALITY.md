@@ -1,7 +1,7 @@
 # Feature Reality Matrix
 
-> **Last Updated**: 2026-02-09
-> **Audit Version**: 2.1
+> **Last Updated**: 2026-02-11
+> **Audit Version**: 2.2
 > **Status**: COMPREHENSIVE AUDIT COMPLETE
 
 ## Executive Summary
@@ -13,7 +13,7 @@ This document provides an honest assessment of what actually exists in the codeb
 - **Partially Implemented**: 4
 - **UI-Only (No Backend)**: 4
 - **Stub/Placeholder**: 1
-- **Test Status**: ✅ 419 passed, 2 skipped (no failures)
+- **Test Status**: ✅ All passed, 2 skipped (no failures) — 31 test files, 35% coverage
 
 ---
 
@@ -54,7 +54,8 @@ This document provides an honest assessment of what actually exists in the codeb
 | **Settings Dialog** | ✅ Fully Implemented | `ui/settings_dialog.py` | Yes | Yes | Appearance, log levels, system info |
 | **Export Dialog** | ✅ Fully Implemented | `ui/export_dialog.py` | Yes | Yes | Export processed video with format options |
 | **Undo/Redo** | ✅ Fully Implemented | `logic/commands.py`, `ui/main_window.py` | Yes | Yes | QUndoStack-based, Add/Remove/Trim commands |
-| **Unit Tests** | ✅ All Passing | `tests/` | N/A | N/A | 417 passed, 2 skipped. Qt tests must be excluded (5 files) |
+| **Debug Export Package** | ✅ Fully Implemented | `logic/debug_export.py` | No | Yes | ZIP containing logs, QA artifacts, environment info |
+| **Unit Tests** | ✅ All Passing | `tests/` (31 files) | N/A | N/A | All passed, 2 skipped. Qt tests must be excluded (5 files). 35% coverage |
 
 ---
 
@@ -73,8 +74,8 @@ This document provides an honest assessment of what actually exists in the codeb
 ## Critical Findings
 
 ### 1. Tests Require Qt Exclusion (RESOLVED)
-- **26 test files** in `tests/` directory
-- **419 passed, 2 skipped** when Qt tests excluded
+- **31 test files** in `tests/` directory
+- **All passed, 2 skipped** when Qt tests excluded (35% overall coverage)
 - **0 failures** after fixing exception handling in optional backends
 - **Command**: `pytest tests/ --ignore=tests/test_ui.py --ignore=tests/test_magic_settings.py --ignore=tests/test_file_list_time.py --ignore=tests/test_processing_worker_signals.py --ignore=tests/test_processing_time.py`
 - **Qt tests ignored**: 5 files require pytest-qt with virtual display

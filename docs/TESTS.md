@@ -1,11 +1,11 @@
 # Test Documentation
 
-> **Last Updated**: 2026-02-03
-> **Status**: ✅ PASSING (417 passed, 2 skipped with Qt test exclusions)
+> **Last Updated**: 2026-02-11
+> **Status**: ✅ PASSING (all passed, 2 skipped with Qt test exclusions)
 
 ## Overview
 
-The project has 26 test files in `tests/`. **Tests run successfully** when Qt-dependent tests are excluded. All core logic tests pass.
+The project has 31 test files in `tests/`. **Tests run successfully** when Qt-dependent tests are excluded. All core logic tests pass. Overall coverage is 35%.
 
 ---
 
@@ -39,6 +39,11 @@ The project has 26 test files in `tests/`. **Tests run successfully** when Qt-de
 | `test_magic_settings.py` | Magic settings persistence | Yes | ❌ Hangs |
 | `test_file_list_time.py` | File list performance | Yes | ❌ Hangs |
 | `test_ui.py` | UI smoke tests | Yes | ❌ Hangs |
+| `test_checkpoint.py` | Checkpoint save/restore | No | ✅ Should work |
+| `test_commands.py` | Undo/redo commands | No | ✅ Should work |
+| `test_qa_artifacts.py` | QA artifacts export | No | ✅ Should work |
+| `test_video_utils.py` | Video utility functions | No | ✅ Should work |
+| `test_preflight_manager.py` | Preflight manager logic | No | ✅ Should work |
 
 ---
 
@@ -134,6 +139,13 @@ In headless CI/shell environments, Qt tries to connect to a display and blocks.
 | Temp cleanup | No test for cleanup on crash | Medium |
 | CLI mode | No integration test for cli.py | Medium |
 | Audio preview | No test for ffplay fallback | Low |
+
+### Recently Filled Gaps
+- ✅ `checkpoint.py` — now tested in `test_checkpoint.py`
+- ✅ `commands.py` — now tested in `test_commands.py`
+- ✅ `qa_artifacts.py` — now tested in `test_qa_artifacts.py`
+- ✅ `video_utils.py` — now tested in `test_video_utils.py`
+- ✅ `preflight.py` manager — now tested in `test_preflight_manager.py`
 
 ---
 

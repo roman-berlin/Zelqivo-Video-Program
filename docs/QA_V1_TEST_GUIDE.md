@@ -194,7 +194,7 @@ This document is for manual QA testing of the V1 core features:
 
 ## 4. QA Artifacts for Bug Reports
 
-When filing a bug, attach these files from `%LOCALAPPDATA%\MultiCamEditor\qa_runs\run_YYYYMMDD_HHMMSS\`:
+When filing a bug, attach these files from `%LOCALAPPDATA%\Zelqivo\qa_runs\run_YYYYMMDD_HHMMSS\`:
 
 | File | Description |
 |------|-------------|
@@ -213,8 +213,8 @@ configure_logging(level=logging.DEBUG)
 
 ### Artifact Location
 ```
-Windows: %LOCALAPPDATA%\MultiCamEditor\qa_runs\
-Linux:   ~/.local/share/MultiCamEditor/qa_runs/
+Windows: %LOCALAPPDATA%\Zelqivo\qa_runs\
+Linux:   ~/.local/share/Zelqivo/qa_runs/
 ```
 
 ### Bug Report Template
@@ -290,10 +290,13 @@ Configurable via Settings dialog or code.
 |------|---------|----------|
 | OFF | NullBackend | Single camera, no switching |
 | STUB | EnergyVADBackend | Dev/test without ML model |
-| REAL | PyannoteBackend | Production quality |
+| ENERGY | RealEnergyVADBackend | CPU-only energy-based VAD (production) |
+| REAL | PyannoteBackend | ML-based diarization (requires pyannote.audio) |
+| LIPS | LipsBackend | Visual lip-movement detection (requires torch + GPU) |
+| HYBRID | Composite | Combines audio + visual detection |
 
 Check logs for: `"Loaded model: pyannote/speaker-diarization-3.1"` to confirm REAL mode active.
 
 ---
 
-*Document version: V1 — 2025-12-21*
+*Document version: V1.1 — 2026-02-11*

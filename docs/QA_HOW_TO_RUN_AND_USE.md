@@ -7,7 +7,7 @@ This document provides manual QA testers with instructions for running the appli
 ## Prerequisites
 
 ### Python Environment
-- **Python 3.8+** required
+- **Python 3.10+** required
 - **Virtual environment recommended** (venv or similar)
 
 ### External Dependencies
@@ -24,6 +24,11 @@ The app currently validates and accepts:
 - `.mp4`
 - `.avi`
 - `.mov`
+- `.mkv`
+- `.webm`
+- `.m4v`
+- `.flv`
+- `.wmv`
 
 Files with other extensions will be rejected during import.
 
@@ -48,7 +53,7 @@ Files with other extensions will be rejected during import.
 
 4. **Install dependencies** (first time or after requirements change):
    ```cmd
-   pip install -r requirements.txt
+   pip install -e ".[dev]"
    ```
 
 5. **Run the application**:
@@ -92,8 +97,9 @@ To see more detailed logs (recommended when debugging issues):
 4. Debug logs will include ffprobe calls, cache hits, trim operations, etc.
 
 ### Where Logs Are Written
-- **Source runs:** Console only (visible in the terminal where you ran `python -m multicam_editor`)
-- **Packaged builds:** May redirect to `.log` file or console depending on build configuration
+- **Console:** Always (visible in the terminal where you ran `python -m multicam_editor`)
+- **File:** Rotating log at `%LOCALAPPDATA%\Zelqivo\logs\zelqivo.log` (1 MB max, 5 backups)
+- **Packaged builds:** Same file logging location applies
 
 ---
 

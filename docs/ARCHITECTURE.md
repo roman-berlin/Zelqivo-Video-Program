@@ -1,7 +1,7 @@
 # Architecture Document
 
-> **Version**: 1.0  
-> **Last Updated**: 2026-02-03  
+> **Version**: 1.1  
+> **Last Updated**: 2026-02-11  
 > **Status**: ALIGNED WITH REALITY
 
 ## Overview
@@ -25,6 +25,7 @@ Zelqivo (formerly MultiCamEditor) is a PyQt6-based desktop application for autom
 | `main.py` | GUI entry point | Creates QApplication, MainWindow |
 | `cli.py` | Headless CLI mode | For automation/QA pipelines |
 | `__main__.py` | Package runner | `python -m multicam_editor` |
+| `logging_setup.py` | Centralized logging config | Console + rotating file handler |
 
 ### Core Layer (`core/`)
 
@@ -41,7 +42,7 @@ Zelqivo (formerly MultiCamEditor) is a PyQt6-based desktop application for autom
 | `decision_engine.py` | Convert speaker segments to camera cuts with smoothing | ✅ Complete |
 | `fast_rules_engine.py` | Rule-based camera switching (no ML) | ✅ Complete |
 | `video_merger.py` | Render video segments, concatenate | ✅ Complete |
-| `audio_sync.py` | Cross-correlation audio alignment | ⚠️ Requires librosa |
+| `audio_sync.py` | Cross-correlation audio alignment | ✅ Complete (librosa is core dep) |
 | `fcpxml_export.py` | Generate FCPXML 1.11 for NLE import | ✅ Complete |
 | `highlights.py` | Teaser cutting infrastructure | 📝 STUB |
 | `preflight.py` | GPU preflight checks, warning dialogs | ✅ Complete |
@@ -51,6 +52,9 @@ Zelqivo (formerly MultiCamEditor) is a PyQt6-based desktop application for autom
 | `commands.py` | Undo/Redo commands (Add, Remove, Trim) | ✅ Complete |
 | `processing_worker.py` | QThread wrapper for async processing | ✅ Complete |
 | `switching_strategy.py` | Strategy enum and loader | ✅ Complete |
+| `video_utils.py` | Video/audio helpers (extract, duration, split) | ✅ Complete |
+| `debug_export.py` | Debug package ZIP export for QA/support | ✅ Complete |
+| `pipeline_config.py` | Pipeline configuration dataclass | ✅ Complete |
 
 ### UI Layer (`ui/`)
 
@@ -72,6 +76,9 @@ Zelqivo (formerly MultiCamEditor) is a PyQt6-based desktop application for autom
 | `trim_panel.py` | Manual trim controls | 🔲 Hidden V1 |
 | `timeline/` | Timeline view components | 🔲 Hidden V1 |
 | `multiview_dialog.py` | Multi-camera preview | ❌ Removed (freeze bug) |
+| `utils/gui.py` | GUI threading helpers | ✅ Active |
+| `widgets/range_slider.py` | Custom range slider widget | ✅ Active |
+| `widgets/processing_options.py` | Processing options widget | ✅ Active |
 
 ### Utils Layer (`utils/`)
 
@@ -180,11 +187,12 @@ To add new features safely:
 - PyQt6, pyqt6-sip
 - numpy, opencv-python
 - ffmpeg-python, moviepy
+- librosa, soundfile (audio sync)
+- tqdm (progress bars)
 - FFmpeg/FFprobe binaries
 
 ### Optional (AI Install)
 - torch (for LIPS mode)
-- librosa, soundfile (for audio sync)
 - pyannote.audio (for real diarization)
 - pydub, speechbrain
 
@@ -192,7 +200,8 @@ To add new features safely:
 
 ## Known Technical Debt
 
-1. **Tests hang** on Qt initialization - need pytest-qt virtual display
-2. **Multiview dialog** causes system freeze - removed but code remains
+1. **Qt tests hang** on initialization without `pytest-qt` + virtual display (5 test files excluded)
+2. **Multiview dialog** causes system freeze - removed from UI but code file remains
 3. **Some UI hidden for V1** - trim panel, timeline, A/B compare
 4. **Highlights stub** returns empty data - infrastructure without implementation
+5. **Overall test coverage at 35%** - core logic well tested, UI layer largely untested

@@ -1,0 +1,75 @@
+============================= test session starts =============================
+platform win32 -- Python 3.13.11, pytest-8.4.1, pluggy-1.6.0
+PyQt6 6.10.1 -- Qt runtime 6.10.1 -- Qt compiled 6.10.0
+rootdir: C:\Python Projects\Video_Program
+configfile: pyproject.toml
+plugins: allure-pytest-2.15.0, anyio-4.9.0, Faker-37.5.3, cov-7.0.0, qt-4.5.0, xdist-3.8.0, typeguard-4.4.4
+collected 69 items
+
+tests\test_checkpoint.py ...........                                     [ 15%]
+tests\test_qa_artifacts.py .....................                         [ 46%]
+tests\test_commands.py ..........................                        [ 84%]
+tests\test_video_utils.py ...........                                    [100%]
+
+=============================== tests coverage ================================
+______________ coverage: platform win32, python 3.13.11-final-0 _______________
+
+Name                                               Stmts   Miss  Cover   Missing
+--------------------------------------------------------------------------------
+src\multicam_editor\__init__.py                        0      0   100%
+src\multicam_editor\__main__.py                        3      3     0%   8-12
+src\multicam_editor\cli.py                            84     84     0%   16-207
+src\multicam_editor\core\__init__.py                   0      0   100%
+src\multicam_editor\core\project.py                  145    145     0%   16-336
+src\multicam_editor\logging_setup.py                  37     37     0%   21-112
+src\multicam_editor\logic\__init__.py                  1      0   100%
+src\multicam_editor\logic\active_speaker.py          881    774    12%   43, 45, 47, 63-64, 76-77, 86-105, 156-166, 170-171, 182-262, 271-287, 299-307, 324-394, 399-435, 440-443, 452-498, 521-615, 638-740, 767-849, 868-869, 874-940, 951-976, 981-985, 990-993, 1001-1086, 1091-1111, 1128-1149, 1156, 1160, 1164, 1172-1174, 1179-1185, 1221-1226, 1230-1253, 1264-1304, 1314-1334, 1338-1354, 1375-1470, 1477-1497, 1517-1520, 1524-1525, 1541-1641, 1663-1751, 1761-1763
+src\multicam_editor\logic\audio_sync.py              234    234     0%   3-474
+src\multicam_editor\logic\checkpoint.py              104     20    81%   45-50, 82-84, 139-143, 165-167, 190-194
+src\multicam_editor\logic\commands.py                214     91    57%   183-199, 203-257, 261-303, 307-316, 355-359, 363, 368, 377, 422, 427, 442
+src\multicam_editor\logic\debug_export.py             87     87     0%   11-160
+src\multicam_editor\logic\decision_engine.py         159    136    14%   31-36, 72-80, 103-126, 142-157, 174-191, 208-237, 256-291, 312-400, 404-418
+src\multicam_editor\logic\eta_estimation.py           71     71     0%   8-254
+src\multicam_editor\logic\fast_rules_engine.py       159    159     0%   17-407
+src\multicam_editor\logic\fcpxml_export.py            83     83     0%   9-212
+src\multicam_editor\logic\highlights.py               49     49     0%   8-128
+src\multicam_editor\logic\pipeline_config.py          44     30    32%   39-78, 85, 92, 100-104
+src\multicam_editor\logic\preflight.py               217    217     0%   12-560
+src\multicam_editor\logic\processing_pipeline.py     680    605    11%   72-73, 84-87, 91, 96, 113-114, 154-216, 220-226, 230-237, 241-244, 248-252, 260-309, 324-350, 355-389, 393-399, 417-545, 549-567, 576-687, 696-885, 912-946, 954-1035, 1043-1113, 1121-1208, 1218-1313, 1328-1371, 1386-1418, 1434-1481
+src\multicam_editor\logic\processing_worker.py        85     85     0%   3-200
+src\multicam_editor\logic\qa_artifacts.py            107     19    82%   39-44, 49-54, 59-63, 276-277
+src\multicam_editor\logic\switching_strategy.py       46     34    26%   54-102, 115-126
+src\multicam_editor\logic\video_merger.py            208    166    20%   91-94, 112-192, 213-263, 267, 274-278, 282-289, 293, 311-312, 338-381, 402-465, 491-574
+src\multicam_editor\logic\video_utils.py             144    102    29%   27-37, 45-46, 125-200, 209-275
+src\multicam_editor\main.py                           38     38     0%   2-81
+src\multicam_editor\ui\__init__.py                     1      1     0%   6
+src\multicam_editor\ui\audio_preview_dialog.py        60     60     0%   6-121
+src\multicam_editor\ui\custom_title_bar.py            73     73     0%   3-157
+src\multicam_editor\ui\export_dialog.py              188    188     0%   3-331
+src\multicam_editor\ui\file_list_widget.py           279    279     0%   2-425
+src\multicam_editor\ui\gpu_warning_dialog.py          61     61     0%   7-121
+src\multicam_editor\ui\loading_dialog.py              91     91     0%   3-202
+src\multicam_editor\ui\magic_settings_dialog.py      194    194     0%   7-439
+src\multicam_editor\ui\main_window.py               1142   1142     0%   2-1952
+src\multicam_editor\ui\multiview_dialog.py           190    190     0%   6-317
+src\multicam_editor\ui\progress_dialog.py            169    169     0%   3-332
+src\multicam_editor\ui\settings_dialog.py            244    244     0%   3-466
+src\multicam_editor\ui\theme.py                        9      9     0%   4-400
+src\multicam_editor\ui\timeline\__init__.py            0      0   100%
+src\multicam_editor\ui\timeline\adapter.py           152    152     0%   2-242
+src\multicam_editor\ui\timeline\timeline.py          281    281     0%   2-429
+src\multicam_editor\ui\trim_panel.py                 238    238     0%   14-352
+src\multicam_editor\ui\utils\__init__.py               0      0   100%
+src\multicam_editor\ui\utils\gui.py                   31     31     0%   2-50
+src\multicam_editor\ui\video_preview.py              277    277     0%   2-402
+src\multicam_editor\ui\waveform_dialog.py            136    136     0%   2-241
+src\multicam_editor\utils\__init__.py                  2      0   100%
+src\multicam_editor\utils\backends.py                129    129     0%   7-271
+src\multicam_editor\utils\ffmpeg.py                  284    231    19%   37, 53-55, 68-93, 109-110, 145-149, 160-195, 199-209, 213-218, 236-237, 251-254, 276-308, 330-360, 391-466, 476, 498, 516-520, 544-549, 587-655, 690-802
+src\multicam_editor\utils\ffprobe.py                 207    158    24%   49-51, 55-57, 72-78, 84-130, 135-144, 150-163, 171-193, 201-229, 244-317, 332-335, 340, 352-355, 360-361, 367-368
+src\multicam_editor\utils\file_utils.py               34     21    38%   12, 16, 26-35, 39, 43-46, 50-53
+src\multicam_editor\utils\settings.py                 26     26     0%   7-81
+src\multicam_editor\utils\signals.py                   7      0   100%
+--------------------------------------------------------------------------------
+TOTAL                                               8385   7650     9%
+============================= 69 passed in 16.33s =============================

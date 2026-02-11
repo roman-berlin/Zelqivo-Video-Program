@@ -156,6 +156,7 @@ class QAArtifactExporter:
         self._total_duration_ms: int = 0
         self._sync_info: Optional[dict[str, Any]] = None
         self._camera_alignments: List[dict[str, Any]] = []
+        self._external_audio_alignment: Optional[dict[str, Any]] = None
 
     def start_run(self) -> Path:
         """Create a new run folder and return its path."""
@@ -228,28 +229,51 @@ class QAArtifactExporter:
             alignments: List of dicts with camera_index, offset_ms, status, message
         """
         self._camera_alignments = alignments
+        logger.debug("Stored %d camera alignments for export", len(alignments))
+
+    def set_external_audio_alignment(self, alignment_info: dict[str, Any]) -> None:
+        """Store external audio alignment info for export.
+
+        Args:
+            alignment_info: Dict with external_audio_path, offset_ms, status, message
+        """
+        self._external_audio_alignment = alignment_info
+        logger.debug("Stored external audio alignment: %s", alignment_info.get("status", "unknown"))
 
     def finalize(self) -> None:
         """Write all artifacts to the run folder."""
         if not self.run_folder:
-            logger.warning("QA export skipped: no run folder")
+            logger.warning("No run folder set, skipping QA artifact export")
             return
 
-        try:
-            export_diarization(self.run_folder, self._segments)
-            export_cut_plan(self.run_folder, self._cuts)
+        logger.info("Finalizing QA artifacts to %s", self.run_folder)
 
-            num_speakers = len(set(s.speaker_id for s in self._segments))
-            export_processing_summary(
-                self.run_folder,
-                num_speakers=num_speakers,
-                num_segments=len(self._segments),
-                num_cuts=len(self._cuts),
-                total_duration_ms=self._total_duration_ms,
-                thresholds=self._thresholds,
-                sync_info=self._sync_info,
-                camera_alignments=self._camera_alignments,
-            )
-            logger.info("QA artifacts written to: %s", self.run_folder.name)
-        except Exception as e:
-            logger.error("Failed to write QA artifacts: %s", e, exc_info=True)
+        # Export diarization
+        export_diarization(self.run_folder, self._segments)
+
+        # Export cut plan
+        export_cut_plan(self.run_folder, self._cuts)
+
+        # Export processing summary
+        export_processing_summary(
+            self.run_folder,
+            num_speakers=len(set(s.speaker_id for s in self._segments)),
+            num_segments=len(self._segments),
+            num_cuts=len(self._cuts),
+            total_duration_ms=self._total_duration_ms,
+            thresholds=self._thresholds,
+            sync_info=self._sync_info,
+            camera_alignments=self._camera_alignments,
+        )
+        
+        # Export external audio alignment if present
+        if self._external_audio_alignment:
+            external_audio_file = self.run_folder / "external_audio_alignment.json"
+            try:
+                with open(external_audio_file, "w", encoding="utf-8") as f:
+                    json.dump(self._external_audio_alignment, f, indent=2)
+                logger.info("Exported external audio alignment to %s", external_audio_file.name)
+            except Exception as e:
+                logger.error("Failed to export external audio alignment: %s", e)
+
+        logger.info("QA artifacts exported successfully")

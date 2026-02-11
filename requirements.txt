@@ -12,8 +12,8 @@ tqdm
 # Install with: pip install -e ".[ai]"
 # Uncomment below or use: pip install torch librosa soundfile pydub pyannote.audio speechbrain
 # torch
-# librosa
-# soundfile
+librosa
+soundfile
 # pydub
 # pyannote.audio
 # speechbrain

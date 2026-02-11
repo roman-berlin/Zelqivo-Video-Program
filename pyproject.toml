@@ -9,7 +9,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "multicam-editor"
-version = "0.1.0"
+version = "1.0.3"
 description = "Refactored multi‑camera video editor"
 authors = [{name = "Owner"}]
 readme = "README.md"
@@ -24,14 +24,14 @@ dependencies = [
     "ffmpeg-python",
     "moviepy",
     "tqdm",
+    "librosa",
+    "soundfile",
 ]
 
 [project.optional-dependencies]
 # AI extras: heavy ML dependencies for real diarization and advanced audio sync
 ai = [
     "torch",
-    "librosa",
-    "soundfile",
     "pydub",
     "pyannote.audio",
     "speechbrain",

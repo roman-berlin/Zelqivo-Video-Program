@@ -13,4 +13,5 @@ class ProcessingSignals(QObject):
     progress = pyqtSignal(int)  # overall percent 0-100
     finished = pyqtSignal(str)  # output path
     error = pyqtSignal(str)     # error message
+    status = pyqtSignal(str)    # status message (e.g. "Running preflight checks...")
     stage = pyqtSignal(str, int, str)  # stage_name, stage_percent, message

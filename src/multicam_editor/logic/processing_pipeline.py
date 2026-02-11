@@ -422,6 +422,39 @@ class ProcessingPipeline:
         self._qa_exporter.start_run()
 
         try:
+            # PREFLIGHT CHECKS: Run comprehensive validation before processing
+            from .preflight import PreflightManager
+            
+            logger.info("Running preflight validation checks...")
+            self.signals.status.emit("Running preflight checks...")
+            
+            preflight = PreflightManager()
+            preflight_result = preflight.run_full_check(
+                self.input_files,
+                output_path or tempfile.gettempdir()
+            )
+            
+            # Handle critical errors (blocking)
+            if not preflight_result.ok:
+                error_messages = [e.message for e in preflight_result.critical_errors]
+                error_msg = "\n".join(error_messages)
+                logger.error("Preflight validation failed: %s", error_msg)
+                self.signals.error.emit(f"Cannot process files:\n\n{error_msg}")
+                return PipelineResult(
+                    success=False, 
+                    error=f"Preflight validation failed:\n{error_msg}"
+                )
+            
+            # Handle warnings (non-blocking - log for now, UI can add dialog later)
+            if preflight_result.warnings:
+                warning_messages = [w.message for w in preflight_result.warnings]
+                for warning in warning_messages:
+                    logger.warning("Preflight warning: %s", warning)
+                # TODO: Show warning dialog with "Proceed Anyway" option
+                # For now, we just log and continue
+            
+            logger.info("Preflight checks passed ✓")
+            
             # Stage 1: Probe all input files
             if not self._stage_probe():
                 return PipelineResult(success=False, cancelled=self._cancelled,
@@ -537,59 +570,121 @@ class ProcessingPipeline:
         """Align cameras using audio cross-correlation.
 
         First camera is primary (offset=0). Others aligned relative to it.
+        If external_audio is provided, it's also aligned to primary camera.
         Never fails the pipeline - on error, all offsets default to 0.
         """
         self._advance_stage(PipelineStage.ALIGN)
 
-        from .audio_sync import align_cameras, CameraAlignment
+        from .audio_sync import align_cameras, align_audio_offset, CameraAlignment
 
         self._camera_offsets = {0: 0.0}  # Primary always 0
+        self._external_audio_offset = 0.0  # Default for external audio
 
-        if len(self.input_files) < 2:
-            self._emit_progress(100, "Skipping alignment (single camera)")
+        if len(self.input_files) < 2 and not self._external_audio_path:
+            self._emit_progress(100, "Skipping alignment (single camera, no external audio)")
             return
 
-        self._emit_progress(10, "Aligning cameras by audio...")
+        # Step 1: Align cameras to each other
+        if len(self.input_files) >= 2:
+            self._emit_progress(10, "Aligning cameras by audio...")
 
-        def on_progress(idx: int, total: int) -> None:
-            if total > 0:
-                percent = int((idx + 1) * 90 / total) + 10
-                self._emit_progress(percent, f"Aligning camera {idx + 1}/{total}")
+            def on_progress(idx: int, total: int) -> None:
+                if total > 0:
+                    percent = int((idx + 1) * 80 / total) + 10  # 10-90% for camera alignment
+                    self._emit_progress(percent, f"Aligning camera {idx + 1}/{total}")
 
-        try:
-            alignments = align_cameras(self.input_files, on_progress=on_progress)
+            try:
+                alignments = align_cameras(self.input_files, on_progress=on_progress)
 
-            # Store offsets
-            alignment_data = []
-            for align in alignments:
-                self._camera_offsets[align.camera_index] = align.offset_ms
-                alignment_data.append({
-                    "camera_index": align.camera_index,
-                    "offset_ms": align.offset_ms,
-                    "status": align.status,
-                    "message": align.message,
+                # Store offsets
+                alignment_data = []
+                for align in alignments:
+                    self._camera_offsets[align.camera_index] = align.offset_ms
+                    alignment_data.append({
+                        "camera_index": align.camera_index,
+                        "offset_ms": align.offset_ms,
+                        "status": align.status,
+                        "message": align.message,
+                        "correlation_score": align.correlation_score,
+                    })
+                    logger.info("Camera %d offset: %.1f ms (%s, corr=%.3f)",
+                               align.camera_index, align.offset_ms, align.status,
+                               align.correlation_score if align.correlation_score else 0.0)
+
+                # Store for QA artifacts
+                self._qa_exporter.set_camera_alignments(alignment_data)
+
+                logger.info("Camera alignment complete: %s",
+                           {k: f"{v:.1f}ms" for k, v in self._camera_offsets.items()})
+
+            except Exception as e:
+                # Never fail pipeline on alignment error - just use 0 offsets
+                logger.error("Camera alignment failed, using offset=0 for all: %s", e, exc_info=True)
+                for i in range(len(self.input_files)):
+                    self._camera_offsets[i] = 0.0
+
+                self._qa_exporter.set_camera_alignments([
+                    {"camera_index": i, "offset_ms": 0.0, "status": "failed", "message": str(e)}
+                    for i in range(len(self.input_files))
+                ])
+        
+        # Step 2: Align external audio to primary camera (if provided)
+        if self._external_audio_path:
+            self._emit_progress(90, "Aligning external audio to primary camera...")
+            
+            try:
+                # Extract audio from primary camera
+                from ..utils.ffmpeg import extract_audio_to_wav
+                
+                primary_wav_result = extract_audio_to_wav(self.input_files[0], sample_rate=16000, mono=True)
+                if not primary_wav_result.success or not primary_wav_result.output_path:
+                    logger.warning("Failed to extract primary audio for external sync: %s", primary_wav_result.error)
+                    self._external_audio_offset = 0.0
+                else:
+                    # Align external audio to primary
+                    offset_ms, status = align_audio_offset(self._external_audio_path, primary_wav_result.output_path)
+                    
+                    if status == "ok":
+                        self._external_audio_offset = offset_ms
+                        logger.info("External audio aligned: offset=%.1f ms", offset_ms)
+                        
+                        # Add to QA artifacts
+                        self._qa_exporter.set_external_audio_alignment({
+                            "external_audio_path": self._external_audio_path,
+                            "offset_ms": offset_ms,
+                            "status": "ok"
+                        })
+                    else:
+                        logger.warning("External audio alignment failed (%s), using offset=0", status)
+                        self._external_audio_offset = 0.0
+                        
+                        self._qa_exporter.set_external_audio_alignment({
+                            "external_audio_path": self._external_audio_path,
+                            "offset_ms": 0.0,
+                            "status": "failed",
+                            "message": status
+                        })
+                    
+                    # Cleanup temp WAV
+                    import os
+                    if primary_wav_result.output_path and os.path.isfile(primary_wav_result.output_path):
+                        try:
+                            os.remove(primary_wav_result.output_path)
+                        except Exception as cleanup_err:
+                            logger.debug("Failed to cleanup primary WAV: %s", cleanup_err)
+                            
+            except Exception as e:
+                logger.error("External audio alignment failed: %s", e, exc_info=True)
+                self._external_audio_offset = 0.0
+                
+                self._qa_exporter.set_external_audio_alignment({
+                    "external_audio_path": self._external_audio_path,
+                    "offset_ms": 0.0,
+                    "status": "error",
+                    "message": str(e)
                 })
-                logger.info("Camera %d offset: %.1f ms (%s)",
-                           align.camera_index, align.offset_ms, align.status)
-
-            # Store for QA artifacts
-            self._qa_exporter.set_camera_alignments(alignment_data)
-
-            self._emit_progress(100, f"Aligned {len(alignments)} cameras")
-            logger.info("Camera alignment complete: %s",
-                       {k: f"{v:.1f}ms" for k, v in self._camera_offsets.items()})
-
-        except Exception as e:
-            # Never fail pipeline on alignment error - just use 0 offsets
-            logger.error("Camera alignment failed, using offset=0 for all: %s", e, exc_info=True)
-            for i in range(len(self.input_files)):
-                self._camera_offsets[i] = 0.0
-
-            self._qa_exporter.set_camera_alignments([
-                {"camera_index": i, "offset_ms": 0.0, "status": "failed", "message": str(e)}
-                for i in range(len(self.input_files))
-            ])
-            self._emit_progress(100, "Alignment failed, using default offsets")
+        
+        self._emit_progress(100, "Alignment complete")
 
     def _stage_diarize(self) -> bool:
         """
@@ -1143,9 +1238,32 @@ class ProcessingPipeline:
 
         self._emit_progress(30, "Finalizing video...")
 
-        # Check for synced external audio
+        # Priority 1: Check for external audio (aligned in _stage_align)
+        if self._external_audio_path and os.path.isfile(self._external_audio_path):
+            # Add external audio with offset
+            self._emit_progress(50, "Adding external audio...")
+            logger.info("Using external audio: %s (offset: %.1f ms)",
+                       os.path.basename(self._external_audio_path),
+                       self._external_audio_offset)
+
+            final_path = self._add_external_audio_with_offset(
+                input_video,
+                self._external_audio_path,
+                output_path,
+                self._external_audio_offset
+            )
+            if final_path:
+                self._emit_progress(100, "External audio added successfully")
+                logger.info("Final output with external audio: %s", final_path)
+                self._cleanup()
+                return final_path
+            else:
+                # Fallback: continue to try other audio sources
+                logger.warning("External audio add failed, trying other sources...")
+
+        # Priority 2: Check for synced external audio (legacy flow from hybrid detection)
         synced_audio = getattr(self, "_synced_audio_path", None)
-        
+
         if synced_audio and os.path.isfile(synced_audio):
             # Add external audio to video
             self._emit_progress(50, "Adding external audio...")
@@ -1297,4 +1415,67 @@ class ProcessingPipeline:
 
         except Exception as e:
             logger.error("Audio replacement error: %s", e, exc_info=True)
+            return None
+
+    def _add_external_audio_with_offset(
+        self, video_path: str, audio_path: str, output_path: str, offset_ms: float
+    ) -> Optional[str]:
+        """Add external audio to video with time offset for sync.
+
+        Args:
+            video_path: Path to rendered video
+            audio_path: Path to external audio file
+            output_path: Where to write final output
+            offset_ms: Time offset to apply to audio (negative = delay audio, positive = advance)
+
+        Returns:
+            output_path on success, None on failure
+        """
+        from ..utils.ffmpeg import FFmpegProcess, is_ffmpeg_available
+
+        if not is_ffmpeg_available():
+            logger.error("ffmpeg not available for audio muxing with offset")
+            return None
+
+        try:
+            # Convert offset from milliseconds to seconds
+            offset_sec = offset_ms / 1000.0
+
+            # Build ffmpeg command with audio offset
+            # -itsoffset applies offset to following input
+            # Negative offset delays audio (audio starts later)
+            # Positive offset advances audio (audio starts earlier, video delayed relative to audio)
+            args = [
+                "ffmpeg", "-y",
+                "-i", video_path,
+            ]
+
+            # Apply offset to audio input
+            if abs(offset_sec) > 0.001:  # Only apply if offset is significant (> 1ms)
+                args.extend(["-itsoffset", str(offset_sec)])
+
+            args.extend([
+                "-i", audio_path,
+                "-c:v", "copy",  # Copy video stream (no re-encode)
+                "-c:a", "aac",   # Encode audio to AAC
+                "-map", "0:v:0",  # Take video from first input
+                "-map", "1:a:0",  # Take audio from second input
+                "-shortest",     # Match shorter duration
+                output_path,
+            ])
+
+            logger.info("Adding external audio with offset=%.1fms: %s -> %s",
+                       offset_ms, os.path.basename(audio_path), os.path.basename(output_path))
+            proc = FFmpegProcess(args, output_path)
+            result = proc.run()
+
+            if result.success:
+                logger.info("External audio mux successful: %s", output_path)
+                return output_path
+
+            logger.error("External audio mux failed: %s", result.error)
+            return None
+
+        except Exception as e:
+            logger.error("External audio mux error: %s", e, exc_info=True)
             return None

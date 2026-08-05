@@ -8,8 +8,8 @@ import subprocess
 import sys
 from typing import Optional
 
-from PyQt6.QtCore import Qt, pyqtSignal, QSettings
-from PyQt6.QtWidgets import (
+from PySide6.QtCore import Qt, Signal, QSettings
+from PySide6.QtWidgets import (
     QDialog,
     QHBoxLayout,
     QLabel,
@@ -35,7 +35,7 @@ class ProcessingProgressDialog(QDialog):
         cancelRequested: Emitted when user clicks Cancel.
     """
 
-    cancelRequested = pyqtSignal()
+    cancelRequested = Signal()
 
     def __init__(self, parent=None) -> None:
         super().__init__(parent)

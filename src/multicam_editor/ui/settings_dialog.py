@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-from PyQt6.QtCore import QSettings, Qt
-from PyQt6.QtWidgets import (
+from PySide6.QtCore import QSettings, Qt
+from PySide6.QtWidgets import (
     QCheckBox,
     QDialog,
     QDialogButtonBox,
@@ -234,7 +234,7 @@ class SettingsDialog(QDialog):
             self.btn_theme_toggle.setText("☀️ Light Mode")
         
         # Apply theme immediately
-        from PyQt6.QtWidgets import QApplication
+        from PySide6.QtWidgets import QApplication
         from .theme import apply_theme
         app = QApplication.instance()
         if app:

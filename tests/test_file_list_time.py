@@ -3,9 +3,9 @@ import time
 import pytest
 from datetime import datetime
 from unittest.mock import patch, Mock
-from PyQt6.QtWidgets import QApplication
+from PySide6.QtWidgets import QApplication
 from multicam_editor.ui.file_list_widget import FileListWidget
-from PyQt6.QtCore import Qt
+from PySide6.QtCore import Qt
 
 @pytest.fixture(scope="session")
 def qapp():

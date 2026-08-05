@@ -14,8 +14,8 @@ branch checkout with this file's content.
 from __future__ import annotations
 from typing import Optional, Tuple
 
-from PyQt6.QtCore import Qt, pyqtSignal
-from PyQt6.QtWidgets import (
+from PySide6.QtCore import Qt, Signal
+from PySide6.QtWidgets import (
     QWidget,
     QLabel,
     QVBoxLayout,
@@ -45,7 +45,7 @@ class TrimPanel(QWidget):
         trimChanged(str path, int in_ms, int out_ms)
     """
 
-    trimChanged = pyqtSignal(str, int, int)
+    trimChanged = Signal(str, int, int)
 
     # minimum allowed duration for each side of a split (ms)
     MIN_SEGMENT_MS = 100

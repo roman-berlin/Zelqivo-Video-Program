@@ -6,7 +6,7 @@
 
 ## Overview
 
-Zelqivo (formerly MultiCamEditor) is a PyQt6-based desktop application for automated multicam video editing. The core workflow:
+Zelqivo (formerly MultiCamEditor) is a PySide6-based desktop application for automated multicam video editing. The core workflow:
 
 1. **Import** multiple camera video files
 2. **Analyze** audio to detect active speaker per time window
@@ -184,7 +184,7 @@ To add new features safely:
 
 ### Required (Core Install)
 - Python 3.10+
-- PyQt6, pyqt6-sip
+- PySide6 (Qt for Python, LGPLv3)
 - numpy, opencv-python
 - ffmpeg-python, moviepy
 - librosa, soundfile (audio sync)

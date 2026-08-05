@@ -2,9 +2,9 @@
 from __future__ import annotations
 from typing import List, Optional
 
-from PyQt6.QtCore import Qt, QRectF, pyqtSignal, QPointF
-from PyQt6.QtGui import QBrush, QPen, QPainter, QColor, QFont, QFontMetrics
-from PyQt6.QtWidgets import QGraphicsScene, QGraphicsView, QGraphicsRectItem, QGraphicsItem, QGraphicsLineItem, QToolTip
+from PySide6.QtCore import Qt, QRectF, Signal, QPointF
+from PySide6.QtGui import QBrush, QPen, QPainter, QColor, QFont, QFontMetrics
+from PySide6.QtWidgets import QGraphicsScene, QGraphicsView, QGraphicsRectItem, QGraphicsItem, QGraphicsLineItem, QToolTip
 
 
 # ------------------------------- CutMarkerItem -----------------------------
@@ -183,14 +183,14 @@ class ClipItem(QGraphicsRectItem):
 class TimelineScene(QGraphicsScene):
     """Hosts ClipItems, enforces single selection, manages order/layout."""
 
-    orderChanged = pyqtSignal(list)  # emits List[str] of keys in left→right order
+    orderChanged = Signal(list)  # emits List[str] of keys in left→right order
 
     # Emitted when a clip is double-clicked.  Provides the unique key (path|in-out|index)
     # of the item so that callers can mirror selection and start playback.
-    clipActivated = pyqtSignal(str)
+    clipActivated = Signal(str)
 
     # Emitted when a cut marker is clicked. Provides timestamp in ms for seek.
-    cutMarkerClicked = pyqtSignal(int)
+    cutMarkerClicked = Signal(int)
 
     def __init__(self, parent=None):
         super().__init__(parent)

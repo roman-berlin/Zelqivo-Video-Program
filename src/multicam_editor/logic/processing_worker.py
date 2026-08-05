@@ -5,7 +5,7 @@ from __future__ import annotations
 import logging
 from typing import List, Optional
 
-from PyQt6.QtCore import QObject, QThread, pyqtSignal
+from PySide6.QtCore import QObject, QThread, Signal
 
 from ..utils.signals import ProcessingSignals
 from .processing_pipeline import ProcessingPipeline, PipelineProgress
@@ -34,12 +34,12 @@ class ProcessingWorker(QObject):
         worker.cancel()
     """
 
-    progress = pyqtSignal(int)
-    stage = pyqtSignal(str, int, str, float)  # stage_name, stage_percent, message, eta_seconds
-    finished = pyqtSignal(str)
-    segments_ready = pyqtSignal(list)  # Speaker segments for XML export
-    detection_stats = pyqtSignal(float, str)  # detection_time_s, detection_model
-    error = pyqtSignal(str)
+    progress = Signal(int)
+    stage = Signal(str, int, str, float)  # stage_name, stage_percent, message, eta_seconds
+    finished = Signal(str)
+    segments_ready = Signal(list)  # Speaker segments for XML export
+    detection_stats = Signal(float, str)  # detection_time_s, detection_model
+    error = Signal(str)
 
     def __init__(
         self,
@@ -145,12 +145,12 @@ class ProcessingThread(QThread):
         thread.cancel()
     """
 
-    progress = pyqtSignal(int)
-    stage = pyqtSignal(str, int, str, float)  # stage_name, stage_percent, message, eta_seconds
-    finished_with_path = pyqtSignal(str)
-    segments_ready = pyqtSignal(list)  # Speaker segments for XML export
-    detection_stats = pyqtSignal(float, str)  # detection_time_s, detection_model
-    error = pyqtSignal(str)
+    progress = Signal(int)
+    stage = Signal(str, int, str, float)  # stage_name, stage_percent, message, eta_seconds
+    finished_with_path = Signal(str)
+    segments_ready = Signal(list)  # Speaker segments for XML export
+    detection_stats = Signal(float, str)  # detection_time_s, detection_model
+    error = Signal(str)
 
     def __init__(
         self,

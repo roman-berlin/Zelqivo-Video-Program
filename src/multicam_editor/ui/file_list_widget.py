@@ -4,9 +4,9 @@ from __future__ import annotations
 import os
 from typing import Iterable, List, Tuple
 
-from PyQt6.QtCore import Qt, QModelIndex, QMimeData, pyqtSignal
-from PyQt6.QtGui import QStandardItemModel, QStandardItem, QKeyEvent
-from PyQt6.QtWidgets import QListView, QVBoxLayout, QWidget
+from PySide6.QtCore import Qt, QModelIndex, QMimeData, Signal
+from PySide6.QtGui import QStandardItemModel, QStandardItem, QKeyEvent
+from PySide6.QtWidgets import QListView, QVBoxLayout, QWidget
 
 # Use a relative import to ensure we access the utils module within the
 # ``multicam_editor`` package rather than relying on sys.path state.
@@ -23,12 +23,12 @@ class FileListWidget(QWidget):
         currentPathChanged(str)
     """
 
-    filesAdded = pyqtSignal(list)
-    videoCountChanged = pyqtSignal(int)
-    currentPathChanged = pyqtSignal(str)
+    filesAdded = Signal(list)
+    videoCountChanged = Signal(int)
+    currentPathChanged = Signal(str)
     # Signals for removal - MainWindow handles Project sync via RemoveClipsCommand
-    removalRequested = pyqtSignal(str)  # path to remove
-    removeAllRequested = pyqtSignal()   # remove all videos
+    removalRequested = Signal(str)  # path to remove
+    removeAllRequested = Signal()   # remove all videos
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)

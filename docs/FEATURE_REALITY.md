@@ -108,7 +108,7 @@ These features require optional packages not in the core install:
 |---------|--------|---------------|
 | FFmpeg | Required | `ffmpeg -version` |
 | FFprobe | Required | `ffprobe -version` |
-| Core (PyQt6, numpy) | Required | Auto-detected |
+| Core (PySide6, numpy) | Required | Auto-detected |
 | Energy VAD | Always available | Built-in |
 | Librosa/Audio Sync | Required (core) | Included in base install |
 | Pyannote | Optional | `pip install multicam-editor[ai]` |

@@ -4,10 +4,10 @@ import logging
 import threading
 from typing import Optional
 
-from PyQt6.QtCore import QUrl, Qt, QTimer, pyqtSignal
-from PyQt6.QtGui import QPixmap, QImage
-from PyQt6.QtMultimediaWidgets import QVideoWidget
-from PyQt6.QtWidgets import (
+from PySide6.QtCore import QUrl, Qt, QTimer, Signal
+from PySide6.QtGui import QPixmap, QImage
+from PySide6.QtMultimediaWidgets import QVideoWidget
+from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QLabel, QHBoxLayout, QPushButton, QSlider, QStackedLayout
 )
 
@@ -22,7 +22,7 @@ class VideoPreview(QWidget):
     Lazy-creates QMediaPlayer on first source load to avoid startup crashes.
     """
 
-    durationKnown = pyqtSignal(int)
+    durationKnown = Signal(int)
 
     def __init__(self, parent: Optional[QWidget] = None) -> None:
         super().__init__(parent)
@@ -91,7 +91,7 @@ class VideoPreview(QWidget):
         if self._player is not None:
             return
         # Import here to avoid early DLL/plugin init
-        from PyQt6.QtMultimedia import QMediaPlayer, QAudioOutput
+        from PySide6.QtMultimedia import QMediaPlayer, QAudioOutput
         self._player = QMediaPlayer(self)
         self._audio = QAudioOutput(self)
         self._player.setAudioOutput(self._audio)
@@ -189,7 +189,7 @@ class VideoPreview(QWidget):
 
     def _set_play_icon(self, playing: bool) -> None:
         """Set Play/Pause icon using Qt standard icons with tooltip."""
-        from PyQt6.QtWidgets import QStyle
+        from PySide6.QtWidgets import QStyle
         style = self.style()
         if playing:
             icon = style.standardIcon(QStyle.StandardPixmap.SP_MediaPause)

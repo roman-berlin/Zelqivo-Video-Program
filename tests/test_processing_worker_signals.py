@@ -2,7 +2,7 @@
 
 import pytest
 from unittest.mock import MagicMock, patch
-from PyQt6.QtCore import QObject
+from PySide6.QtCore import QObject
 
 from multicam_editor.logic.processing_worker import ProcessingWorker
 from multicam_editor.logic.processing_pipeline import PipelineResult

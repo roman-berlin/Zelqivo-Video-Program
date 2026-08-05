@@ -7,10 +7,10 @@ Shows a warning when BEST_LIPS mode is selected without GPU.
 import logging
 from typing import Tuple
 
-from PyQt6.QtWidgets import (
+from PySide6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QLabel, QPushButton
 )
-from PyQt6.QtCore import Qt
+from PySide6.QtCore import Qt
 
 from ..logic.switching_strategy import SwitchingStrategy
 

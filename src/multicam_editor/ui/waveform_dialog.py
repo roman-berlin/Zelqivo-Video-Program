@@ -3,9 +3,9 @@ import logging
 import os
 import numpy as np
 import soundfile as sf
-from PyQt6.QtCore import Qt, QRectF
-from PyQt6.QtGui import QPainter, QColor, QPen, QBrush, QFont, QPainterPath
-from PyQt6.QtWidgets import (
+from PySide6.QtCore import Qt, QRectF
+from PySide6.QtGui import QPainter, QColor, QPen, QBrush, QFont, QPainterPath
+from PySide6.QtWidgets import (
     QDialog, QVBoxLayout, QWidget, QScrollArea, QLabel, 
     QHBoxLayout, QPushButton, QSizePolicy
 )

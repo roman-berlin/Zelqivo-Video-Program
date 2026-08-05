@@ -1,6 +1,6 @@
 """Sanity tests for importing the package.
 
-We deliberately avoid importing GUI modules here because PyQt6 may not be
+We deliberately avoid importing GUI modules here because PySide6 may not be
 available in the test environment.  Instead we import the top‑level
 package and a core submodule to verify that basic imports succeed.
 """

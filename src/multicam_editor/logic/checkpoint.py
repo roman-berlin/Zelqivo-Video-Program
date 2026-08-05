@@ -14,7 +14,7 @@ from dataclasses import dataclass, asdict, field
 from pathlib import Path
 from typing import List, Optional, Dict, Any
 
-from PyQt6.QtCore import QStandardPaths
+from PySide6.QtCore import QStandardPaths
 
 logger = logging.getLogger(__name__)
 

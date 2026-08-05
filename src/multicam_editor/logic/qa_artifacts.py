@@ -13,7 +13,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, List, Optional
 
-from PyQt6.QtCore import QStandardPaths
+from PySide6.QtCore import QStandardPaths
 
 from .active_speaker import SpeakerSegment
 

@@ -112,7 +112,7 @@ pytest --cov=src --cov-report=term-missing
    python -m multicam_editor
    ```
 
-   Note: Running the GUI requires installing PyQt6 and other multimedia
+   Note: Running the GUI requires installing PySide6 and other multimedia
    libraries which may not be available in minimal environments.  See the
    original project documentation for details.
 
@@ -195,12 +195,12 @@ Logs are automatically written to:
 
 | Error | Solution |
 |-------|----------|
-| "Qt platform plugin 'windows' not found" | Reinstall PyQt6: `pip uninstall PyQt6 PyQt6-Qt6 -y && pip install PyQt6` |
+| "Qt platform plugin 'windows' not found" | Reinstall PySide6: `pip uninstall PySide6 PySide6-Essentials PySide6-Addons shiboken6 -y && pip install PySide6` |
 | "ffmpeg not found" | FFmpeg should be bundled. Check `dist\MulticamEditor\tools\ffmpeg\` exists |
 | Missing VC++ Runtime | Install [VC++ Redistributable](https://aka.ms/vs/17/release/vc_redist.x64.exe) |
 | ImportError on launch | Rebuild with `--clean` flag |
 | No logs created | Check folder permissions for `%LOCALAPPDATA%\Zelqivo\` |
-| Black screen / no video | Ensure Qt Multimedia plugins are in `_internal\PyQt6\Qt6\plugins\multimedia\` |
+| Black screen / no video | Ensure Qt Multimedia plugins are in `_internal\PySide6\plugins\multimedia\` |
 
 #### Smoke Test Checklist
 

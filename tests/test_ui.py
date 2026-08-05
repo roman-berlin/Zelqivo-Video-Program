@@ -11,8 +11,8 @@ from __future__ import annotations
 
 import pytest
 from unittest.mock import patch, MagicMock
-from PyQt6.QtCore import Qt
-from PyQt6.QtWidgets import QApplication, QFileDialog, QMessageBox
+from PySide6.QtCore import Qt
+from PySide6.QtWidgets import QApplication, QFileDialog, QMessageBox
 
 
 # Ensure QApplication is created before importing UI modules
@@ -150,7 +150,7 @@ class TestCreateVideoButton:
         """Create Video button should be disabled when no videos loaded."""
         # Find Create Video button
         create_btn = None
-        from PyQt6.QtWidgets import QPushButton
+        from PySide6.QtWidgets import QPushButton
         for btn in main_window.findChildren(QPushButton):
             if "Create" in btn.text():
                 create_btn = btn

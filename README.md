@@ -1,11 +1,15 @@
-## MultiCamEditor – Refactored
+# Zelqivo
 
-MultiCamEditor is a Python‑based desktop application for merging and editing
-multi‑camera video footage.  It presents a simple interface for previewing
-clips, trimming them and constructing a timeline by selecting the active
-speaker.  This repository contains a refactored, test‑backed version of
-MultiCamEditor with a modern project layout, automated tooling and a
-continuous integration workflow.
+Zelqivo (formerly MultiCamEditor) is a desktop application for automatic
+multicam editing of podcasts and interviews: point it at your camera files,
+and it builds the cut for you — probe → audio-sync → speaker detection →
+rule-based cuts → render, with FCPXML export to Premiere/DaVinci.
+
+**Platforms:** Windows 10/11 (primary). macOS and Linux run from source;
+first-class macOS support is [on the roadmap](docs/ROADMAP.md).
+
+**Contributing:** welcome — see [CONTRIBUTING.md](CONTRIBUTING.md) and
+[good first issues](docs/GOOD_FIRST_ISSUES.md).
 
 ### Features
 
@@ -20,11 +24,9 @@ continuous integration workflow.
 * **Type hints & basic type checking** – public APIs are annotated and the
   project is checked with `mypy` in permissive mode (strict mode is a roadmap
   item for future improvement).
-* **Tests & coverage** – a small but meaningful test suite validates the
-  behaviour of core components and the logging configuration.  Running
-  `pytest -q` will report coverage information.
-* **CI ready** – a GitHub Actions workflow runs linting, type checking and
-  the tests against Python 3.10–3.12.
+* **Tests & coverage** – 539 passing tests (including Qt UI tests) covering
+  core components, the processing pipeline, and settings persistence.
+  Continuous integration is on the [roadmap](docs/ROADMAP.md) and not yet set up.
 
 ### Getting Started
 
@@ -316,7 +318,23 @@ This folder contains:
 - `cut_plan.json` - Final cut decisions with reasons
 - `processing_summary.json` - Counts, thresholds, sync info
 
+### Contributing
+
+Bug fixes, tests, docs, and platform work are all welcome. Start with
+[CONTRIBUTING.md](CONTRIBUTING.md) — it covers setup, the test gate, and what
+gets merged. Easy entry points live in
+[docs/GOOD_FIRST_ISSUES.md](docs/GOOD_FIRST_ISSUES.md).
+
 ### License
 
-This project is licensed under the MIT License.  See `LICENSE` for
-details.
+The source code is licensed under the **Apache License 2.0** — see
+[LICENSE](LICENSE) and [NOTICE](NOTICE). Third-party components and their
+licenses are listed in [docs/THIRD_PARTY.md](docs/THIRD_PARTY.md).
+
+The "Zelqivo" name and logo are trademarks and are **not** covered by the code
+license — see [TRADEMARK.md](TRADEMARK.md).
+
+Plainly, so there are no surprises: the desktop app in this repo is free and
+open source, forever. A paid, closed-source Pro tier (cloud features for
+studios) is planned as a separate product by the same author — the Apache
+license makes that split legal and explicit.

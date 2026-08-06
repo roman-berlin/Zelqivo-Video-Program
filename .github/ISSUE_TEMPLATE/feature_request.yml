@@ -1,0 +1,31 @@
+name: Feature request
+description: Suggest an improvement or new capability
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Check [docs/ROADMAP.md](https://github.com/roman-berlin/Zelquivo-Video-Program/blob/master/docs/ROADMAP.md) first — it may
+        already be planned (or explicitly not planned).
+  - type: textarea
+    id: problem
+    attributes:
+      label: What problem does this solve?
+      description: Describe the situation where you needed this, not the solution.
+      placeholder: "When I edit 3-hour podcast recordings, I ..."
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed solution (optional)
+  - type: dropdown
+    id: help
+    attributes:
+      label: Would you be willing to help implement it?
+      options:
+        - "No"
+        - "Yes, with guidance"
+        - "Yes, I can build it"
+    validations:
+      required: true

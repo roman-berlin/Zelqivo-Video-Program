@@ -142,13 +142,14 @@ class TestPreflightManager:
         assert "Insufficient disk space" in result.critical_errors[0].message
         assert "25.0 GB required" in result.critical_errors[0].message
 
+    @patch("multicam_editor.logic.preflight.os.makedirs")
     @patch("multicam_editor.logic.preflight.probe")
     @patch("multicam_editor.logic.preflight.shutil.disk_usage")
     @patch("multicam_editor.logic.preflight.os.path.getsize")
     @patch("multicam_editor.logic.preflight.os.path.isfile", return_value=True)
     @patch("builtins.open", new_callable=MagicMock)
     @patch("multicam_editor.logic.preflight.os.remove")
-    def test_low_disk_space_warning(self, mock_remove, mock_file, mock_isfile, mock_getsize, mock_disk_usage, mock_probe):
+    def test_low_disk_space_warning(self, mock_remove, mock_file, mock_isfile, mock_getsize, mock_disk_usage, mock_probe, mock_makedirs):
         """Low disk space (< 3x but >= 2.5x) should generate warning."""
         # Mock valid probe
         mock_probe.return_value = ProbeResult(

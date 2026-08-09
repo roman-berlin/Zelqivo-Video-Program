@@ -11,8 +11,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **License changed from MIT to Apache-2.0**, with the real copyright holder
   (Roman Berlin) replacing the "Owner" placeholder. Apache-2.0 adds an explicit
   patent grant and trademark reservation, which the open-core model needs.
-- README: removed the false "CI ready" claim, added platform support and
-  contributing sections, and updated the license section.
+- README rewritten as a user-first landing page: what it does / doesn't do,
+  how it works, platform table, install guide, CLI reference, honest CI note,
+  and the new logo (a demo GIF slot is reserved). Also removed the false
+  "CI ready" claim. A social-preview banner was added under
+  `Installer/assets/icons/`.
 - Internal AI-agent scaffolding (`.clinerules`, `.ai_instructions/`,
   `.human_instructions/`) replaced by a single public `CLAUDE.md` with the
   project's engineering rules.

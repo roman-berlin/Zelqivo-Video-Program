@@ -14,7 +14,16 @@ Point it at your camera files — get back a cut video.
 
 </div>
 
-<!-- TODO(demo): 15–20s GIF above the fold — two camera angles in, the cut output. -->
+<div align="center">
+
+<img src="docs/assets/demo.gif" width="640" alt="Two camera inputs on top; Zelqivo's automatic cut below, following whoever is speaking">
+
+<sub>Real pipeline output. The green mic shows who is speaking on each camera —
+the bottom view is the cut Zelqivo produced automatically (rule-based switching
+with a stability window, which is why cuts land ~0.4s after a speaker change).
+Synthetic test cameras for now; a real-footage demo is coming.</sub>
+
+</div>
 
 You recorded a podcast with two or three cameras. Now someone has to sit in an
 editor and cut to whoever is talking, for the whole episode. Zelqivo does that

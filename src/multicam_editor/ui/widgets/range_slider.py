@@ -2,9 +2,9 @@
 from __future__ import annotations
 from typing import Tuple, Optional
 
-from PyQt6.QtCore import Qt, QRectF, pyqtSignal
-from PyQt6.QtGui import QPainter, QPen, QBrush
-from PyQt6.QtWidgets import QWidget
+from PySide6.QtCore import Qt, QRectF, Signal
+from PySide6.QtGui import QPainter, QPen, QBrush
+from PySide6.QtWidgets import QWidget
 
 
 class RangeSlider(QWidget):
@@ -18,7 +18,7 @@ class RangeSlider(QWidget):
     - Mouse handlers bail out if geometry is tiny.
     """
 
-    valuesChanged = pyqtSignal(int, int)
+    valuesChanged = Signal(int, int)
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)

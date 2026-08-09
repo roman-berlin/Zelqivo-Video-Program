@@ -8,8 +8,8 @@ import logging
 import os
 from typing import Callable
 
-from PyQt6.QtCore import QSettings, pyqtSignal
-from PyQt6.QtWidgets import (
+from PySide6.QtCore import QSettings, Signal
+from PySide6.QtWidgets import (
     QCheckBox,
     QComboBox,
     QFileDialog,
@@ -33,8 +33,8 @@ class ProcessingOptionsWidget(QGroupBox):
         outputFolderChanged: Emitted when output folder changes
     """
 
-    externalAudioChanged = pyqtSignal(bool, str)  # enabled, path
-    outputFolderChanged = pyqtSignal(str)  # folder path
+    externalAudioChanged = Signal(bool, str)  # enabled, path
+    outputFolderChanged = Signal(str)  # folder path
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__("Processing Options", parent)

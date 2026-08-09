@@ -2,11 +2,11 @@
 from __future__ import annotations
 from typing import Callable
 
-from PyQt6.QtCore import QObject, pyqtSignal, QThread, QCoreApplication, QTimer, Qt
+from PySide6.QtCore import QObject, Signal, QThread, QCoreApplication, QTimer, Qt
 
 
 class _GuiRunner(QObject):
-    _post = pyqtSignal(object)  # emits: Callable[[], None]
+    _post = Signal(object)  # emits: Callable[[], None]
 
     def __init__(self) -> None:
         super().__init__()

@@ -1,0 +1,63 @@
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  windows-installer:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install package
+        run: pip install -e ".[dev]"
+
+      # BtbN LGPL build — pinned to the "latest" autobuild asset. Do NOT swap in
+      # a -gpl zip: licensing depends on it (docs/THIRD_PARTY.md).
+      - name: Download LGPL ffmpeg (BtbN)
+        shell: pwsh
+        run: |
+          $url = "https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-master-latest-win64-lgpl.zip"
+          Invoke-WebRequest -Uri $url -OutFile ffmpeg-lgpl.zip
+          Expand-Archive ffmpeg-lgpl.zip -DestinationPath ffmpeg-lgpl
+          $bin = (Get-ChildItem ffmpeg-lgpl -Directory | Select-Object -First 1).FullName + "\bin"
+          "ZELQIVO_FFMPEG_DIR=$bin" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+
+      # DEPENDS on multicam_editor.spec reading ZELQIVO_FFMPEG_DIR
+      # (support added in this same change set — Phase 0.2 Slice D)
+      - name: Build app (PyInstaller)
+        run: pyinstaller multicam_editor.spec --clean --noconfirm
+
+      - name: Install Inno Setup
+        run: choco install innosetup -y
+
+      - name: Build installer
+        run: iscc Installer/setup1.iss
+
+      - name: Compute SHA256 checksums
+        shell: pwsh
+        run: |
+          $installer = Get-ChildItem Installer/build_installer/*.exe | Select-Object -First 1
+          $hash = (Get-FileHash $installer.FullName -Algorithm SHA256).Hash
+          "$hash  $($installer.Name)" | Out-File -FilePath SHA256SUMS.txt -Encoding utf8
+          Get-Content SHA256SUMS.txt
+
+      - name: Create GitHub Release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $installer = Get-ChildItem Installer/build_installer/*.exe | Select-Object -First 1
+          gh release create $env:GITHUB_REF_NAME `
+            --title "Zelqivo $env:GITHUB_REF_NAME" `
+            --notes-file CHANGELOG.md `
+            $installer.FullName SHA256SUMS.txt

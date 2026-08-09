@@ -2,14 +2,14 @@
 """Custom title bar widget for frameless window with modern dark mode styling."""
 from __future__ import annotations
 
-from PyQt6.QtCore import Qt, QPoint
-from PyQt6.QtWidgets import (
+from PySide6.QtCore import Qt, QPoint
+from PySide6.QtWidgets import (
     QWidget,
     QHBoxLayout,
     QLabel,
     QPushButton,
 )
-from PyQt6.QtGui import QMouseEvent
+from PySide6.QtGui import QMouseEvent
 
 
 class CustomTitleBar(QWidget):

@@ -2,7 +2,7 @@
 import time
 from unittest.mock import MagicMock, patch
 import pytest
-from PyQt6.QtWidgets import QApplication, QLabel
+from PySide6.QtWidgets import QApplication, QLabel
 from multicam_editor.ui.main_window import MainWindow
 
 @pytest.fixture(scope="session")

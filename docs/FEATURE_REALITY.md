@@ -13,7 +13,7 @@ This document provides an honest assessment of what actually exists in the codeb
 - **Partially Implemented**: 4
 - **UI-Only (No Backend)**: 4
 - **Stub/Placeholder**: 1
-- **Test Status**: ✅ All passed, 2 skipped (no failures) — 31 test files, 35% coverage
+- **Test Status**: ✅ 539 passed, 2 skipped — 32 test files, Qt tests included, 48% coverage (2 known Windows-path test failures on macOS/Linux)
 
 ---
 
@@ -30,6 +30,8 @@ This document provides an honest assessment of what actually exists in the codeb
 | **Decision Engine** | ✅ Fully Implemented | `logic/decision_engine.py` | Yes | Yes | Smoothing, hysteresis, confidence stability window |
 | **Processing Pipeline** | ✅ Fully Implemented | `logic/processing_pipeline.py` | Yes | Yes | Full orchestration: probe → align → diarize → decision → render → concat |
 | **Video Rendering** | ✅ Fully Implemented | `logic/video_merger.py` | Yes | Yes | Segment rendering, concatenation, single-pass mode |
+| **H.264 Encoder Auto-Selection** | ✅ Fully Implemented | `utils/ffmpeg.py` → `select_h264_encoder` | Yes | Yes | Hardware first (NVENC/QSV/AMF/VideoToolbox), then libopenh264/libx264; cached probe, logged, in QA summary |
+| **Custom FFmpeg Override** | ✅ Fully Implemented | Settings → FFmpeg, `utils/ffmpeg.py` | Yes | Yes | "Use my own FFmpeg" path picker; ffprobe found as sibling; applies without restart |
 | **FCPXML Export** | ✅ Fully Implemented | `logic/fcpxml_export.py` | Yes | Yes | Generates valid FCPXML 1.11 for Premiere/DaVinci |
 | **Audio Sync (Cross-correlation)** | ✅ Fully Implemented | `logic/audio_sync.py` | Yes | Yes | Requires `librosa` core dependency (always available) |
 | **External Audio** | ✅ Fully Implemented | `ui/main_window.py`, `logic/processing_pipeline.py` | Yes | Yes | Replace camera audio with external audio file |
@@ -55,7 +57,7 @@ This document provides an honest assessment of what actually exists in the codeb
 | **Export Dialog** | ✅ Fully Implemented | `ui/export_dialog.py` | Yes | Yes | Export processed video with format options |
 | **Undo/Redo** | ✅ Fully Implemented | `logic/commands.py`, `ui/main_window.py` | Yes | Yes | QUndoStack-based, Add/Remove/Trim commands |
 | **Debug Export Package** | ✅ Fully Implemented | `logic/debug_export.py` | No | Yes | ZIP containing logs, QA artifacts, environment info |
-| **Unit Tests** | ✅ All Passing | `tests/` (31 files) | N/A | N/A | All passed, 2 skipped. Qt tests must be excluded (5 files). 35% coverage |
+| **Unit Tests** | ✅ All Passing | `tests/` (32 files) | N/A | N/A | 539 passed, 2 skipped. Qt tests run via pytest-qt (offscreen). 48% coverage |
 
 ---
 
@@ -73,11 +75,11 @@ This document provides an honest assessment of what actually exists in the codeb
 
 ## Critical Findings
 
-### 1. Tests Require Qt Exclusion (RESOLVED)
-- **31 test files** in `tests/` directory
-- **All passed, 2 skipped** when Qt tests excluded (35% overall coverage)
-- **0 failures** after fixing exception handling in optional backends
-- **Command**: `pytest tests/ --ignore=tests/test_ui.py --ignore=tests/test_magic_settings.py --ignore=tests/test_file_list_time.py --ignore=tests/test_processing_worker_signals.py --ignore=tests/test_processing_time.py`
+### 1. Tests Require Qt Exclusion (RESOLVED — Qt tests now run)
+- **32 test files** in `tests/` directory, Qt tests included via `pytest-qt`
+- **539 passed, 2 skipped** (48% overall coverage); the 2 failures on
+  macOS/Linux are known Windows-path tests (see docs/GOOD_FIRST_ISSUES.md)
+- **Command**: `pytest --no-cov` (on macOS/Linux prefix with `QT_QPA_PLATFORM=offscreen`)
 - **Qt tests ignored**: 5 files require pytest-qt with virtual display
 - **Fix applied**: Broader exception handling in `PyannoteBackend.check_install()` to catch RuntimeError from broken torchvision
 
@@ -108,7 +110,7 @@ These features require optional packages not in the core install:
 |---------|--------|---------------|
 | FFmpeg | Required | `ffmpeg -version` |
 | FFprobe | Required | `ffprobe -version` |
-| Core (PyQt6, numpy) | Required | Auto-detected |
+| Core (PySide6, numpy) | Required | Auto-detected |
 | Energy VAD | Always available | Built-in |
 | Librosa/Audio Sync | Required (core) | Included in base install |
 | Pyannote | Optional | `pip install multicam-editor[ai]` |

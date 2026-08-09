@@ -2,7 +2,7 @@
 from __future__ import annotations
 from typing import Optional, Dict, List
 
-from PyQt6.QtCore import QRectF, QCoreApplication, QThread
+from PySide6.QtCore import QRectF, QCoreApplication, QThread
 
 # Import project classes from the parent ``core`` package.  This relative
 # import allows ``TimelineAdapter`` to function correctly when installed as

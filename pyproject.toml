@@ -10,16 +10,16 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "multicam-editor"
 version = "1.0.3"
-description = "Refactored multi‑camera video editor"
-authors = [{name = "Owner"}]
+description = "Automatic multicam editing for podcasts and interviews"
+authors = [{name = "Roman Berlin", email = "romario.berlin@gmail.com"}]
+license = {text = "Apache-2.0"}
 readme = "README.md"
 requires-python = ">=3.10"
 
 # Core dependencies: CPU-only operation without ML/AI
 dependencies = [
     "numpy",
-    "PyQt6",
-    "pyqt6-sip",
+    "PySide6>=6.8",
     "opencv-python",
     "ffmpeg-python",
     "moviepy",
@@ -40,6 +40,7 @@ ai = [
 dev = [
     "pytest",
     "pytest-cov",
+    "pytest-qt",
     "black",
     "ruff",
     "mypy",

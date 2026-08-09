@@ -1,323 +1,188 @@
-## MultiCamEditor – Refactored
+<div align="center">
 
-MultiCamEditor is a Python‑based desktop application for merging and editing
-multi‑camera video footage.  It presents a simple interface for previewing
-clips, trimming them and constructing a timeline by selecting the active
-speaker.  This repository contains a refactored, test‑backed version of
-MultiCamEditor with a modern project layout, automated tooling and a
-continuous integration workflow.
+<img src="Installer/assets/icons/Zelqivo.png" width="110" alt="Zelqivo logo">
 
-### Features
+# Zelqivo
 
-* **Modular structure** – code is organised under `src/multicam_editor` with
-  clear separation between core data structures, business logic and the GUI.
-* **Guard‑railed splitting** – clips can be split only when both resulting
-  segments exceed a minimum duration.  This prevents accidental creation of
-  unusable segments.
-* **Centralised logging** – the `logging_setup` module configures the root
-  logger once, ensuring consistent log formatting and preventing duplicate
-  handlers.
-* **Type hints & basic type checking** – public APIs are annotated and the
-  project is checked with `mypy` in permissive mode (strict mode is a roadmap
-  item for future improvement).
-* **Tests & coverage** – a small but meaningful test suite validates the
-  behaviour of core components and the logging configuration.  Running
-  `pytest -q` will report coverage information.
-* **CI ready** – a GitHub Actions workflow runs linting, type checking and
-  the tests against Python 3.10–3.12.
+**Automatic multicam editing for podcasts and interviews.**
+Point it at your camera files — get back a cut video.
 
-### Getting Started
+[![CI](https://github.com/roman-berlin/Zelqivo-Video-Program/actions/workflows/ci.yml/badge.svg?branch=master)](https://github.com/roman-berlin/Zelqivo-Video-Program/actions/workflows/ci.yml)
+![License](https://img.shields.io/badge/license-Apache--2.0-blue)
+![Python](https://img.shields.io/badge/python-3.10%E2%80%933.12-blue)
+![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20macOS%2FLinux%20(from%20source)-lightgrey)
+[![Good first issues](https://img.shields.io/github/issues/roman-berlin/Zelqivo-Video-Program/good%20first%20issue?label=good%20first%20issues)](https://github.com/roman-berlin/Zelqivo-Video-Program/labels/good%20first%20issue)
 
-MultiCamEditor offers two installation modes:
+</div>
 
-- **Core (default)**: CPU-only operation with energy-based speaker detection.
-  No torch/pyannote required. Ideal for non-technical users.
-- **AI extras**: Adds real AI diarization (pyannote.audio) and advanced audio
-  sync (librosa). Requires ~2GB disk space for models.
+<div align="center">
 
-#### Option A: Core Installation (Recommended for Most Users)
+<img src="docs/assets/demo.gif" width="640" alt="Two camera inputs on top; Zelqivo's automatic cut below, following whoever is speaking">
+
+<sub>Real pipeline output. The green mic shows who is speaking on each camera —
+the bottom view is the cut Zelqivo produced automatically (rule-based switching
+with a stability window, which is why cuts land ~0.4s after a speaker change).
+Synthetic test cameras for now; a real-footage demo is coming.</sub>
+
+</div>
+
+You recorded a podcast with two or three cameras. Now someone has to sit in an
+editor and cut to whoever is talking, for the whole episode. Zelqivo does that
+part for you: it detects who is speaking and builds the camera cuts
+automatically.
+
+## What it does
+
+- **Automatic speaker cuts** — analyses the audio, detects the active speaker,
+  and switches cameras with sensible pacing (minimum shot length, switch
+  cooldown, cuts on silences).
+- **Audio sync** — aligns your camera files to each other (and to an external
+  recorder track if you have one).
+- **Renders a finished MP4** — or exports the cut as **FCPXML**, so you can
+  keep polishing in Final Cut Pro / Premiere / DaVinci instead of starting
+  from zero.
+- **Runs on your machine** — no upload, no account, no cloud. A CPU-only mode
+  works everywhere; an optional AI mode improves speaker detection.
+- **QA overlay & artifacts** — optional debug view showing *why* it cut where
+  it cut.
+
+<div align="center">
+<img src="docs/screenshots/hero.png" width="760" alt="Zelqivo main window, dark theme, with two camera files loaded">
+</div>
+
+## What it doesn't do (yet)
+
+We keep an honest feature list in [docs/FEATURE_REALITY.md](docs/FEATURE_REALITY.md)
+and an ordered [roadmap](docs/ROADMAP.md). Headlines: no timeline editing, no
+trim UI, no multiview grid — today Zelqivo is an *automatic* editor, not a
+manual one. There is no installer download yet (coming with signed releases);
+for now you run it from source, below.
+
+## How it works
+
+```
+probe files → sync audio → detect active speaker → rule-based cuts → render / FCPXML
+```
+
+## Platform support
+
+| Platform | Status |
+|---|---|
+| Windows 10/11 | Primary target; installer build script included |
+| macOS | Runs from source; first-class support (menu bar, .dmg) is [in progress](docs/ROADMAP.md) |
+| Linux | Runs from source; community-supported |
+
+## Install and run (from source)
+
+You need Python 3.10–3.12 and [FFmpeg](https://ffmpeg.org/download.html) on
+your PATH.
 
 ```bash
+git clone https://github.com/roman-berlin/Zelqivo-Video-Program.git
+cd Zelqivo-Video-Program
 python -m venv .venv
-source .venv/bin/activate  # Windows: .venv\Scripts\activate
+source .venv/bin/activate        # Windows: .venv\Scripts\activate
 pip install -e .
+python -m multicam_editor
 ```
 
-The app will run in CPU-only mode with energy-based speaker switching.
-
-#### Option B: Full AI Installation
-
-```bash
-python -m venv .venv
-source .venv/bin/activate  # Windows: .venv\Scripts\activate
-pip install -e ".[ai]"
-```
-
-This enables:
-- Real pyannote.audio speaker diarization
-- Advanced librosa-based audio sync
-
-#### Option C: Development Installation
-
-```bash
-python -m venv .venv
-source .venv/bin/activate
-pip install -e ".[dev]"       # Core + dev tools (pytest, black, ruff, mypy)
-pip install -e ".[all]"       # Everything (core + ai + dev)
-```
-
-#### Check Backend Status
-
-To verify which features are available:
+That's the CPU-only mode with energy-based speaker detection — works on any
+machine. To check what's available in your install:
 
 ```bash
 python -m multicam_editor.utils.backends
 ```
 
-Output example:
-```
-=== MultiCamEditor Backend Status ===
-
-  [OK] Core (PyQt, numpy, ffmpeg)
-  [OK] Energy VAD (CPU speaker detection)
-  [--] Audio Sync (librosa, soundfile)
-       AI audio dependencies not installed...
-  [--] Pyannote (AI diarization)
-       pyannote.audio not installed...
-
-To enable AI features, install: pip install multicam-editor[ai]
-```
-
-#### Run the Test Suite
+### Optional: AI speaker detection
 
 ```bash
-# Run non-Qt tests (recommended, no display needed)
-pytest tests/ --ignore=tests/test_ui.py --ignore=tests/test_magic_settings.py --ignore=tests/test_file_list_time.py --ignore=tests/test_processing_worker_signals.py --ignore=tests/test_processing_time.py -v
-
-# Quick coverage report
-pytest --cov=src --cov-report=term-missing
+pip install -e ".[ai]"
 ```
 
-4. **Lint, format and type‑check the code**:
+This adds real diarization via `pyannote.audio` (~2 GB of models, needs a free
+Hugging Face account):
 
-   ```bash
-   ruff check .
-   black --check .
-   mypy .
-   ```
+1. Create an account at https://huggingface.co/join
+2. Accept the model terms at https://hf.co/pyannote/speaker-diarization-3.1
+3. Create a **Read** token at https://hf.co/settings/tokens, then run
+   `hf auth login` and paste it
 
-5. **Run the GUI** (optional):
+Models download to `~/.cache/huggingface/hub/` on first use and are cached
+after that.
 
-   ```bash
-   python -m multicam_editor
-   ```
+## Headless CLI
 
-   Note: Running the GUI requires installing PyQt6 and other multimedia
-   libraries which may not be available in minimal environments.  See the
-   original project documentation for details.
-
-### Development
-
-The project uses `black` for code formatting, `ruff` for linting and
-`mypy` for type checking.  Configuration for these tools lives in
-`pyproject.toml`.  Please format your code before committing:
-
-```bash
-black .
-ruff check --fix .
-```
-
-To run the full suite locally:
-
-```bash
-pytest --cov=src --cov-report=term-missing
-```
-
-### Packaging
-
-The repository is configured with a standard `pyproject.toml` and uses
-Setuptools to build a source distribution and wheel.  To build the
-package:
-
-```bash
-python -m pip install build
-python -m build
-```
-
-Artifacts will be placed in the `dist/` directory.
-
-#### Building Windows Executable
-
-Build a standalone Windows executable that runs on machines without Python installed.
-
-> **Note:** FFmpeg is bundled with the distribution. No separate FFmpeg install required on target machines.
-
-**Prerequisites:**
-- Python 3.10 or later
-- FFmpeg binaries at `C:\ffmpeg-7.1.1-full_build\bin\` (for bundling)
-- Development dependencies: `pip install -e ".[dev]"`
-
-**Quick Build (Recommended):**
-
-```powershell
-# Run from repo root - handles venv, deps, tests, and build
-.\build_exe.ps1
-```
-
-**Manual Build:**
-
-```powershell
-# 1. Activate venv
-.\.venv\Scripts\Activate.ps1
-
-# 2. Install deps
-pip install -e ".[dev]"
-
-# 3. Build
-pyinstaller multicam_editor.spec --clean --noconfirm
-```
-
-**Output:**
-```
-dist\MulticamEditor\MulticamEditor.exe
-```
-
-The `dist\MulticamEditor\` folder contains the EXE and all required DLLs/resources.
-Copy the entire folder to distribute the application.
-
-**Log Files:**
-
-Logs are automatically written to:
-- Windows: `%LOCALAPPDATA%\Zelqivo\logs\zelqivo.log`
-- macOS and Linux: `~/.zelqivo/logs/zelqivo.log`
-- Logs rotate automatically (5 files × 1MB max)
-
-**Troubleshooting:**
-
-| Error | Solution |
-|-------|----------|
-| "Qt platform plugin 'windows' not found" | Reinstall PyQt6: `pip uninstall PyQt6 PyQt6-Qt6 -y && pip install PyQt6` |
-| "ffmpeg not found" | FFmpeg should be bundled. Check `dist\MulticamEditor\tools\ffmpeg\` exists |
-| Missing VC++ Runtime | Install [VC++ Redistributable](https://aka.ms/vs/17/release/vc_redist.x64.exe) |
-| ImportError on launch | Rebuild with `--clean` flag |
-| No logs created | Check folder permissions for `%LOCALAPPDATA%\Zelqivo\` on Windows, or `~/.zelqivo/logs/` on macOS/Linux |
-| Black screen / no video | Ensure Qt Multimedia plugins are in `_internal\PyQt6\Qt6\plugins\multimedia\` |
-
-#### Smoke Test Checklist
-
-After building, verify the EXE works correctly (~2 minutes):
-
-1. [ ] Launch `dist\MulticamEditor\MulticamEditor.exe`
-2. [ ] Verify no console window appears (windowed mode)
-3. [ ] No "missing plugin" error dialogs
-4. [ ] Import 2+ video files via "Add Files" button
-5. [ ] (Optional) Add external audio file
-6. [ ] Play preview – video displays correctly
-7. [ ] Confirm audio plays during preview
-8. [ ] Seek on the timeline works
-9. [ ] Click "Create Video" (Process) and export
-10. [ ] Verify output MP4 plays in VLC or Windows Media Player
-11. [ ] Check logs exist at `%LOCALAPPDATA%\Zelqivo\logs\`
-
-
-### Real Speaker Diarization (pyannote.audio) – Windows Setup
-
-The REAL diarization backend uses `pyannote.audio` which requires HuggingFace
-authentication due to gated model access.
-
-#### 1. Create a HuggingFace Account
-Visit https://huggingface.co/join and create a free account.
-
-#### 2. Accept Gated Model Access
-Visit https://hf.co/pyannote/speaker-diarization-3.1 and click **"Agree and access repository"**.
-You must accept the model's user conditions before downloading.
-
-#### 3. Create a Read Token
-Go to https://hf.co/settings/tokens → **Create new token** → Select **Read** access → Copy the token.
-
-#### 4. Login to HuggingFace
-
-**Preferred (new CLI):**
-```powershell
-hf auth login
-# Paste your token when prompted
-```
-
-**Legacy CLI:**
-```powershell
-huggingface-cli login
-```
-
-#### 5. Verify Authentication
-The `hf whoami` command may not exist in all environments. Use these instead:
-
-```powershell
-# Option A: Check auth status
-hf auth status
-
-# Option B: Python verification
-python -c "from huggingface_hub import HfApi; print(HfApi().whoami())"
-```
-
-#### 6. First Run
-On first use, the model downloads to:
-- Windows: `C:\Users\<username>\.cache\huggingface\hub\`
-- Linux/Mac: `~/.cache/huggingface/hub/`
-
-Initial download is ~1-2GB. Subsequent runs use the cached model.
-
-#### Troubleshooting
-- **401 Unauthorized**: Run `hf auth login` again with a valid token
-- **Gated model not accepted**: Visit the model page and click "Agree and access"
-- **Model not found**: Check your internet connection and HuggingFace status
-
-### QA CLI Mode (Headless Processing)
-
-For automated QA and CI/CD pipelines, use the CLI entry point to run
-processing without the GUI:
+For scripting and QA there is a no-GUI entry point:
 
 ```bash
 python -m multicam_editor.cli \
   --videos cam1.mp4 cam2.mp4 \
   --external-audio podcast.wav \
-  --enable-speaker-switching true \
-  --mapping cam1:speaker_0 cam2:speaker_1 \
   --preset 1080p \
   --out output.mp4 \
   --export-artifacts true
 ```
 
-#### CLI Arguments
+| Argument | Required | Default | Description |
+|---|---|---|---|
+| `--videos` | Yes | – | Input video files (at least 2) |
+| `--external-audio` | No | – | External audio file to sync |
+| `--enable-speaker-switching` | No | true | Speaker-based camera switching |
+| `--preset` | No | 1080p | Output resolution: 1080p, 720p, 480p |
+| `--export-artifacts` | No | false | Write QA artifacts (cut plan, diarization JSON) |
+| `--verbose` / `-v` | No | false | Verbose logging |
 
-| Argument                     | Required | Default | Description                                      |
-|-----------------------------|----------|---------|--------------------------------------------------|
-| `--videos`                  | Yes      | -       | Input video files (at least 2)                   |
-| `--external-audio`          | No       | -       | External audio file to sync                      |
-| `--enable-speaker-switching`| No       | true    | Enable speaker-based camera switching            |
-| `--mapping`                 | No       | -       | Camera-to-speaker mapping (reserved for future)  |
-| `--preset`                  | No       | 1080p   | Output resolution: 1080p, 720p, 480p             |
-| `--out`                     | Yes      | -       | Output file path                                 |
-| `--export-artifacts`        | No       | true    | Export QA artifacts (diarization.json, etc.)     |
-| `--verbose` / `-v`          | No       | false   | Enable verbose logging                           |
+Exit code 0 = success. With `--export-artifacts true` the CLI prints a folder
+containing `cut_plan.json`, `diarization.json`, and `processing_summary.json`.
 
-#### Exit Codes
+**Log files** (attach these to bug reports):
+- Windows: `%LOCALAPPDATA%\Zelqivo\logs\zelqivo.log`
+- macOS and Linux: `~/.zelqivo/logs/zelqivo.log`
 
-- `0` - Success
-- `1` - Failure (check logs for details)
+Logs rotate automatically (5 files × 1 MB max).
 
-#### QA Artifacts
+If something breaks, the fastest way to get help is **Settings → Export Debug
+Package** in the app, then open an issue with the ZIP attached.
 
-When `--export-artifacts true`, the CLI prints the artifacts folder path:
+## Building the Windows installer
+
+```powershell
+.\build_exe.ps1
 ```
-Artifacts: C:\Users\...\AppData\Local\MultiCamEditor\qa_runs\run_20241221_143052
-```
 
-This folder contains:
-- `diarization.json` - Speaker segments detected
-- `cut_plan.json` - Final cut decisions with reasons
-- `processing_summary.json` - Counts, thresholds, sync info
+Builds a standalone EXE with PyInstaller (spec: `multicam_editor.spec`), then
+an Inno Setup installer (`Installer/setup1.iss`). The script currently expects
+FFmpeg binaries at `C:\ffmpeg-7.1.1-full_build\bin\` — making this
+configurable (and switching to an LGPL FFmpeg build) is the current top
+roadmap item; see [docs/planning/PHASE_0_2_PLAN.md](docs/planning/PHASE_0_2_PLAN.md).
 
-### License
+After building, smoke-test: launch the EXE → add 2 videos → preview & seek →
+export → play the MP4.
 
-This project is licensed under the MIT License.  See `LICENSE` for
-details.
+## Contributing
+
+Bug fixes, tests, docs, and platform work are all welcome — this project is
+young and the easy wins are mapped out:
+
+- [CONTRIBUTING.md](CONTRIBUTING.md) — setup, tests, style, what gets merged
+- [docs/GOOD_FIRST_ISSUES.md](docs/GOOD_FIRST_ISSUES.md) — 10 evening-sized
+  starter tasks, each one already open as a
+  [`good first issue`](https://github.com/roman-berlin/Zelqivo-Video-Program/labels/good%20first%20issue)
+- [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) — how the pieces fit together
+
+Current test baseline: **539 passed** (Qt tests included). CI is on the
+roadmap and not yet set up — honesty over badges.
+
+## License
+
+The source code is licensed under the **Apache License 2.0** — see
+[LICENSE](LICENSE) and [NOTICE](NOTICE). Third-party components and their
+licenses are listed in [docs/THIRD_PARTY.md](docs/THIRD_PARTY.md).
+
+The "Zelqivo" name and logo are trademarks and are **not** covered by the code
+license — see [TRADEMARK.md](TRADEMARK.md).
+
+Plainly, so there are no surprises: the desktop app in this repo is free and
+open source, forever. A paid, closed-source Pro tier (cloud features for
+studios) is planned as a separate product by the same author — the Apache
+license makes that split legal and explicit.

@@ -9,8 +9,8 @@ from __future__ import annotations
 import logging
 from typing import Optional
 
-from PyQt6.QtCore import Qt, QSettings, pyqtSignal
-from PyQt6.QtWidgets import (
+from PySide6.QtCore import Qt, QSettings, Signal
+from PySide6.QtWidgets import (
     QCheckBox,
     QComboBox,
     QDialog,
@@ -40,7 +40,7 @@ class MagicSettingsDialog(QDialog):
     """
     
     # Signal emitted when user clicks "Sync Now" button
-    sync_requested = pyqtSignal()
+    sync_requested = Signal()
 
     def __init__(self, parent: Optional[QWidget] = None) -> None:
         super().__init__(parent)

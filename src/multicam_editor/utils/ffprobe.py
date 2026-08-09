@@ -85,6 +85,17 @@ def _find_ffprobe() -> Optional[str]:
         return _ffprobe_path
     _ffprobe_checked = True
 
+    # 0. Sibling of the user-set custom ffmpeg (Settings dialog)
+    from .ffmpeg import _custom_ffmpeg_path, derive_sibling_tool
+
+    custom_ffmpeg = _custom_ffmpeg_path()
+    if custom_ffmpeg:
+        candidate = derive_sibling_tool(custom_ffmpeg, "ffprobe")
+        if os.path.isfile(candidate):
+            _ffprobe_path = candidate
+            logger.info("Using custom ffprobe from settings: %s", candidate)
+            return _ffprobe_path
+
     # 1. Check bundled location first (for frozen builds)
     bundled_path = _get_app_dir() / "tools" / "ffmpeg" / "ffprobe.exe"
     if bundled_path.is_file():

@@ -8,7 +8,7 @@ capturing all necessary state to perform and reverse their operations.
 
 from __future__ import annotations
 from typing import Optional, Any
-from PyQt6.QtGui import QUndoCommand
+from PySide6.QtGui import QUndoCommand
 
 
 class UndoableCommand(QUndoCommand):

@@ -1,5 +1,0 @@
-Starting...
-Cleared settings.
-Saved values.
-Loaded: theme='dark', sync=True
-SUCCESS

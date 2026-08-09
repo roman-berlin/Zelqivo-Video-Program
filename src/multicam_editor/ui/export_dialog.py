@@ -6,8 +6,8 @@ import logging
 import os
 from typing import Optional
 
-from PyQt6.QtCore import Qt, QThread, pyqtSignal
-from PyQt6.QtWidgets import (
+from PySide6.QtCore import Qt, QThread, Signal
+from PySide6.QtWidgets import (
     QComboBox,
     QDialog,
     QFileDialog,
@@ -19,7 +19,7 @@ from PyQt6.QtWidgets import (
     QVBoxLayout,
 )
 
-from ..utils.ffmpeg import FFmpegProcess, is_ffmpeg_available
+from ..utils.ffmpeg import FFmpegProcess, is_ffmpeg_available, select_h264_encoder
 
 logger = logging.getLogger(__name__)
 
@@ -27,9 +27,9 @@ logger = logging.getLogger(__name__)
 class ExportWorker(QThread):
     """Worker thread for exporting video with ffmpeg."""
 
-    progress = pyqtSignal(int)  # 0-100
-    finished_ok = pyqtSignal(str)  # output_path
-    error = pyqtSignal(str)  # error message
+    progress = Signal(int)  # 0-100
+    finished_ok = Signal(str)  # output_path
+    error = Signal(str)  # error message
 
     def __init__(
         self,
@@ -100,9 +100,14 @@ class ExportWorker(QThread):
         # "Original" or "Source" = no scaling
 
         # Video codec and bitrate
-        args.extend(["-c:v", "libx264", "-preset", "fast"])
+        encoder, quality_args = select_h264_encoder()
+        args.extend(["-c:v", encoder])
         if self._bitrate != "auto":
+            # Explicit bitrate replaces the quality args (CRF/CQ-style flags
+            # would override or conflict with -b:v on most encoders)
             args.extend(["-b:v", self._bitrate])
+        else:
+            args.extend(quality_args)
 
         # Audio codec
         args.extend(["-c:a", "aac", "-b:a", "192k"])
@@ -303,7 +308,7 @@ class ExportDialog(QDialog):
         self._output_path = output_path
 
         # Auto-close after 1 second
-        from PyQt6.QtCore import QTimer
+        from PySide6.QtCore import QTimer
         QTimer.singleShot(1000, self.accept)
 
     def _on_error(self, error_msg: str) -> None:

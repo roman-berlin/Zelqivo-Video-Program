@@ -2,8 +2,8 @@
 """Loading dialog with progress bar for video file loading."""
 from __future__ import annotations
 
-from PyQt6.QtCore import Qt, QTimer, pyqtSignal
-from PyQt6.QtWidgets import (
+from PySide6.QtCore import Qt, QTimer, Signal
+from PySide6.QtWidgets import (
     QDialog,
     QLabel,
     QProgressBar,
@@ -20,7 +20,7 @@ class LoadingDialog(QDialog):
     appropriate styling.
     """
     
-    cancelled = pyqtSignal()
+    cancelled = Signal()
 
     def __init__(self, parent: QWidget | None = None, title: str = "Loading Videos", dark_mode: bool = False):
         super().__init__(parent)

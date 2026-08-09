@@ -5,8 +5,8 @@ from __future__ import annotations
 
 import pytest
 from unittest.mock import patch, MagicMock
-from PyQt6.QtCore import QSettings
-from PyQt6.QtWidgets import QApplication
+from PySide6.QtCore import QSettings
+from PySide6.QtWidgets import QApplication
 
 
 # Ensure QApplication is created before importing UI modules

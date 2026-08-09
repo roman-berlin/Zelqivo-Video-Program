@@ -31,6 +31,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `docs/ROADMAP.md`, and `docs/GOOD_FIRST_ISSUES.md`.
 - `src/multicam_editor/ui/widgets/__init__.py` — the widgets folder was an
   implicit namespace package, which breaks some packaging tools.
+- New app logo (`Installer/assets/icons/`): PNG plus a multi-size `.ico`,
+  now committed so contributors can build the installer; the PyInstaller
+  spec uses it as the EXE icon.
 
 ### Removed
 - `requirements.txt` and `requirements.in` (duplicated and contradicted `pyproject.toml`).
@@ -38,8 +41,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Committed scratch files (`coverage_report.txt`, `test_new_results.txt`,
   `verification_result.txt`, `verify_settings_persistence.py`, `commands`,
   `shortcuts`); `.gitignore` now blocks them and no longer ignores the
-  installer script. (The app icon is also un-ignored but still needs to be
-  committed from the Windows machine.)
+  installer script and app icon that contributors need to build the installer.
 
 > The sections below were reconstructed from git history. These releases were never
 > tagged, so dates are approximate (taken from commit dates).

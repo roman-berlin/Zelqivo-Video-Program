@@ -22,8 +22,8 @@ understand — thank you for reading this far.
 You need Python 3.10–3.12 (3.12 recommended) and FFmpeg on your PATH.
 
 ```bash
-git clone https://github.com/roman-berlin/Zelquivo-Video-Program.git
-cd Zelquivo-Video-Program
+git clone https://github.com/roman-berlin/Zelqivo-Video-Program.git
+cd Zelqivo-Video-Program
 python3.12 -m venv .venv
 # Windows: .\.venv\Scripts\Activate.ps1   |   macOS/Linux: source .venv/bin/activate
 pip install -e ".[dev]"

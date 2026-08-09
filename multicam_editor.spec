@@ -129,7 +129,7 @@ exe = EXE(
     target_arch=None,
     codesign_identity=None,
     entitlements_file=None,
-    # icon='assets/icon.ico',  # Uncomment when icon is added
+    icon='Installer/assets/icons/Zelqivo.ico',
 )
 
 coll = COLLECT(

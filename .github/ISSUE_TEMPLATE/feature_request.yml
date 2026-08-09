@@ -5,7 +5,7 @@ body:
   - type: markdown
     attributes:
       value: |
-        Check [docs/ROADMAP.md](https://github.com/roman-berlin/Zelquivo-Video-Program/blob/master/docs/ROADMAP.md) first — it may
+        Check [docs/ROADMAP.md](https://github.com/roman-berlin/Zelqivo-Video-Program/blob/master/docs/ROADMAP.md) first — it may
         already be planned (or explicitly not planned).
   - type: textarea
     id: problem

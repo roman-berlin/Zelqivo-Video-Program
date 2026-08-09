@@ -1,0 +1,62 @@
+name: Bug report
+description: Something broke or behaved wrong
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting! The three fields below (OS, version, backends output)
+        let us reproduce most bugs without a round-trip — please fill them all.
+  - type: dropdown
+    id: os
+    attributes:
+      label: Operating system
+      options:
+        - Windows 11
+        - Windows 10
+        - macOS (Apple Silicon)
+        - macOS (Intel)
+        - Linux
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: App version
+      description: From the installer name or `pyproject.toml` if running from source
+      placeholder: "1.0.3"
+    validations:
+      required: true
+  - type: textarea
+    id: backends
+    attributes:
+      label: Backends output
+      description: "Run this in a terminal in the project folder and paste the output:"
+      placeholder: "python -m multicam_editor.utils.backends"
+      render: text
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. Add two videos (formats: ...)
+        2. Click ...
+        3. ...
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: What you expected vs what happened
+    validations:
+      required: true
+  - type: textarea
+    id: debugzip
+    attributes:
+      label: Debug package
+      description: >
+        In the app: Settings → "Export Debug Package" creates a ZIP with logs and
+        diagnostics (no media content). Drag the ZIP here. If the app won't start,
+        attach the log file instead — Windows: %LOCALAPPDATA%\Zelqivo\logs\zelqivo.log

@@ -49,7 +49,7 @@ def check_backends() -> Dict[str, BackendStatus]:
     Check which backends are available.
 
     Returns a dict with status for each backend:
-    - core: Always available (PyQt, numpy, ffmpeg-python)
+    - core: Always available (Qt, numpy, ffmpeg-python)
     - audio_sync: Requires librosa, soundfile
     - pyannote: Requires pyannote.audio, torch
     - energy_vad: Always available (CPU-only)
@@ -64,7 +64,7 @@ def check_backends() -> Dict[str, BackendStatus]:
 
     # Core - always available if we got this far
     results["core"] = BackendStatus(
-        name="Core (PyQt, numpy, ffmpeg)",
+        name="Core (Qt, numpy, ffmpeg)",
         available=True,
     )
 

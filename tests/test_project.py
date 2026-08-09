@@ -225,7 +225,7 @@ def test_no_duplicate_clips_on_add() -> None:
 
 def test_trim_command_undo_redo() -> None:
     """TrimCommand undo restores previous in/out, redo reapplies."""
-    from PyQt6.QtGui import QUndoStack
+    from PySide6.QtGui import QUndoStack
     from multicam_editor.logic.commands import TrimCommand
 
     p = Project()
@@ -251,7 +251,7 @@ def test_trim_command_undo_redo() -> None:
 
 def test_trim_command_coalesces_multiple_drags() -> None:
     """Multiple TrimCommands on same clip coalesce into one undo operation."""
-    from PyQt6.QtGui import QUndoStack
+    from PySide6.QtGui import QUndoStack
     from multicam_editor.logic.commands import TrimCommand
 
     p = Project()
@@ -284,7 +284,7 @@ def test_trim_command_coalesces_multiple_drags() -> None:
 
 def test_trim_command_different_clips_not_coalesced() -> None:
     """TrimCommands on different clips are NOT coalesced."""
-    from PyQt6.QtGui import QUndoStack
+    from PySide6.QtGui import QUndoStack
     from multicam_editor.logic.commands import TrimCommand
 
     p = Project()

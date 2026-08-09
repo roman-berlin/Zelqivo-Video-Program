@@ -6,8 +6,8 @@ import logging
 import os
 from typing import Optional
 
-from PyQt6.QtCore import Qt, QThread, pyqtSignal
-from PyQt6.QtWidgets import (
+from PySide6.QtCore import Qt, QThread, Signal
+from PySide6.QtWidgets import (
     QComboBox,
     QDialog,
     QFileDialog,
@@ -27,9 +27,9 @@ logger = logging.getLogger(__name__)
 class ExportWorker(QThread):
     """Worker thread for exporting video with ffmpeg."""
 
-    progress = pyqtSignal(int)  # 0-100
-    finished_ok = pyqtSignal(str)  # output_path
-    error = pyqtSignal(str)  # error message
+    progress = Signal(int)  # 0-100
+    finished_ok = Signal(str)  # output_path
+    error = Signal(str)  # error message
 
     def __init__(
         self,
@@ -303,7 +303,7 @@ class ExportDialog(QDialog):
         self._output_path = output_path
 
         # Auto-close after 1 second
-        from PyQt6.QtCore import QTimer
+        from PySide6.QtCore import QTimer
         QTimer.singleShot(1000, self.accept)
 
     def _on_error(self, error_msg: str) -> None:

@@ -7,10 +7,10 @@ import logging
 import os
 from typing import Dict, List, Optional
 
-from PyQt6.QtCore import Qt, QTimer, QUrl
-from PyQt6.QtMultimedia import QAudioOutput, QMediaPlayer
-from PyQt6.QtMultimediaWidgets import QVideoWidget
-from PyQt6.QtWidgets import (
+from PySide6.QtCore import Qt, QTimer, QUrl
+from PySide6.QtMultimedia import QAudioOutput, QMediaPlayer
+from PySide6.QtMultimediaWidgets import QVideoWidget
+from PySide6.QtWidgets import (
     QComboBox,
     QDialog,
     QGridLayout,

@@ -5,9 +5,9 @@ import os
 import time
 from typing import List
 
-from PyQt6.QtCore import Qt, QSettings, QTimer
-from PyQt6.QtGui import QAction, QKeySequence, QUndoStack
-from PyQt6.QtWidgets import (
+from PySide6.QtCore import Qt, QSettings, QTimer
+from PySide6.QtGui import QAction, QKeySequence, QUndoStack
+from PySide6.QtWidgets import (
     QCheckBox,
     QComboBox,
     QFileDialog,
@@ -60,7 +60,7 @@ from .progress_dialog import ProcessingProgressDialog
 from .loading_dialog import LoadingDialog
 from .gpu_warning_dialog import show_gpu_warning_dialog
 from .custom_title_bar import CustomTitleBar
-from PyQt6.QtWidgets import QMessageBox
+from PySide6.QtWidgets import QMessageBox
 
 
 
@@ -739,7 +739,7 @@ class MainWindow(QMainWindow):
         # Apply theme to app
         app = self.window().parentWidget()
         if app is None:
-            from PyQt6.QtWidgets import QApplication
+            from PySide6.QtWidgets import QApplication
             app = QApplication.instance()
         if app:
             apply_theme(app, theme)
@@ -749,7 +749,7 @@ class MainWindow(QMainWindow):
     def _apply_startup_theme(self) -> None:
         """Apply saved theme on application startup."""
         theme = self.settings.value("appearance/theme", "light", type=str)
-        from PyQt6.QtWidgets import QApplication
+        from PySide6.QtWidgets import QApplication
         app = QApplication.instance()
         if app:
             apply_theme(app, theme)
@@ -867,7 +867,7 @@ class MainWindow(QMainWindow):
 
     def _add_files_with_progress(self, videos: List[str], remaining: int) -> None:
         """Add files with a progress dialog for user feedback."""
-        from PyQt6.QtWidgets import QApplication
+        from PySide6.QtWidgets import QApplication
         
         # Check current theme for dialog styling
         is_dark = self.settings.value("appearance/theme", "light", type=str) == "dark"
@@ -1464,8 +1464,8 @@ class MainWindow(QMainWindow):
             self._toast("Video file not found")
             return
         
-        from PyQt6.QtCore import QUrl
-        from PyQt6.QtGui import QDesktopServices
+        from PySide6.QtCore import QUrl
+        from PySide6.QtGui import QDesktopServices
         
         url = QUrl.fromLocalFile(self._result_path)
         if QDesktopServices.openUrl(url):
@@ -1488,8 +1488,8 @@ class MainWindow(QMainWindow):
             self._toast("Output folder not available")
             return
         
-        from PyQt6.QtCore import QUrl
-        from PyQt6.QtGui import QDesktopServices
+        from PySide6.QtCore import QUrl
+        from PySide6.QtGui import QDesktopServices
         
         url = QUrl.fromLocalFile(self._output_folder)
         if QDesktopServices.openUrl(url):
@@ -1607,7 +1607,7 @@ class MainWindow(QMainWindow):
         Also includes external audio if enabled.
         """
         from ..logic.audio_sync import align_cameras, CameraAlignment
-        from PyQt6.QtWidgets import QApplication, QProgressDialog
+        from PySide6.QtWidgets import QApplication, QProgressDialog
         
         paths = self.file_list.all_paths()
         if len(paths) < 2:

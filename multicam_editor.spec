@@ -19,17 +19,15 @@ from PyInstaller.utils.hooks import collect_data_files, collect_submodules
 
 block_cipher = None
 
-# Collect all PyQt6 submodules to ensure complete Qt functionality
+# Collect all PySide6 submodules to ensure complete Qt functionality
 hiddenimports = [
     # Core Qt modules
-    'PyQt6.QtCore',
-    'PyQt6.QtGui',
-    'PyQt6.QtWidgets',
+    'PySide6.QtCore',
+    'PySide6.QtGui',
+    'PySide6.QtWidgets',
     # Multimedia modules (required for video preview)
-    'PyQt6.QtMultimedia',
-    'PyQt6.QtMultimediaWidgets',
-    # SIP bindings
-    'PyQt6.sip',
+    'PySide6.QtMultimedia',
+    'PySide6.QtMultimediaWidgets',
     # Standard library modules that may be dynamically imported
     'json',
     'logging.handlers',
@@ -131,7 +129,7 @@ exe = EXE(
     target_arch=None,
     codesign_identity=None,
     entitlements_file=None,
-    # icon='assets/icon.ico',  # Uncomment when icon is added
+    icon='Installer/assets/icons/Zelqivo.ico',
 )
 
 coll = COLLECT(

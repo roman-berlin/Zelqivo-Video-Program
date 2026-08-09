@@ -11,6 +11,8 @@ __pycache__/
 dist/
 build/
 *.egg-info/
+*.zip
+*.exe
 
 # PyTest / coverage
 .coverage
@@ -27,10 +29,12 @@ build/
 # Editors and IDEs
 .idea/
 .vscode/
-Installer/build_installer/Zelqivo_Setup_1.0.1.zip
-Installer/build_installer/Zelqivo_Setup_1.0.1.exe
-Installer/assets/icons/Zelqivo.ico
 .agent/workflows/build-exe.md
-Installer/setup1.iss
-*.zip
-*.exe
+
+# Local scratch output (never commit)
+coverage_report.txt
+test_new_results.txt
+verification_result.txt
+verify_settings_persistence.py
+commands
+shortcuts

@@ -15,7 +15,7 @@ from dataclasses import dataclass, field
 from enum import Enum, auto
 from typing import Callable, List, Optional
 
-from PyQt6.QtCore import QSettings
+from PySide6.QtCore import QSettings
 
 from ..utils.ffprobe import probe, ProbeResult
 from ..utils.signals import ProcessingSignals

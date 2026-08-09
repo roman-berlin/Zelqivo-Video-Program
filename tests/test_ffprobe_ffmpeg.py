@@ -474,9 +474,11 @@ class TestCustomFfmpegOverride:
     """The "Use my own FFmpeg" setting (ffmpeg/custom_path) wins discovery."""
 
     def test_derive_sibling_tool_replaces_only_filename(self):
-        assert (
-            ffmpeg.derive_sibling_tool("/opt/ffmpeg/bin/ffmpeg", "ffprobe")
-            == "/opt/ffmpeg/bin/ffprobe"
+        from pathlib import Path
+
+        # str(Path(...)) normalizes separators per platform (Windows uses "\\")
+        assert ffmpeg.derive_sibling_tool("/opt/ffmpeg/bin/ffmpeg", "ffprobe") == str(
+            Path("/opt/ffmpeg/bin/ffprobe")
         )
         # bare PATH-style command
         assert ffmpeg.derive_sibling_tool("ffmpeg", "ffplay") == "ffplay"

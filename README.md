@@ -136,7 +136,10 @@ Exit code 0 = success. With `--export-artifacts true` the CLI prints a folder
 containing `cut_plan.json`, `diarization.json`, and `processing_summary.json`.
 
 **Log files** (attach these to bug reports):
-- Windows: `%LOCALAPPDATA%\Zelqivo\logs\zelqivo.log` (rotates automatically)
+- Windows: `%LOCALAPPDATA%\Zelqivo\logs\zelqivo.log`
+- macOS and Linux: `~/.zelqivo/logs/zelqivo.log`
+
+Logs rotate automatically (5 files × 1 MB max).
 
 If something breaks, the fastest way to get help is **Settings → Export Debug
 Package** in the app, then open an issue with the ZIP attached.

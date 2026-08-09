@@ -189,6 +189,7 @@ Copy the entire folder to distribute the application.
 
 Logs are automatically written to:
 - Windows: `%LOCALAPPDATA%\Zelqivo\logs\zelqivo.log`
+- macOS and Linux: `~/.zelqivo/logs/zelqivo.log`
 - Logs rotate automatically (5 files × 1MB max)
 
 **Troubleshooting:**
@@ -199,7 +200,7 @@ Logs are automatically written to:
 | "ffmpeg not found" | FFmpeg should be bundled. Check `dist\MulticamEditor\tools\ffmpeg\` exists |
 | Missing VC++ Runtime | Install [VC++ Redistributable](https://aka.ms/vs/17/release/vc_redist.x64.exe) |
 | ImportError on launch | Rebuild with `--clean` flag |
-| No logs created | Check folder permissions for `%LOCALAPPDATA%\Zelqivo\` |
+| No logs created | Check folder permissions for `%LOCALAPPDATA%\Zelqivo\` on Windows, or `~/.zelqivo/logs/` on macOS/Linux |
 | Black screen / no video | Ensure Qt Multimedia plugins are in `_internal\PyQt6\Qt6\plugins\multimedia\` |
 
 #### Smoke Test Checklist

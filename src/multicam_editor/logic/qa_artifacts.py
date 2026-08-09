@@ -15,6 +15,7 @@ from typing import Any, List, Optional
 
 from PySide6.QtCore import QStandardPaths
 
+from ..utils.ffmpeg import select_h264_encoder
 from .active_speaker import SpeakerSegment
 
 logger = logging.getLogger(__name__)
@@ -128,6 +129,11 @@ def export_processing_summary(
     camera_alignments: Optional[List[dict[str, Any]]] = None,
 ) -> None:
     """Export processing_summary.json with counts and settings."""
+    try:
+        h264_encoder = select_h264_encoder()[0]
+    except RuntimeError as e:
+        logger.debug("H.264 encoder unavailable for summary: %s", e, exc_info=True)
+        h264_encoder = "unavailable"
     data = {
         "counts": {
             "num_speakers": num_speakers,
@@ -135,6 +141,7 @@ def export_processing_summary(
             "num_cuts": num_cuts,
             "total_duration_ms": total_duration_ms,
         },
+        "h264_encoder": h264_encoder,
         "thresholds": thresholds,
         "external_audio_sync": sync_info or {"used": False},
         "camera_alignments": camera_alignments or [],

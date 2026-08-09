@@ -12,6 +12,8 @@ from PySide6.QtWidgets import (
     QSpinBox,
     QComboBox,
     QVBoxLayout,
+    QHBoxLayout,
+    QLineEdit,
     QGroupBox,
     QPushButton,
     QMessageBox,
@@ -191,6 +193,29 @@ class SettingsDialog(QDialog):
         qa_group.setLayout(qa_layout)
         advanced_layout.addWidget(qa_group)
 
+        # FFmpeg override ("Use my own FFmpeg")
+        ffmpeg_group = QGroupBox("FFmpeg")
+        ffmpeg_layout = QHBoxLayout()
+
+        self.edit_custom_ffmpeg = QLineEdit()
+        self.edit_custom_ffmpeg.setReadOnly(True)
+        self.edit_custom_ffmpeg.setPlaceholderText("Bundled / system FFmpeg (default)")
+        self.edit_custom_ffmpeg.setToolTip(
+            "Use my own FFmpeg: point at an ffmpeg binary you installed yourself.\n"
+            "Enables encoders the bundled build may lack (e.g. libx264).\n"
+            "ffprobe is expected next to it. Applies to the next processing run."
+        )
+        self.btn_browse_ffmpeg = QPushButton("Browse…")
+        self.btn_browse_ffmpeg.clicked.connect(self._on_browse_ffmpeg)
+        self.btn_clear_ffmpeg = QPushButton("Clear")
+        self.btn_clear_ffmpeg.clicked.connect(lambda: self.edit_custom_ffmpeg.setText(""))
+
+        ffmpeg_layout.addWidget(self.edit_custom_ffmpeg, 1)
+        ffmpeg_layout.addWidget(self.btn_browse_ffmpeg)
+        ffmpeg_layout.addWidget(self.btn_clear_ffmpeg)
+        ffmpeg_group.setLayout(ffmpeg_layout)
+        advanced_layout.addWidget(ffmpeg_group)
+
         # Maintenance / Support
         maint_group = QGroupBox("Maintenance")
         maint_layout = QVBoxLayout()
@@ -314,6 +339,11 @@ class SettingsDialog(QDialog):
             self.settings.value("qa_overlay/enabled", False, type=bool)
         )
 
+        # FFmpeg override
+        self.edit_custom_ffmpeg.setText(
+            self.settings.value("ffmpeg/custom_path", "", type=str)
+        )
+
         # Apply initial UI state
         self._on_audio_mode_changed(audio_mode)
 
@@ -359,7 +389,22 @@ class SettingsDialog(QDialog):
         # QA Overlay
         self.settings.setValue("qa_overlay/enabled", self.check_qa_overlay.isChecked())
 
+        # FFmpeg override — re-run discovery so it applies without a restart
+        self.settings.setValue("ffmpeg/custom_path", self.edit_custom_ffmpeg.text().strip())
+        from ..utils import ffmpeg as ffmpeg_utils
+        from ..utils import ffprobe as ffprobe_utils
+
+        ffmpeg_utils.reset_ffmpeg_detection()
+        ffmpeg_utils.reset_encoder_selection()
+        ffprobe_utils.reset_ffprobe_detection()
+
         self.accept()
+
+    def _on_browse_ffmpeg(self) -> None:
+        """Pick a user-installed ffmpeg binary for the custom-FFmpeg override."""
+        path, _ = QFileDialog.getOpenFileName(self, "Select ffmpeg executable")
+        if path:
+            self.edit_custom_ffmpeg.setText(path)
 
     def _on_export_debug_clicked(self) -> None:
         """Trigger debug package export."""

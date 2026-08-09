@@ -40,12 +40,39 @@ def _get_app_dir() -> Path:
         return Path(__file__).resolve().parent.parent.parent.parent
 
 
+def derive_sibling_tool(ffmpeg_path: str, tool: str) -> str:
+    """Derive a sibling tool path (ffprobe/ffplay) from an ffmpeg path.
+
+    Replaces only the file-name component, so directories containing
+    "ffmpeg" (e.g. /opt/ffmpeg/bin/ffmpeg) stay intact.
+    """
+    p = Path(ffmpeg_path)
+    return str(p.with_name(tool + p.suffix))
+
+
+def _custom_ffmpeg_path() -> Optional[str]:
+    """User-set "Use my own FFmpeg" override from the Settings dialog, if valid."""
+    from PySide6.QtCore import QSettings
+
+    path = QSettings("Zelqivo", "Zelqivo").value("ffmpeg/custom_path", "", type=str)
+    if path and os.path.isfile(path):
+        return path
+    return None
+
+
 def _find_ffmpeg() -> Optional[str]:
     """Locate ffmpeg executable. Returns path or None if not found."""
     global _ffmpeg_path, _ffmpeg_checked
     if _ffmpeg_checked:
         return _ffmpeg_path
     _ffmpeg_checked = True
+
+    # 0. User-set override from Settings ("Use my own FFmpeg")
+    custom = _custom_ffmpeg_path()
+    if custom:
+        _ffmpeg_path = custom
+        logger.info("Using custom ffmpeg from settings: %s", custom)
+        return _ffmpeg_path
 
     # 1. Check bundled location first (for frozen builds)
     bundled_path = _get_app_dir() / "tools" / "ffmpeg" / "ffmpeg.exe"
@@ -108,6 +135,103 @@ def reset_ffmpeg_detection() -> None:
     global _ffmpeg_path, _ffmpeg_checked
     _ffmpeg_path = None
     _ffmpeg_checked = False
+
+
+# H.264 encoder preference table: hardware first, then software fallbacks.
+# Quality args target visual parity with the libx264 flags previously
+# hardcoded at the call sites. libopenh264 has no CRF mode, so it uses a
+# fixed bitrate — quality may trail CRF-based encodes on complex footage.
+_H264_ENCODERS: List[tuple[str, List[str]]] = [
+    ("h264_nvenc", ["-rc", "vbr", "-cq", "23", "-preset", "p4"]),
+    ("h264_qsv", ["-global_quality", "23"]),
+    ("h264_amf", ["-rc", "cqp", "-qp_i", "23", "-qp_p", "23"]),
+    ("h264_videotoolbox", ["-q:v", "55"]),
+    ("libopenh264", ["-b:v", "6M"]),
+    ("libx264", ["-preset", "fast", "-crf", "18"]),
+]
+_HARDWARE_H264_ENCODERS = frozenset(
+    {"h264_nvenc", "h264_qsv", "h264_amf", "h264_videotoolbox"}
+)
+
+_available_encoders: Optional[frozenset[str]] = None
+_selected_encoders: dict[bool, tuple[str, List[str]]] = {}
+
+
+def _probe_encoders() -> frozenset[str]:
+    """Return encoder names supported by the ffmpeg build (probed once, cached)."""
+    global _available_encoders
+    if _available_encoders is not None:
+        return _available_encoders
+
+    ffmpeg = _find_ffmpeg()
+    if not ffmpeg:
+        raise RuntimeError("ffmpeg not found; cannot select an H.264 encoder")
+
+    try:
+        result = subprocess.run(
+            [ffmpeg, "-hide_banner", "-encoders"],
+            capture_output=True,
+            timeout=10,
+            creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
+        )
+    except (OSError, subprocess.SubprocessError) as e:
+        raise RuntimeError(f"Failed to probe ffmpeg encoders: {e}") from e
+
+    names = set()
+    for line in result.stdout.decode("utf-8", errors="replace").splitlines():
+        # Encoder lines look like " V....D libx264   H.264 / AVC ..."
+        # Legend lines (" V..... = Video") are filtered by the "=" check.
+        parts = line.split()
+        if len(parts) >= 2 and parts[0][0] in "VAS" and parts[1] != "=":
+            names.add(parts[1])
+
+    _available_encoders = frozenset(names)
+    return _available_encoders
+
+
+def select_h264_encoder(prefer_hardware: bool = True) -> tuple[str, List[str]]:
+    """Select the best available H.264 encoder for this ffmpeg build.
+
+    Probes ``ffmpeg -hide_banner -encoders`` once (cached module-level).
+    Preference: h264_nvenc > h264_qsv > h264_amf > h264_videotoolbox
+    > libopenh264 > libx264 (libx264 only if present in the user's own
+    ffmpeg — never bundled, for LGPL licensing).
+
+    Args:
+        prefer_hardware: If False, skip hardware encoders entirely and
+            pick the best software encoder.
+
+    Returns:
+        Tuple of (encoder_name, quality_args) to splice after "-c:v".
+
+    Raises:
+        RuntimeError: If ffmpeg is missing or has no supported H.264 encoder.
+    """
+    cached = _selected_encoders.get(prefer_hardware)
+    if cached is not None:
+        return cached[0], list(cached[1])
+
+    available = _probe_encoders()
+    for name, quality_args in _H264_ENCODERS:
+        if not prefer_hardware and name in _HARDWARE_H264_ENCODERS:
+            continue
+        if name in available:
+            logger.info("Selected H.264 encoder: %s", name)
+            _selected_encoders[prefer_hardware] = (name, quality_args)
+            return name, list(quality_args)
+
+    raise RuntimeError(
+        "No supported H.264 encoder found in this ffmpeg build (checked: "
+        + ", ".join(name for name, _ in _H264_ENCODERS)
+        + ")"
+    )
+
+
+def reset_encoder_selection() -> None:
+    """Reset encoder probe/selection caches. Useful for testing."""
+    global _available_encoders
+    _available_encoders = None
+    _selected_encoders.clear()
 
 
 @dataclass
@@ -343,10 +467,11 @@ def build_trim_args(
         # For stream copy, avoid negative timestamps
         args.extend(["-avoid_negative_ts", "make_zero"])
     else:
+        encoder, quality_args = select_h264_encoder()
         # Re-encode with proper timestamp handling to avoid black frames
         args.extend([
-            "-c:v", "libx264",
-            "-preset", "fast",
+            "-c:v", encoder,
+            *quality_args,
             "-c:a", "aac",
             # Reset timestamps to start at 0 - critical for seamless concat
             "-avoid_negative_ts", "make_zero",
@@ -450,9 +575,10 @@ def build_segment_with_effects_args(
         args.extend(["-af", ",".join(afilters)])
 
     # Re-encode with proper timestamp handling to avoid black frames
+    encoder, quality_args = select_h264_encoder()
     args.extend([
-        "-c:v", "libx264",
-        "-preset", "fast",
+        "-c:v", encoder,
+        *quality_args,
         "-c:a", "aac",
         # Reset timestamps to start at 0 - critical for seamless concat
         "-avoid_negative_ts", "make_zero",
@@ -639,9 +765,10 @@ def build_segment_with_qa_overlay_args(
         args.extend(["-af", ",".join(afilters)])
 
     # Re-encode with proper timestamp handling to avoid black frames
+    encoder, quality_args = select_h264_encoder()
     args.extend([
-        "-c:v", "libx264",
-        "-preset", "fast",
+        "-c:v", encoder,
+        *quality_args,
         "-c:a", "aac",
         # Reset timestamps to start at 0 - critical for seamless concat
         "-avoid_negative_ts", "make_zero",
@@ -770,6 +897,14 @@ def build_single_pass_filter_complex_args(
     # Join all filter parts
     filter_complex = ";".join(filter_parts)
 
+    # Select encoder before creating the temp filter script so a failure
+    # here cannot leak the temp file.
+    try:
+        encoder, quality_args = select_h264_encoder()
+    except RuntimeError as e:
+        logger.error("Cannot render single-pass: %s", e)
+        return [], None
+
     # Write filter_complex to a temp file to avoid Windows command-line length limits
     # This prevents WinError 206: "The filename or extension is too long"
     filter_script_path = get_temp_output_path(suffix=".txt")
@@ -785,9 +920,8 @@ def build_single_pass_filter_complex_args(
     args.extend([
         "-filter_complex_script", filter_script_path,
         "-map", "[outv]",
-        "-c:v", "libx264",
-        "-preset", "fast",
-        "-crf", "18",  # High quality
+        "-c:v", encoder,
+        *quality_args,
         "-pix_fmt", "yuv420p",
         "-fps_mode", "cfr",
         "-an",  # No audio (added separately)

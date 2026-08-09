@@ -7,6 +7,7 @@
 **Automatic multicam editing for podcasts and interviews.**
 Point it at your camera files — get back a cut video.
 
+[![CI](https://github.com/roman-berlin/Zelqivo-Video-Program/actions/workflows/ci.yml/badge.svg?branch=master)](https://github.com/roman-berlin/Zelqivo-Video-Program/actions/workflows/ci.yml)
 ![License](https://img.shields.io/badge/license-Apache--2.0-blue)
 ![Python](https://img.shields.io/badge/python-3.10%E2%80%933.12-blue)
 ![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20macOS%2FLinux%20(from%20source)-lightgrey)
@@ -44,6 +45,10 @@ automatically.
   works everywhere; an optional AI mode improves speaker detection.
 - **QA overlay & artifacts** — optional debug view showing *why* it cut where
   it cut.
+
+<div align="center">
+<img src="docs/screenshots/hero.png" width="760" alt="Zelqivo main window, dark theme, with two camera files loaded">
+</div>
 
 ## What it doesn't do (yet)
 

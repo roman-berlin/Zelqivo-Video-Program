@@ -27,6 +27,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `pytest-qt` added to the dev extras so the Qt test files run in the standard suite.
 
 ### Added
+- **Runtime H.264 encoder selection**: hardware encoders (NVIDIA NVENC, Intel
+  QSV, AMD AMF, Apple VideoToolbox) are detected and preferred automatically,
+  with `libopenh264`/`libx264` as software fallbacks — replacing six hardcoded
+  `libx264` sites. The chosen encoder is logged and recorded in the QA
+  artifacts summary.
+- **"Use my own FFmpeg" setting** (Settings → FFmpeg): point Zelqivo at an
+  ffmpeg binary you installed yourself; ffprobe is found next to it. Takes
+  effect without a restart.
+- **Continuous integration**: GitHub Actions now run the full test suite
+  (Qt included) on Linux, Windows, and macOS across Python 3.10–3.12, plus an
+  advisory lint job; a release workflow builds the Windows installer from a
+  version tag using an LGPL FFmpeg build, with SHA-256 checksums.
+- Real app screenshots under `docs/screenshots/`, including a branded hero shot
+  in the README.
 - `tests/test_settings_roundtrip.py`: proves `QSettings.value(..., type=X)` coercion
   for bool/int/float/str plus missing-key defaults, guarding future PySide6 bumps.
 - Open-source community files: `CONTRIBUTING.md`, `CODE_OF_CONDUCT.md`
@@ -39,7 +53,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   now committed so contributors can build the installer; the PyInstaller
   spec uses it as the EXE icon.
 
+- When `libx264` is the selected encoder, all renders now use CRF 18 explicitly
+  (four call sites previously inherited FFmpeg's default CRF 23) — slightly
+  larger intermediates, better final quality.
+- Windows build scripts (`build_exe.ps1`, `multicam_editor.spec`) read the
+  FFmpeg location from the `ZELQIVO_FFMPEG_DIR` environment variable instead of
+  a hardcoded path, and fail with a clear message pointing at BtbN LGPL builds.
+
 ### Removed
+- The GPL `imageio-ffmpeg` fallback binary is no longer bundled into the
+  installer (licensing; see `docs/THIRD_PARTY.md`).
 - `requirements.txt` and `requirements.in` (duplicated and contradicted `pyproject.toml`).
 - `PyQt6.sip` hidden import and `pyqt6-sip` dependency (PySide6 uses shiboken6, bundled automatically).
 - Committed scratch files (`coverage_report.txt`, `test_new_results.txt`,

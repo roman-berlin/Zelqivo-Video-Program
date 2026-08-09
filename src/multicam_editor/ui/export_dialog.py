@@ -19,7 +19,7 @@ from PySide6.QtWidgets import (
     QVBoxLayout,
 )
 
-from ..utils.ffmpeg import FFmpegProcess, is_ffmpeg_available
+from ..utils.ffmpeg import FFmpegProcess, is_ffmpeg_available, select_h264_encoder
 
 logger = logging.getLogger(__name__)
 
@@ -100,9 +100,14 @@ class ExportWorker(QThread):
         # "Original" or "Source" = no scaling
 
         # Video codec and bitrate
-        args.extend(["-c:v", "libx264", "-preset", "fast"])
+        encoder, quality_args = select_h264_encoder()
+        args.extend(["-c:v", encoder])
         if self._bitrate != "auto":
+            # Explicit bitrate replaces the quality args (CRF/CQ-style flags
+            # would override or conflict with -b:v on most encoders)
             args.extend(["-b:v", self._bitrate])
+        else:
+            args.extend(quality_args)
 
         # Audio codec
         args.extend(["-c:a", "aac", "-b:a", "192k"])

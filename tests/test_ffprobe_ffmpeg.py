@@ -42,10 +42,12 @@ def reset_caches():
     ffprobe.clear_cache()
     ffprobe.reset_ffprobe_detection()
     ffmpeg.reset_ffmpeg_detection()
+    ffmpeg.reset_encoder_selection()
     yield
     ffprobe.clear_cache()
     ffprobe.reset_ffprobe_detection()
     ffmpeg.reset_ffmpeg_detection()
+    ffmpeg.reset_encoder_selection()
 
 
 class TestFFprobe:
@@ -241,12 +243,17 @@ class TestFFmpeg:
         assert "copy" in args
 
     def test_build_trim_args_reencode(self):
-        """build_trim_args with re-encode uses libx264."""
-        args = ffmpeg.build_trim_args(
-            "/input.mp4", "/output.mp4",
-            start_ms=0, end_ms=1000, copy_codec=False
-        )
+        """build_trim_args with re-encode uses the selected H.264 encoder."""
+        with patch(
+            "multicam_editor.utils.ffmpeg.select_h264_encoder",
+            return_value=("libx264", ["-preset", "fast", "-crf", "18"]),
+        ):
+            args = ffmpeg.build_trim_args(
+                "/input.mp4", "/output.mp4",
+                start_ms=0, end_ms=1000, copy_codec=False
+            )
         assert "libx264" in args
+        assert "-crf" in args
 
     def test_has_effects_none(self):
         """has_effects returns False when no effects applied."""
@@ -461,3 +468,42 @@ class TestProbeResult:
         """fps_str returns formatted fps."""
         result = ffprobe.ProbeResult(duration_ms=1000, fps=29.97)
         assert result.fps_str() == "29.97"
+
+
+class TestCustomFfmpegOverride:
+    """The "Use my own FFmpeg" setting (ffmpeg/custom_path) wins discovery."""
+
+    def test_derive_sibling_tool_replaces_only_filename(self):
+        assert (
+            ffmpeg.derive_sibling_tool("/opt/ffmpeg/bin/ffmpeg", "ffprobe")
+            == "/opt/ffmpeg/bin/ffprobe"
+        )
+        # bare PATH-style command
+        assert ffmpeg.derive_sibling_tool("ffmpeg", "ffplay") == "ffplay"
+        # suffix is preserved
+        assert ffmpeg.derive_sibling_tool("tools/ffmpeg.exe", "ffprobe").endswith(
+            "ffprobe.exe"
+        )
+
+    def test_custom_ffmpeg_wins_discovery(self, tmp_path, monkeypatch):
+        fake = tmp_path / "ffmpeg" / "bin" / "ffmpeg"
+        fake.parent.mkdir(parents=True)
+        fake.write_text("")
+        monkeypatch.setattr(ffmpeg, "_custom_ffmpeg_path", lambda: str(fake))
+        assert ffmpeg._find_ffmpeg() == str(fake)
+
+    def test_custom_ffprobe_found_as_sibling(self, tmp_path, monkeypatch):
+        # "ffmpeg" appears twice in the path — sibling derivation must not
+        # rewrite the directory component (regression guard for str.replace)
+        bin_dir = tmp_path / "ffmpeg" / "bin"
+        bin_dir.mkdir(parents=True)
+        (bin_dir / "ffmpeg").write_text("")
+        (bin_dir / "ffprobe").write_text("")
+        monkeypatch.setattr(ffmpeg, "_custom_ffmpeg_path", lambda: str(bin_dir / "ffmpeg"))
+        found = ffprobe._find_ffprobe()
+        assert found == str(bin_dir / "ffprobe")
+
+    def test_missing_custom_path_falls_through(self, monkeypatch):
+        monkeypatch.setattr(ffmpeg, "_custom_ffmpeg_path", lambda: None)
+        # Must not raise; discovery continues down the normal chain
+        ffmpeg._find_ffmpeg()

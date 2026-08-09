@@ -15,7 +15,9 @@
     .\build_exe.ps1
 
 .NOTES
-    Requires: Python 3.10+, FFmpeg binaries at C:\ffmpeg-7.1.1-full_build\bin\
+    Requires: Python 3.10+, and $env:ZELQIVO_FFMPEG_DIR pointing at a folder
+    with ffmpeg.exe / ffprobe.exe from an LGPL FFmpeg build (BtbN *-lgpl:
+    https://github.com/BtbN/FFmpeg-Builds/releases)
 #>
 
 $ErrorActionPreference = "Stop"
@@ -82,11 +84,21 @@ if ($testExitCode -eq 0) {
 Write-Host "[5/5] Building EXE with PyInstaller..." -ForegroundColor Yellow
 Write-Host "  Spec file: $SpecFile" -ForegroundColor Gray
 
-# Check FFmpeg binaries
-$ffmpegPath = "C:\ffmpeg-7.1.1-full_build\bin\ffmpeg.exe"
-if (-not (Test-Path $ffmpegPath)) {
-    Write-Host "  WARNING: FFmpeg not found at $ffmpegPath" -ForegroundColor Yellow
-    Write-Host "  The build will continue but the EXE may not work properly." -ForegroundColor Yellow
+# Check FFmpeg binaries (directory comes from ZELQIVO_FFMPEG_DIR)
+$ffmpegDir = $env:ZELQIVO_FFMPEG_DIR
+if (-not $ffmpegDir) {
+    Write-Host "ERROR: ZELQIVO_FFMPEG_DIR is not set." -ForegroundColor Red
+    Write-Host "  Set it to a folder containing ffmpeg.exe and ffprobe.exe from an" -ForegroundColor Red
+    Write-Host "  LGPL FFmpeg build (BtbN *-lgpl: https://github.com/BtbN/FFmpeg-Builds/releases)." -ForegroundColor Red
+    exit 1
+}
+$ffmpegPath = Join-Path $ffmpegDir "ffmpeg.exe"
+$ffprobePath = Join-Path $ffmpegDir "ffprobe.exe"
+if (-not (Test-Path $ffmpegPath) -or -not (Test-Path $ffprobePath)) {
+    Write-Host "ERROR: ffmpeg.exe / ffprobe.exe not found in ZELQIVO_FFMPEG_DIR ($ffmpegDir)." -ForegroundColor Red
+    Write-Host "  Download an LGPL build (BtbN *-lgpl: https://github.com/BtbN/FFmpeg-Builds/releases)" -ForegroundColor Red
+    Write-Host "  and point ZELQIVO_FFMPEG_DIR at its bin folder." -ForegroundColor Red
+    exit 1
 }
 
 # Run PyInstaller

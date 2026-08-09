@@ -23,6 +23,7 @@ from ..utils.ffmpeg import (
     get_temp_output_path,
     has_effects,
     is_ffmpeg_available,
+    select_h264_encoder,
 )
 
 
@@ -436,14 +437,15 @@ def concatenate_segments(
 
         # Stream copy concat failed, try re-encode
         logger.warning("Stream copy concat failed, re-encoding...")
+        encoder, quality_args = select_h264_encoder()
         args_reencode = [
             "ffmpeg", "-y",
             "-f", "concat",
             "-safe", "0",
             "-i", concat_list_path,
-            "-c:v", "libx264",
+            "-c:v", encoder,
+            *quality_args,
             "-c:a", "aac",
-            "-preset", "fast",
             output_path,
         ]
         proc2 = FFmpegProcess(args_reencode, output_path)

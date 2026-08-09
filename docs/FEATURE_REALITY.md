@@ -30,6 +30,8 @@ This document provides an honest assessment of what actually exists in the codeb
 | **Decision Engine** | ✅ Fully Implemented | `logic/decision_engine.py` | Yes | Yes | Smoothing, hysteresis, confidence stability window |
 | **Processing Pipeline** | ✅ Fully Implemented | `logic/processing_pipeline.py` | Yes | Yes | Full orchestration: probe → align → diarize → decision → render → concat |
 | **Video Rendering** | ✅ Fully Implemented | `logic/video_merger.py` | Yes | Yes | Segment rendering, concatenation, single-pass mode |
+| **H.264 Encoder Auto-Selection** | ✅ Fully Implemented | `utils/ffmpeg.py` → `select_h264_encoder` | Yes | Yes | Hardware first (NVENC/QSV/AMF/VideoToolbox), then libopenh264/libx264; cached probe, logged, in QA summary |
+| **Custom FFmpeg Override** | ✅ Fully Implemented | Settings → FFmpeg, `utils/ffmpeg.py` | Yes | Yes | "Use my own FFmpeg" path picker; ffprobe found as sibling; applies without restart |
 | **FCPXML Export** | ✅ Fully Implemented | `logic/fcpxml_export.py` | Yes | Yes | Generates valid FCPXML 1.11 for Premiere/DaVinci |
 | **Audio Sync (Cross-correlation)** | ✅ Fully Implemented | `logic/audio_sync.py` | Yes | Yes | Requires `librosa` core dependency (always available) |
 | **External Audio** | ✅ Fully Implemented | `ui/main_window.py`, `logic/processing_pipeline.py` | Yes | Yes | Replace camera audio with external audio file |

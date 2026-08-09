@@ -33,7 +33,7 @@ Versions below were read from the development virtual environment on 2026-08-06
 | ffmpeg-python | 0.2.0 | Apache-2.0 | Builds FFmpeg command lines (does not contain FFmpeg) | Keep notice |
 | moviepy | 2.2.1 | MIT | Video editing / rendering | Keep notice |
 | imageio | 2.37.4 | BSD-2-Clause | Image I/O (moviepy dependency) | Keep notice |
-| imageio-ffmpeg | 0.6.0 | BSD-2-Clause (wheel only) | FFmpeg wrapper for moviepy | **Warning — bundles a GPL ffmpeg binary, see note 4** |
+| imageio-ffmpeg | 0.6.0 | BSD-2-Clause (wheel only) | FFmpeg wrapper for moviepy | **Bundles a GPL ffmpeg binary — excluded from the build, see note 4** |
 | pillow | 11.3.0 | MIT-CMU | Image handling (moviepy dependency) | Keep notice |
 | proglog | 0.1.12 | MIT | Progress logging (moviepy dependency) | Keep notice |
 | decorator | 5.3.1 | BSD-2-Clause | Helper (moviepy dependency) | Keep notice |
@@ -89,35 +89,36 @@ runtime the app log shows: `FFmpeg version 7.1.3 LGPL`. This is an LGPL build,
 so it is fine to ship — but it is a third FFmpeg copy in our tree (see the
 FFmpeg section below) and must stay a separate, replaceable library.
 
-**Note 4 — imageio-ffmpeg: GPL contamination risk.** The `imageio-ffmpeg`
-Python wheel is BSD-2-Clause, but the **ffmpeg binary it bundles as a data
-file is a GPL build**. Our PyInstaller spec currently copies that binary into
-the installer: `multicam_editor.spec` lines 66–71 call
-`collect_data_files('imageio_ffmpeg')` as a "fallback" FFmpeg. **Shipping that
-binary would make the distributed app carry GPL code**, which conflicts with
-our Apache-2.0 + closed Pro-tier plan.
-**Recommendation: exclude the imageio_ffmpeg data files from the spec.**
-Tracked for Phase 0.2 — see `docs/planning/PHASE_0_2_PLAN.md`.
+**Note 4 — imageio-ffmpeg: GPL contamination risk (resolved).** The
+`imageio-ffmpeg` Python wheel is BSD-2-Clause, but the **ffmpeg binary it
+bundles as a data file is a GPL build**. Shipping that binary would make the
+distributed app carry GPL code, which conflicts with our Apache-2.0 + closed
+Pro-tier plan. **Resolved in Phase 0.2:** the
+`collect_data_files('imageio_ffmpeg')` "fallback FFmpeg" block was removed
+from `multicam_editor.spec`, so the GPL binary is no longer bundled. The
+`imageio_ffmpeg` Python module itself stays (moviepy needs it) — only its
+binary data files are excluded.
 
 ---
 
 ## FFmpeg copies in the shipped tree
 
-There are currently **three** FFmpeg copies to keep track of:
+There are **three** FFmpeg copies to keep track of:
 
 1. **Our bundled `ffmpeg.exe` / `ffprobe.exe`** (`tools/ffmpeg/`, added by
-   `multicam_editor.spec` lines 73–81). Currently taken from a
-   `ffmpeg-7.1.1-full_build`, which is a **GPL** build. Being replaced in
-   **Phase 0.2** by a BtbN **LGPL** build
-   (`TODO: exact download URL + SHA-256 checksum once Roman downloads it on
+   `multicam_editor.spec` from the folder named in the `ZELQIVO_FFMPEG_DIR`
+   environment variable — no more hardcoded path). Must be a BtbN **LGPL**
+   build (`*-lgpl` from https://github.com/BtbN/FFmpeg-Builds/releases;
+   `TODO: exact download URL + SHA-256 checksum once Roman downloads it on
    the Windows build machine`).
 2. **Qt Multimedia's private FFmpeg** (inside PySide6_Addons) — version 7.1.3,
    **LGPL** build, used only for in-app video preview. Fine to ship as-is.
-3. **imageio-ffmpeg's bundled ffmpeg** — **GPL** build, currently pulled into
-   the installer as a fallback by spec lines 66–71. **To be removed**
-   (Phase 0.2, see Note 4 above).
+3. **imageio-ffmpeg's bundled ffmpeg** — **GPL** build. **Excluded from the
+   build as of Phase 0.2** (the spec no longer collects imageio_ffmpeg data
+   files, see Note 4 above). It still sits inside the wheel in the dev
+   environment, but is never shipped.
 
-Target end state after Phase 0.2: exactly two FFmpeg copies, both LGPL
+End state after Phase 0.2: exactly two FFmpeg copies are shipped, both LGPL
 (ours from BtbN, plus Qt Multimedia's).
 
 ---

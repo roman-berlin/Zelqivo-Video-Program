@@ -13,7 +13,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   patent grant and trademark reservation, which the open-core model needs.
 - README rewritten as a user-first landing page: what it does / doesn't do,
   how it works, platform table, install guide, CLI reference, honest CI note,
-  and the new logo (a demo GIF slot is reserved). Also removed the false
+  and the new logo. Above the fold: a demo GIF produced by the real pipeline
+  on synthetic test cameras (`docs/assets/demo.gif`). Also removed the false
   "CI ready" claim. A social-preview banner was added under
   `Installer/assets/icons/`.
 - Internal AI-agent scaffolding (`.clinerules`, `.ai_instructions/`,

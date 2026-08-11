@@ -434,20 +434,26 @@ class GpuPreflightStatus:
 
 def detect_gpu() -> bool:
     """
-    Detect if CUDA GPU is available for PyTorch.
+    Detect if a CUDA or Apple MPS GPU is available for PyTorch.
     
     Returns:
         True if GPU available, False otherwise.
     """
     try:
         import torch
-        available = torch.cuda.is_available()
-        if available:
+
+        if torch.cuda.is_available():
             device_name = torch.cuda.get_device_name(0)
-            logger.info("GPU detected: %s", device_name)
-        else:
-            logger.info("GPU not detected, using CPU")
-        return available
+            logger.info("CUDA GPU detected: %s", device_name)
+            return True
+
+        mps = getattr(torch.backends, "mps", None)
+        if mps is not None and mps.is_available():
+            logger.info("Apple MPS GPU detected")
+            return True
+
+        logger.info("GPU not detected, using CPU")
+        return False
     except ImportError:
         logger.info("PyTorch not installed, assuming no GPU")
         return False

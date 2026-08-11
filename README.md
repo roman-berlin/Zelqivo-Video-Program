@@ -151,10 +151,13 @@ Package** in the app, then open an issue with the ZIP attached.
 ```
 
 Builds a standalone EXE with PyInstaller (spec: `multicam_editor.spec`), then
-an Inno Setup installer (`Installer/setup1.iss`). The script currently expects
-FFmpeg binaries at `C:\ffmpeg-7.1.1-full_build\bin\` — making this
-configurable (and switching to an LGPL FFmpeg build) is the current top
-roadmap item; see [docs/planning/PHASE_0_2_PLAN.md](docs/planning/PHASE_0_2_PLAN.md).
+an Inno Setup installer (`Installer/setup1.iss`). Point `ZELQIVO_FFMPEG_DIR` at
+a folder containing `ffmpeg.exe` and `ffprobe.exe` first — use an
+[LGPL build](https://github.com/BtbN/FFmpeg-Builds/releases) (`*-lgpl`), since
+shipping a GPL FFmpeg would change the license of the whole installer.
+
+Tagging a release (`v*`) builds and publishes this automatically via
+`.github/workflows/release.yml`, so you don't need a Windows machine.
 
 After building, smoke-test: launch the EXE → add 2 videos → preview & seek →
 export → play the MP4.
@@ -170,8 +173,8 @@ young and the easy wins are mapped out:
   [`good first issue`](https://github.com/roman-berlin/Zelqivo-Video-Program/labels/good%20first%20issue)
 - [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) — how the pieces fit together
 
-Current test baseline: **539 passed** (Qt tests included). CI is on the
-roadmap and not yet set up — honesty over badges.
+Every pull request is checked automatically: the full suite (**558 tests**,
+Qt included) runs on Linux, Windows, and macOS across Python 3.10–3.12.
 
 ## License
 

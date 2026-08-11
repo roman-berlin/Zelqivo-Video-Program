@@ -2,15 +2,16 @@
 Tests for GPU preflight check logic.
 """
 
+from types import SimpleNamespace
+from unittest.mock import MagicMock, patch
+
 import pytest
-from unittest.mock import patch, MagicMock
 
 from multicam_editor.logic.preflight import (
+    GpuPreflightResult,
     detect_gpu,
     needs_gpu_warning,
     run_gpu_preflight_check,
-    GpuPreflightResult,
-    GpuPreflightStatus,
 )
 from multicam_editor.logic.switching_strategy import SwitchingStrategy
 
@@ -27,13 +28,51 @@ class TestDetectGpu:
     def test_no_torch_returns_false(self, mock_logger) -> None:
         """Returns False when torch is not installed."""
         with patch.dict("sys.modules", {"torch": None}):
-            # Force ImportError by patching the import
-            with patch(
-                "multicam_editor.logic.preflight.detect_gpu",
-                side_effect=lambda: False
-            ):
-                # Just verify the function handles missing torch gracefully
-                pass
+            assert detect_gpu() is False
+
+        mock_logger.info.assert_called_once_with("PyTorch not installed, assuming no GPU")
+
+    @patch("multicam_editor.logic.preflight.logger")
+    def test_mps_available_returns_true(self, mock_logger) -> None:
+        """Returns True when CUDA is off and Apple MPS is available."""
+        cuda = MagicMock()
+        cuda.is_available.return_value = False
+        mps = MagicMock()
+        mps.is_available.return_value = True
+        torch = SimpleNamespace(cuda=cuda, backends=SimpleNamespace(mps=mps))
+
+        with patch.dict("sys.modules", {"torch": torch}):
+            assert detect_gpu() is True
+
+        mock_logger.info.assert_called_once_with("Apple MPS GPU detected")
+
+    @pytest.mark.parametrize("mps_available", [None, False])
+    def test_mps_missing_or_unavailable_returns_false(self, mps_available: bool | None) -> None:
+        """Returns False when CUDA is off and MPS is missing or unavailable."""
+        cuda = MagicMock()
+        cuda.is_available.return_value = False
+        backends = SimpleNamespace()
+        if mps_available is not None:
+            mps = MagicMock()
+            mps.is_available.return_value = mps_available
+            backends.mps = mps
+        torch = SimpleNamespace(cuda=cuda, backends=backends)
+
+        with patch.dict("sys.modules", {"torch": torch}):
+            assert detect_gpu() is False
+
+    def test_cuda_takes_precedence_over_mps(self) -> None:
+        """A CUDA device is returned without consulting the MPS backend."""
+        cuda = MagicMock()
+        cuda.is_available.return_value = True
+        cuda.get_device_name.return_value = "Test CUDA GPU"
+        mps = MagicMock()
+        torch = SimpleNamespace(cuda=cuda, backends=SimpleNamespace(mps=mps))
+
+        with patch.dict("sys.modules", {"torch": torch}):
+            assert detect_gpu() is True
+
+        mps.is_available.assert_not_called()
     
     @patch("multicam_editor.logic.preflight.logger")
     def test_logs_gpu_status(self, mock_logger) -> None:

@@ -47,7 +47,7 @@ This document provides an honest assessment of what actually exists in the codeb
 | **Multiview Dialog** | 🔲 UI Only | `ui/multiview_dialog.py` | Yes | No | Dialog exists but causes system freeze - REMOVED from UI |
 | **Highlights/Teaser** | 📝 Stub | `logic/highlights.py` | No | Stub | Data structures exist, `compute_highlights_stub()` returns empty list |
 | **CLI Mode** | ✅ Fully Implemented | `cli.py` | No | Yes | Headless processing with arguments, QA artifacts |
-| **GPU Preflight Check** | ✅ Fully Implemented | `logic/preflight.py` | Yes | Yes | Warns if GPU-heavy mode selected without GPU |
+| **GPU Preflight Check** | ✅ Fully Implemented | `logic/preflight.py` | Yes | Yes | Detects CUDA and Apple MPS; warns if GPU-heavy mode selected without either |
 | **Checkpointing** | ✅ Fully Implemented | `logic/checkpoint.py` | No | Yes | Save/restore pipeline state for crash recovery |
 | **Sync All Button** | 🔲 UI Only | `ui/main_window.py` line 143-149 | Yes (hidden) | Partial | Button hidden; sync moved to Magic Settings |
 | **Audio Preview** | ⚠️ Partially Implemented | `ui/audio_preview_dialog.py` | Yes | Partial | Requires `ffplay`; error handling present but playback fragile |
@@ -136,4 +136,3 @@ Run health check: `python -m multicam_editor.utils.backends`
 2. Re-enable hidden features (A/B compare, timeline) when ready
 3. Consider removing multiview entirely if unfixable
 4. Add pytest-qt for proper Qt testing in CI
-

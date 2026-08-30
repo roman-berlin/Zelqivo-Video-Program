@@ -60,6 +60,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   FFmpeg location from the `ZELQIVO_FFMPEG_DIR` environment variable instead of
   a hardcoded path, and fail with a clear message pointing at BtbN LGPL builds.
 
+### Fixed
+- GPU preflight now recognizes Apple Silicon acceleration through PyTorch's MPS
+  backend instead of incorrectly warning that every Mac has no GPU.
+
 ### Removed
 - The GPL `imageio-ffmpeg` fallback binary is no longer bundled into the
   installer (licensing; see `docs/THIRD_PARTY.md`).

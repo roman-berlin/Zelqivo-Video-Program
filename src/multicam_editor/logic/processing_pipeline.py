@@ -1442,9 +1442,10 @@ class ProcessingPipeline:
             offset_sec = offset_ms / 1000.0
 
             # Build ffmpeg command with audio offset
-            # -itsoffset applies offset to following input
-            # Negative offset delays audio (audio starts later)
-            # Positive offset advances audio (audio starts earlier, video delayed relative to audio)
+            # -itsoffset applies to the following input, and a POSITIVE value
+            # DELAYS that input. offset_ms follows the audio_sync convention:
+            # positive means the external audio is late relative to the camera.
+            # To line up, pull it earlier, so pass the negated offset.
             args = [
                 "ffmpeg", "-y",
                 "-i", video_path,
@@ -1452,7 +1453,7 @@ class ProcessingPipeline:
 
             # Apply offset to audio input
             if abs(offset_sec) > 0.001:  # Only apply if offset is significant (> 1ms)
-                args.extend(["-itsoffset", str(offset_sec)])
+                args.extend(["-itsoffset", str(-offset_sec)])
 
             args.extend([
                 "-i", audio_path,
